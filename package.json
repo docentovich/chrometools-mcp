@@ -1,0 +1,21 @@
+{
+  "name": "chrometools-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for Chrome automation using Puppeteer with persistent browser sessions",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "chrometools-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.2",
+    "puppeteer": "^24.27.0",
+    "zod": "^3.25.76"
+  }
+}

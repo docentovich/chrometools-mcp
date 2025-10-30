@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(DISPLAY=172.25.96.1:0 timeout 5 /home/user/.cache/puppeteer/chrome/linux-142.0.7444.59/chrome-linux64/chrome --version)",
+      "Bash(env)",
+      "Bash(echo $WAYLAND_DISPLAY)",
+      "Bash(timeout 10 node index.js)",
+      "Bash(DISPLAY=:0 timeout 10 node index.js)",
+      "Read(//tmp/**)",
+      "Bash(kill 90747)",
+      "Read(//home/user/.claude/**)",
+      "Bash(test -d /mnt/c/prj/chrometools-mcp/node_modules)",
+      "Bash(timeout 3 node index.js)",
+      "Bash(echo $DISPLAY)",
+      "Read(//mnt/c/prj/devchrome-mcp/**)",
+      "Read(//home/user/**)",
+      "Bash(cat /home/user/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json)",
+      "Bash(~/.claude/scripts/chrome-debug.sh status)",
+      "Bash(curl -s http://172.25.96.1:9222/json/version)",
+      "Bash(~/.claude/scripts/chrome-debug.sh restart)",
+      "Bash(~/.claude/scripts/pwsh.sh \"Stop-Process -Name chrome -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2\")",
+      "Bash(~/.claude/scripts/chrome-debug.sh start)",
+      "Bash(test -d node_modules)",
+      "Bash(node --version)",
+      "Bash(npm --version)",
+      "Bash(DISPLAY=172.25.96.1:0 timeout 5 /home/user/.nvm/versions/node/v22.20.0/bin/node /mnt/c/prj/chrometools-mcp/index.js)",
+      "Bash(cat /tmp/chrometools.log)",
+      "Bash(kill 94512)",
+      "Bash(kill 94963)",
+      "Bash(claude mcp list)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
