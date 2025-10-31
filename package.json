@@ -1,7 +1,7 @@
 {
   "name": "chrometools-mcp",
   "version": "1.0.0",
-  "description": "MCP server for Chrome automation using Puppeteer with persistent browser sessions",
+  "description": "MCP (Model Context Protocol) server for Chrome automation using Puppeteer. Persistent browser sessions, visual testing, Figma comparison, and design validation. Works seamlessly in WSL, Linux, and macOS.",
   "type": "module",
   "main": "index.js",
   "bin": {
@@ -9,10 +9,42 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npm run lint && npm run validate",
+    "lint": "echo \"No linting configured\"",
+    "validate": "node -c index.js && echo \"Syntax validation passed\"",
+    "prepublishOnly": "npm run build"
   },
-  "author": "",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "puppeteer",
+    "chrome",
+    "chromium",
+    "browser",
+    "automation",
+    "testing",
+    "visual-testing",
+    "figma",
+    "design-validation",
+    "web-automation",
+    "devtools",
+    "wsl"
+  ],
+  "author": "Your Name <your.email@example.com>",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/chrometools-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/chrometools-mcp/issues"
+  },
+  "homepage": "https://github.com/yourusername/chrometools-mcp#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.2",
     "jimp": "^0.22.12",

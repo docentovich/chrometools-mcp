@@ -10,5 +10,8 @@ conversation-*.txt
 test-*.js
 *.sh
 
+# NPM package archives
+*.tgz
+
 # Local settings (may contain sensitive data)
 .claude/settings.local.json
