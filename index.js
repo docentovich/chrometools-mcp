@@ -8,6 +8,11 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import puppeteer from "puppeteer";
+import Jimp from "jimp";
+import pixelmatch from "pixelmatch";
+
+// Figma token from environment variable (can be set in MCP config)
+const FIGMA_TOKEN = process.env.FIGMA_TOKEN || null;
 
 // Global browser instance (persists between requests)
 let browserPromise = null;
@@ -97,6 +102,79 @@ async function getLastOpenPage() {
     throw new Error('No page is currently open. Use openBrowser first to open a page.');
   }
   return lastPage;
+}
+
+// Figma API helper function
+async function fetchFigmaAPI(endpoint, figmaToken) {
+  if (!figmaToken) {
+    throw new Error('Figma token is required. Get it from https://www.figma.com/developers/api#access-tokens');
+  }
+
+  const response = await fetch(`https://api.figma.com/v1/${endpoint}`, {
+    headers: {
+      'X-Figma-Token': figmaToken
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Figma API error: ${response.status} - ${error}`);
+  }
+
+  return response.json();
+}
+
+// Calculate SSIM (Structural Similarity Index) for image comparison
+function calculateSSIM(img1Data, img2Data, width, height) {
+  if (img1Data.length !== img2Data.length) {
+    return 0;
+  }
+
+  const windowSize = 8;
+  const k1 = 0.01;
+  const k2 = 0.03;
+  const c1 = (k1 * 255) ** 2;
+  const c2 = (k2 * 255) ** 2;
+
+  let ssimSum = 0;
+  let validWindows = 0;
+
+  for (let y = 0; y <= height - windowSize; y += windowSize) {
+    for (let x = 0; x <= width - windowSize; x += windowSize) {
+      let sum1 = 0, sum2 = 0, sum1Sq = 0, sum2Sq = 0, sum12 = 0;
+
+      for (let dy = 0; dy < windowSize; dy++) {
+        for (let dx = 0; dx < windowSize; dx++) {
+          const idx = ((y + dy) * width + (x + dx)) * 4;
+          if (idx + 2 >= img1Data.length) continue;
+
+          const gray1 = (img1Data[idx] * 0.299 + img1Data[idx + 1] * 0.587 + img1Data[idx + 2] * 0.114);
+          const gray2 = (img2Data[idx] * 0.299 + img2Data[idx + 1] * 0.587 + img2Data[idx + 2] * 0.114);
+
+          sum1 += gray1;
+          sum2 += gray2;
+          sum1Sq += gray1 * gray1;
+          sum2Sq += gray2 * gray2;
+          sum12 += gray1 * gray2;
+        }
+      }
+
+      const n = windowSize * windowSize;
+      const mean1 = sum1 / n;
+      const mean2 = sum2 / n;
+      const variance1 = (sum1Sq / n) - (mean1 * mean1);
+      const variance2 = (sum2Sq / n) - (mean2 * mean2);
+      const covariance = (sum12 / n) - (mean1 * mean2);
+
+      const ssim = ((2 * mean1 * mean2 + c1) * (2 * covariance + c2)) /
+        ((mean1 * mean1 + mean2 * mean2 + c1) * (variance1 + variance2 + c2));
+
+      ssimSum += ssim;
+      validWindows++;
+    }
+  }
+
+  return validWindows > 0 ? ssimSum / validWindows : 0;
 }
 
 // Cleanup on exit
@@ -202,6 +280,30 @@ const NavigateToSchema = z.object({
   waitUntil: z.enum(['load', 'domcontentloaded', 'networkidle0', 'networkidle2'])
     .optional()
     .describe("Wait until event (default: networkidle2)"),
+});
+
+// Figma tools schemas
+const GetFigmaFrameSchema = z.object({
+  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  fileKey: z.string().describe("Figma file key (from URL: figma.com/file/FILE_KEY/...)"),
+  nodeId: z.string().describe("Figma node ID (frame/component ID)"),
+  scale: z.number().min(0.1).max(4).optional().describe("Export scale (0.1-4, default: 2)"),
+  format: z.enum(['png', 'jpg', 'svg']).optional().describe("Export format (default: png)")
+});
+
+const CompareFigmaToElementSchema = z.object({
+  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  fileKey: z.string().describe("Figma file key"),
+  nodeId: z.string().describe("Figma frame/component ID"),
+  selector: z.string().describe("CSS selector for page element"),
+  threshold: z.number().min(0).max(1).optional().describe("Difference threshold (0-1, default: 0.05)"),
+  figmaScale: z.number().min(0.1).max(4).optional().describe("Figma export scale (default: 2)")
+});
+
+const GetFigmaSpecsSchema = z.object({
+  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  fileKey: z.string().describe("Figma file key"),
+  nodeId: z.string().describe("Figma frame/component ID")
 });
 
 // List available tools
@@ -398,6 +500,50 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle0", "networkidle2"], description: "Wait until event (default: networkidle2)" },
           },
           required: ["url"],
+        },
+      },
+      {
+        name: "getFigmaFrame",
+        description: "Export and download a Figma frame as PNG image for comparison. Requires Figma API token and file/node IDs from Figma URLs.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
+            fileKey: { type: "string", description: "Figma file key (from URL: figma.com/file/FILE_KEY/...)" },
+            nodeId: { type: "string", description: "Figma node ID (frame/component ID)" },
+            scale: { type: "number", minimum: 0.1, maximum: 4, description: "Export scale (0.1-4, default: 2)" },
+            format: { type: "string", enum: ["png", "jpg", "svg"], description: "Export format (default: png)" },
+          },
+          required: ["fileKey", "nodeId"],
+        },
+      },
+      {
+        name: "compareFigmaToElement",
+        description: "Compare Figma design directly with browser implementation. The GOLD STANDARD for design-to-code validation. Fetches Figma frame, screenshots element, performs pixel-perfect comparison with difference analysis.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
+            fileKey: { type: "string", description: "Figma file key" },
+            nodeId: { type: "string", description: "Figma frame/component ID" },
+            selector: { type: "string", description: "CSS selector for page element" },
+            threshold: { type: "number", minimum: 0, maximum: 1, description: "Difference threshold (0-1, default: 0.05)" },
+            figmaScale: { type: "number", minimum: 0.1, maximum: 4, description: "Figma export scale (default: 2)" },
+          },
+          required: ["fileKey", "nodeId", "selector"],
+        },
+      },
+      {
+        name: "getFigmaSpecs",
+        description: "Extract detailed design specifications from Figma including colors, fonts, dimensions, and spacing. Perfect for design-to-code comparison.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
+            fileKey: { type: "string", description: "Figma file key" },
+            nodeId: { type: "string", description: "Figma frame/component ID" },
+          },
+          required: ["fileKey", "nodeId"],
         },
       },
     ],
@@ -807,6 +953,297 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           type: "text",
           text: `Navigated to: ${validatedArgs.url}\nPage title: ${title}`
         }],
+      };
+    }
+
+    // Figma tools
+    if (name === "getFigmaFrame") {
+      const validatedArgs = GetFigmaFrameSchema.parse(args);
+      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
+      if (!token) {
+        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
+      }
+
+      const scale = validatedArgs.scale || 2;
+      const format = validatedArgs.format || 'png';
+
+      // Get export URL from Figma
+      const exportData = await fetchFigmaAPI(
+        `images/${validatedArgs.fileKey}?ids=${validatedArgs.nodeId}&scale=${scale}&format=${format}`,
+        token
+      );
+
+      if (!exportData.images || !exportData.images[validatedArgs.nodeId]) {
+        throw new Error(`Failed to export node ${validatedArgs.nodeId} from file ${validatedArgs.fileKey}`);
+      }
+
+      const imageUrl = exportData.images[validatedArgs.nodeId];
+
+      // Download image
+      const imageResponse = await fetch(imageUrl);
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to download image: ${imageResponse.status}`);
+      }
+
+      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+
+      // Get frame info
+      const nodesData = await fetchFigmaAPI(`files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(validatedArgs.nodeId)}`, token);
+      const frameInfo = nodesData.nodes?.[validatedArgs.nodeId]?.document;
+
+      const result = {
+        figmaInfo: {
+          fileName: nodesData.name || 'Unknown',
+          frameId: validatedArgs.nodeId,
+          frameName: frameInfo?.name || 'Unknown',
+          dimensions: frameInfo ? {
+            width: frameInfo.absoluteBoundingBox?.width,
+            height: frameInfo.absoluteBoundingBox?.height
+          } : null,
+          exportSettings: {
+            scale,
+            format,
+            fileSize: imageBuffer.length
+          }
+        }
+      };
+
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(result, null, 2) },
+          {
+            type: 'image',
+            data: imageBuffer.toString('base64'),
+            mimeType: `image/${format}`
+          }
+        ]
+      };
+    }
+
+    if (name === "compareFigmaToElement") {
+      const validatedArgs = CompareFigmaToElementSchema.parse(args);
+      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
+      if (!token) {
+        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
+      }
+
+      const page = await getLastOpenPage();
+      const figmaScale = validatedArgs.figmaScale || 2;
+      const threshold = validatedArgs.threshold || 0.05;
+
+      // Get Figma image
+      const exportData = await fetchFigmaAPI(
+        `images/${validatedArgs.fileKey}?ids=${validatedArgs.nodeId}&scale=${figmaScale}&format=png`,
+        token
+      );
+
+      if (!exportData.images || !exportData.images[validatedArgs.nodeId]) {
+        throw new Error(`Failed to export Figma node ${validatedArgs.nodeId}`);
+      }
+
+      const figmaImageUrl = exportData.images[validatedArgs.nodeId];
+      const figmaResponse = await fetch(figmaImageUrl);
+      const figmaBuffer = Buffer.from(await figmaResponse.arrayBuffer());
+
+      // Get page element screenshot
+      const element = await page.$(validatedArgs.selector);
+      if (!element) {
+        throw new Error(`Selector not found: ${validatedArgs.selector}`);
+      }
+
+      const pageBuffer = await element.screenshot();
+
+      // Load images for comparison
+      const [figmaImg, pageImg] = await Promise.all([
+        Jimp.read(figmaBuffer),
+        Jimp.read(pageBuffer)
+      ]);
+
+      // Resize to same dimensions (use larger dimensions)
+      const targetWidth = Math.max(figmaImg.bitmap.width, pageImg.bitmap.width);
+      const targetHeight = Math.max(figmaImg.bitmap.height, pageImg.bitmap.height);
+
+      figmaImg.resize(targetWidth, targetHeight);
+      pageImg.resize(targetWidth, targetHeight);
+
+      // Compare images
+      const figmaData = new Uint8ClampedArray(figmaImg.bitmap.data);
+      const pageData = new Uint8ClampedArray(pageImg.bitmap.data);
+      const diffData = new Uint8ClampedArray(targetWidth * targetHeight * 4);
+
+      const diffPixels = pixelmatch(figmaData, pageData, diffData, targetWidth, targetHeight, {
+        threshold: 0.1,
+        includeAA: false
+      });
+
+      const ssimValue = calculateSSIM(figmaData, pageData, targetWidth, targetHeight);
+      const totalPixels = targetWidth * targetHeight;
+      const differencePercent = (diffPixels / totalPixels) * 100;
+
+      // Analysis
+      const analysis = {
+        figmaVsPage: {
+          identical: diffPixels === 0,
+          withinThreshold: differencePercent <= (threshold * 100),
+          pixelDifferences: diffPixels,
+          differencePercent: Math.round(differencePercent * 100) / 100,
+          ssim: Math.round(ssimValue * 10000) / 10000,
+          recommendation: differencePercent < 1 ? 'Pixel-perfect match' :
+            differencePercent < 3 ? 'Very close to design' :
+              differencePercent < 10 ? 'Minor differences detected' :
+                'Significant differences from design'
+        },
+        dimensions: {
+          figma: { width: figmaImg.bitmap.width, height: figmaImg.bitmap.height },
+          page: { width: pageImg.bitmap.width, height: pageImg.bitmap.height },
+          comparison: { width: targetWidth, height: targetHeight }
+        }
+      };
+
+      const content = [
+        { type: 'text', text: JSON.stringify(analysis, null, 2) },
+        { type: 'image', data: figmaBuffer.toString('base64'), mimeType: 'image/png' },
+        { type: 'image', data: pageBuffer.toString('base64'), mimeType: 'image/png' }
+      ];
+
+      // Add difference map if there are differences
+      if (diffPixels > 0) {
+        const diffImg = new Jimp({ data: Buffer.from(diffData), width: targetWidth, height: targetHeight });
+        const diffBuffer = await diffImg.getBufferAsync(Jimp.MIME_PNG);
+        content.push({
+          type: 'image',
+          data: diffBuffer.toString('base64'),
+          mimeType: 'image/png'
+        });
+      }
+
+      return { content };
+    }
+
+    if (name === "getFigmaSpecs") {
+      const validatedArgs = GetFigmaSpecsSchema.parse(args);
+      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
+      if (!token) {
+        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
+      }
+
+      // Get specific node via nodes API
+      const nodesData = await fetchFigmaAPI(`files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(validatedArgs.nodeId)}`, token);
+
+      if (!nodesData.nodes || !nodesData.nodes[validatedArgs.nodeId]) {
+        throw new Error(`Node ${validatedArgs.nodeId} not found in Figma file`);
+      }
+
+      const node = nodesData.nodes[validatedArgs.nodeId].document;
+
+      // Extract specifications
+      const specs = {
+        general: {
+          name: node.name,
+          type: node.type,
+          visible: node.visible !== false
+        },
+        dimensions: node.absoluteBoundingBox ? {
+          width: node.absoluteBoundingBox.width,
+          height: node.absoluteBoundingBox.height,
+          x: node.absoluteBoundingBox.x,
+          y: node.absoluteBoundingBox.y
+        } : null,
+        styling: {},
+        children: []
+      };
+
+      // Analyze styles
+      if (node.fills && node.fills.length > 0) {
+        specs.styling.fills = node.fills.map(fill => {
+          if (fill.type === 'SOLID') {
+            const r = Math.round(fill.color.r * 255);
+            const g = Math.round(fill.color.g * 255);
+            const b = Math.round(fill.color.b * 255);
+            const a = fill.opacity || 1;
+            return {
+              type: fill.type,
+              color: `rgba(${r}, ${g}, ${b}, ${a})`,
+              hex: `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
+              opacity: a
+            };
+          }
+          return fill;
+        });
+      }
+
+      if (node.strokes && node.strokes.length > 0) {
+        specs.styling.strokes = node.strokes.map(stroke => {
+          if (stroke.type === 'SOLID') {
+            const r = Math.round(stroke.color.r * 255);
+            const g = Math.round(stroke.color.g * 255);
+            const b = Math.round(stroke.color.b * 255);
+            const a = stroke.opacity || 1;
+            return {
+              type: stroke.type,
+              color: `rgba(${r}, ${g}, ${b}, ${a})`,
+              hex: `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
+              weight: node.strokeWeight || 1
+            };
+          }
+          return stroke;
+        });
+      }
+
+      // Typography
+      if (node.style) {
+        specs.styling.typography = {
+          fontFamily: node.style.fontFamily,
+          fontSize: node.style.fontSize,
+          fontWeight: node.style.fontWeight,
+          lineHeight: node.style.lineHeightPx || node.style.lineHeightPercent,
+          letterSpacing: node.style.letterSpacing,
+          textAlign: node.style.textAlignHorizontal,
+          textCase: node.style.textCase
+        };
+      }
+
+      // Effects (shadows, blur)
+      if (node.effects && node.effects.length > 0) {
+        specs.styling.effects = node.effects.map(effect => ({
+          type: effect.type,
+          visible: effect.visible !== false,
+          radius: effect.radius,
+          offset: effect.offset,
+          color: effect.color ? {
+            rgba: `rgba(${Math.round(effect.color.r * 255)}, ${Math.round(effect.color.g * 255)}, ${Math.round(effect.color.b * 255)}, ${effect.color.a || 1})`
+          } : null
+        }));
+      }
+
+      // Border radius
+      if (node.cornerRadius !== undefined) {
+        specs.styling.borderRadius = node.cornerRadius;
+      }
+      if (node.rectangleCornerRadii) {
+        specs.styling.borderRadius = {
+          topLeft: node.rectangleCornerRadii[0],
+          topRight: node.rectangleCornerRadii[1],
+          bottomRight: node.rectangleCornerRadii[2],
+          bottomLeft: node.rectangleCornerRadii[3]
+        };
+      }
+
+      // Analyze children
+      if (node.children && node.children.length > 0) {
+        specs.children = node.children.map(child => ({
+          id: child.id,
+          name: child.name,
+          type: child.type,
+          dimensions: child.absoluteBoundingBox,
+          visible: child.visible !== false
+        }));
+      }
+
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(specs, null, 2) }
+        ]
       };
     }
 
