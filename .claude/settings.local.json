@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(xargs kill)"
-    ],
-    "deny": [],
-    "ask": []
-  }
-}

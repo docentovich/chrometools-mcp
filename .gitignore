@@ -9,3 +9,6 @@ build/
 conversation-*.txt
 test-*.js
 *.sh
+
+# Local settings (may contain sensitive data)
+.claude/settings.local.json
