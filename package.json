@@ -32,16 +32,16 @@
     "devtools",
     "wsl"
   ],
-  "author": "Your Name <your.email@example.com>",
+  "author": "Andrey Prozorov <docentovich@gmail.com>",
   "license": "ISC",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/chrometools-mcp.git"
+    "url": "git+https://github.com/docentovich/chrometools-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/chrometools-mcp/issues"
+    "url": "https://github.com/docentovich/chrometools-mcp/issues"
   },
-  "homepage": "https://github.com/yourusername/chrometools-mcp#readme",
+  "homepage": "https://github.com/docentovich/chrometools-mcp#readme",
   "engines": {
     "node": ">=18.0.0"
   },
