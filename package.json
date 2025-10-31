@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "bin": {
-    "chrometools-mcp": "./index.js"
+    "chrometools-mcp": "index.js"
   },
   "scripts": {
     "start": "node index.js",
