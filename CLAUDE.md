@@ -119,3 +119,22 @@ Ensure `package.json` includes:
 - Proper entry point
 - MCP server metadata
 - Puppeteer as dependency
+
+## MCP Configuration for Development
+
+MCP servers are configured in `/home/user/.claude.json` file (NOT `.claude/mcp_config.json`).
+
+For WSL development with GUI support, use xvfb-run:
+
+```json
+"mcpServers": {
+  "chrometools": {
+    "type": "stdio",
+    "command": "xvfb-run",
+    "args": ["-a", "node", "/mnt/c/prj/chrometools-mcp/index.js"],
+    "env": {}
+  }
+}
+```
+
+xvfb provides virtual X server, allowing Chrome GUI to run without external X server (VcXsrv).

@@ -17,17 +17,16 @@ let page = null;
 async function initBrowser() {
   if (!browser) {
     browser = await puppeteer.launch({
-      headless: true,
+      headless: false,
       defaultViewport: null,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu',
       ],
     });
     page = await browser.newPage();
-    console.error("Browser initialized (headless: true)");
+    console.error("Browser initialized (headless: false, GUI mode)");
   }
   return { browser, page };
 }
@@ -58,6 +57,11 @@ const PingSchema = z.object({
   message: z.string().optional().describe("Optional message to send"),
 });
 
+// OpenBrowser tool schema
+const OpenBrowserSchema = z.object({
+  url: z.string().describe("URL to open in the browser"),
+});
+
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -74,6 +78,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Optional message to include in response",
             },
           },
+        },
+      },
+      {
+        name: "openBrowser",
+        description:
+          "Opens a browser window and navigates to the specified URL. Browser stays open for user interaction.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description: "URL to navigate to (e.g., https://example.com)",
+            },
+          },
+          required: ["url"],
         },
       },
     ],
@@ -96,6 +115,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           {
             type: "text",
             text: responseMessage,
+          },
+        ],
+      };
+    }
+
+    if (name === "openBrowser") {
+      const validatedArgs = OpenBrowserSchema.parse(args);
+      const { browser, page } = await initBrowser();
+
+      await page.goto(validatedArgs.url, { waitUntil: 'networkidle2' });
+      const title = await page.title();
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Browser opened successfully!\nURL: ${validatedArgs.url}\nPage title: ${title}\n\nBrowser remains open for interaction.`,
           },
         ],
       };
@@ -127,13 +163,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   console.error("Starting chrometools-mcp server...");
 
-  // Initialize browser on startup
-  await initBrowser();
-
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
   console.error("chrometools-mcp server running on stdio");
+  console.error("Browser will be initialized on first openBrowser call");
 }
 
 main().catch((error) => {

@@ -4,3 +4,8 @@ node_modules/
 .env
 dist/
 build/
+
+# Temporary files
+conversation-*.txt
+test-*.js
+*.sh
