@@ -6,12 +6,14 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 
 - [Installation](#installation)
 - [Usage](#usage)
-- [Available Tools](#available-tools)
-  - [ping](#ping)
-  - [openBrowser](#openbrowser)
+- [Available Tools](#available-tools) - **16 Tools Total**
+  - [Core Tools](#1-core-tools) - ping, openBrowser
+  - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo
+  - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
+  - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, hover, setStyles, setViewport, getViewport, navigateTo
+- [Typical Workflow Example](#typical-workflow-example)
+- [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
-  - [Basic Configuration](#basic-configuration-linux-macos-windows)
-  - [GUI Mode vs Headless Mode](#gui-mode-vs-headless-mode)
 - [WSL Setup Guide](#wsl-setup-guide) → [Full WSL Guide](WSL_SETUP.md)
 - [Development](#development)
 - [Features](#features)
@@ -40,55 +42,165 @@ Add to your MCP client configuration (e.g., Claude Desktop):
 
 ## Available Tools
 
-### ping
+### 1. Core Tools
 
-Simple ping-pong tool for testing MCP connection.
+#### ping
+Test MCP connection with a simple ping-pong response.
+- **Parameters**: `message` (optional)
+- **Example**: `{ "name": "ping", "arguments": { "message": "hello" } }`
+- **Returns**: `pong: hello`
 
-**Parameters:**
-- `message` (optional): String message to include in response
+#### openBrowser
+Opens browser and navigates to URL. Browser stays open for further interactions.
+- **Parameters**: `url` (required)
+- **Use case**: First step before other tools
+- **Returns**: Page title + confirmation
 
-**Example:**
-```json
-{
-  "name": "ping",
-  "arguments": {
-    "message": "hello"
-  }
-}
+### 2. Interaction Tools
+
+#### click
+Click an element and capture result screenshot.
+- **Parameters**:
+  - `selector` (required): CSS selector
+  - `waitAfter` (optional): Wait time in ms (default: 1500)
+- **Use case**: Buttons, links, form submissions
+- **Returns**: Confirmation text + screenshot
+
+#### type
+Type text into input fields with optional clearing and typing delay.
+- **Parameters**:
+  - `selector` (required): CSS selector
+  - `text` (required): Text to type
+  - `delay` (optional): Delay between keystrokes in ms
+  - `clearFirst` (optional): Clear field first (default: true)
+- **Use case**: Filling forms, search boxes, text inputs
+- **Returns**: Confirmation text
+
+#### scrollTo
+Scroll page to bring element into view.
+- **Parameters**:
+  - `selector` (required): CSS selector
+  - `behavior` (optional): "auto" or "smooth"
+- **Use case**: Lazy loading, sticky elements, visibility checks
+- **Returns**: Final scroll position
+
+### 3. Inspection Tools
+
+#### getElement
+Get HTML markup of element (defaults to body if no selector).
+- **Parameters**: `selector` (optional)
+- **Use case**: Inspecting structure, debugging markup
+- **Returns**: Complete outerHTML
+
+#### getComputedCss
+Get all computed CSS styles for an element.
+- **Parameters**: `selector` (optional)
+- **Use case**: Debugging layout, verifying styles
+- **Returns**: JSON object with CSS properties
+
+#### getBoxModel
+Get precise dimensions, positioning, margins, padding, and borders.
+- **Parameters**: `selector` (required)
+- **Use case**: Pixel-perfect measurements, layout analysis
+- **Returns**: Box model data + metrics
+
+#### screenshot
+Capture PNG screenshot of specific element.
+- **Parameters**:
+  - `selector` (required)
+  - `padding` (optional): Padding in pixels
+- **Use case**: Visual documentation, bug reports
+- **Returns**: Base64 PNG image
+
+### 4. Advanced Tools
+
+#### executeScript
+Execute arbitrary JavaScript in page context.
+- **Parameters**:
+  - `script` (required): JavaScript code
+  - `waitAfter` (optional): Wait time in ms (default: 500)
+- **Use case**: Complex interactions, custom manipulations
+- **Returns**: Execution result + screenshot
+
+#### getConsoleLogs
+Retrieve browser console logs (log, warn, error, etc.).
+- **Parameters**:
+  - `types` (optional): Array of log types to filter
+  - `clear` (optional): Clear logs after reading (default: false)
+- **Use case**: Debugging JavaScript errors, tracking behavior
+- **Returns**: Array of log entries with timestamps
+
+#### hover
+Simulate mouse hover over element.
+- **Parameters**: `selector` (required)
+- **Use case**: Testing hover effects, tooltips, dropdown menus
+- **Returns**: Confirmation text
+
+#### setStyles
+Apply inline CSS styles to element for live editing.
+- **Parameters**:
+  - `selector` (required)
+  - `styles` (required): Array of {name, value} pairs
+- **Use case**: Testing design changes, rapid prototyping
+- **Returns**: Applied styles confirmation
+
+#### setViewport
+Change viewport dimensions for responsive testing.
+- **Parameters**:
+  - `width` (required): 320-4000px
+  - `height` (required): 200-3000px
+  - `deviceScaleFactor` (optional): 0.5-3 (default: 1)
+- **Use case**: Testing mobile, tablet, desktop layouts
+- **Returns**: Actual viewport dimensions
+
+#### getViewport
+Get current viewport size and device pixel ratio.
+- **Parameters**: None
+- **Use case**: Checking current screen dimensions
+- **Returns**: Viewport metrics (width, height, DPR)
+
+#### navigateTo
+Navigate to different URL while keeping browser instance.
+- **Parameters**:
+  - `url` (required)
+  - `waitUntil` (optional): load event type
+- **Use case**: Moving between pages in workflow
+- **Returns**: New page title
+
+---
+
+## Typical Workflow Example
+
+```javascript
+// 1. Open page
+openBrowser({ url: "https://example.com/form" })
+
+// 2. Fill form
+type({ selector: "input[name='email']", text: "user@example.com" })
+type({ selector: "input[name='password']", text: "secret123" })
+
+// 3. Submit
+click({ selector: "button[type='submit']" })
+
+// 4. Verify
+getElement({ selector: ".success-message" })
+screenshot({ selector: ".dashboard", padding: 20 })
 ```
 
-**Response:**
-```
-pong: hello
-```
+---
 
-### openBrowser
+## Tool Usage Tips
 
-Opens a browser window and navigates to the specified URL. The browser stays open for user interaction after the command completes.
+**Persistent Browser:**
+- Browser windows remain open after each command
+- Manual interaction possible between AI requests
+- All tools work with currently open page
 
-**Parameters:**
-- `url` (required): URL to navigate to (e.g., `https://example.com`)
-
-**Example:**
-```json
-{
-  "name": "openBrowser",
-  "arguments": {
-    "url": "https://example.com"
-  }
-}
-```
-
-**Response:**
-```
-Browser opened successfully!
-URL: https://example.com
-Page title: Example Domain
-
-Browser remains open for interaction.
-```
-
-**Important:** The browser window remains open after execution, allowing you to interact with the page between MCP commands. This enables iterative workflows where you prepare pages manually between AI requests.
+**Best Practices:**
+- Start with `openBrowser` to establish context
+- Use `screenshot` to verify visual results
+- Combine tools for complex workflows
+- Tools use CDP (Chrome DevTools Protocol) for precision
 
 ## Configuration
 
@@ -195,10 +307,19 @@ npx @modelcontextprotocol/inspector node index.js
 
 ## Features
 
+- **16 Powerful Tools**: Complete toolkit for browser automation
+  - Core: ping, openBrowser
+  - Interaction: click, type, scrollTo
+  - Inspection: getElement, getComputedCss, getBoxModel, screenshot
+  - Advanced: executeScript, getConsoleLogs, hover, setStyles, setViewport, getViewport, navigateTo
+- **Console Log Capture**: Automatic JavaScript console monitoring
 - **Persistent Browser Sessions**: Browser tabs remain open between requests
-- **Headless: false**: Visual browser for user interaction
+- **Visual Browser (GUI Mode)**: See automation in real-time
 - **Cross-platform**: Works on Windows/WSL, Linux, macOS
 - **Simple Installation**: One command with npx
+- **CDP Integration**: Uses Chrome DevTools Protocol for precision
+- **AI-Friendly**: Detailed descriptions optimized for AI agents
+- **Responsive Testing**: Built-in viewport control for mobile/tablet/desktop
 
 ## Architecture
 
