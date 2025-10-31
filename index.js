@@ -14,6 +14,17 @@ import pixelmatch from "pixelmatch";
 // Figma token from environment variable (can be set in MCP config)
 const FIGMA_TOKEN = process.env.FIGMA_TOKEN || null;
 
+// Detect WSL environment
+const isWSL = (() => {
+  try {
+    const fs = require('fs');
+    const proc_version = fs.readFileSync('/proc/version', 'utf8').toLowerCase();
+    return proc_version.includes('microsoft') || proc_version.includes('wsl');
+  } catch {
+    return false;
+  }
+})();
+
 // Global browser instance (persists between requests)
 let browserPromise = null;
 const openPages = new Map();
@@ -25,16 +36,61 @@ const consoleLogs = [];
 // Initialize browser (singleton)
 async function getBrowser() {
   if (!browserPromise) {
-    browserPromise = puppeteer.launch({
-      headless: false,
-      defaultViewport: null,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-      ],
-    });
-    console.error("[chrometools-mcp] Browser initialized (GUI mode)");
+    browserPromise = (async () => {
+      try {
+        const browser = await puppeteer.launch({
+          headless: false,
+          defaultViewport: null,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+          ],
+        });
+        console.error("[chrometools-mcp] Browser initialized (GUI mode)");
+        return browser;
+      } catch (error) {
+        // Check if it's a display-related error in WSL
+        if (isWSL && (
+          error.message.includes('DISPLAY') ||
+          error.message.includes('connect ECONNREFUSED') ||
+          error.message.includes('cannot open display')
+        )) {
+          const helpMessage = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ WSL X Server Error Detected
+
+You are running in WSL environment with headless:false mode.
+This requires an X server to display the browser GUI.
+
+🔧 Solution:
+   1. Start X server on Windows (e.g., VcXsrv, X410)
+   2. Set DISPLAY in your MCP config:
+
+      {
+        "mcpServers": {
+          "chrometools": {
+            "env": {
+              "DISPLAY": "172.25.96.1:0"
+            }
+          }
+        }
+      }
+
+📚 For detailed setup instructions, see:
+   WSL_SETUP.md in chrometools-mcp package
+
+💡 Alternative: Run in headless mode (modify index.js)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+          console.error(helpMessage);
+          throw new Error(`WSL X Server not available. ${error.message}\n\nSee above for setup instructions.`);
+        }
+
+        // Re-throw other errors as-is
+        throw error;
+      }
+    })();
   }
   return browserPromise;
 }
@@ -1272,6 +1328,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // Start server
 async function main() {
   console.error("Starting chrometools-mcp server...");
+
+  // Show environment info
+  if (isWSL) {
+    console.error("[chrometools-mcp] WSL environment detected");
+    console.error("[chrometools-mcp] GUI mode requires X server (DISPLAY=" + (process.env.DISPLAY || "not set") + ")");
+  }
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
