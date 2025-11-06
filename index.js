@@ -10,6 +10,8 @@ import { z } from "zod";
 import puppeteer from "puppeteer";
 import Jimp from "jimp";
 import pixelmatch from "pixelmatch";
+import { writeFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 
 // Figma token from environment variable (can be set in MCP config)
 const FIGMA_TOKEN = process.env.FIGMA_TOKEN || null;
@@ -246,7 +248,7 @@ process.on("SIGINT", async () => {
 const server = new Server(
   {
     name: "chrometools-mcp",
-    version: "1.0.0",
+    version: "1.0.2",
   },
   {
     capabilities: {
@@ -290,6 +292,12 @@ const GetBoxModelSchema = z.object({
 
 const ScreenshotSchema = z.object({
   selector: z.string().describe("CSS selector for element to screenshot"),
+  padding: z.number().optional().describe("Padding around element in pixels (default: 0)"),
+});
+
+const SaveScreenshotSchema = z.object({
+  selector: z.string().describe("CSS selector for element to screenshot"),
+  filePath: z.string().describe("Absolute path where to save PNG file"),
   padding: z.number().optional().describe("Padding around element in pixels (default: 0)"),
 });
 
@@ -454,6 +462,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             padding: { type: "number", description: "Padding around element in pixels (default: 0)" },
           },
           required: ["selector"],
+        },
+      },
+      {
+        name: "saveScreenshot",
+        description: "Save PNG screenshot directly to filesystem. Unlike 'screenshot' tool, this saves to file instead of returning in context. Perfect for baseline screenshots that need to persist.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for element to screenshot" },
+            filePath: { type: "string", description: "Absolute path where to save PNG (e.g., /path/to/file.png)" },
+            padding: { type: "number", description: "Padding around element in pixels (default: 0)" },
+          },
+          required: ["selector", "filePath"],
         },
       },
       {
@@ -809,6 +830,48 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             type: "image",
             data: screenshot,
             mimeType: "image/png"
+          }
+        ],
+      };
+    }
+
+    if (name === "saveScreenshot") {
+      const validatedArgs = SaveScreenshotSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const element = await page.$(validatedArgs.selector);
+      if (!element) {
+        throw new Error(`Element not found: ${validatedArgs.selector}`);
+      }
+
+      const box = await element.boundingBox();
+      if (!box) {
+        throw new Error(`Element not visible: ${validatedArgs.selector}`);
+      }
+
+      const padding = validatedArgs.padding || 0;
+      const clip = {
+        x: Math.max(box.x - padding, 0),
+        y: Math.max(box.y - padding, 0),
+        width: Math.max(box.width + padding * 2, 1),
+        height: Math.max(box.height + padding * 2, 1)
+      };
+
+      // Get screenshot as buffer (not base64)
+      const screenshotBuffer = await page.screenshot({ clip, encoding: 'binary' });
+
+      // Ensure directory exists
+      const dir = dirname(validatedArgs.filePath);
+      mkdirSync(dir, { recursive: true });
+
+      // Save to file
+      writeFileSync(validatedArgs.filePath, screenshotBuffer);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Screenshot saved to: ${validatedArgs.filePath}\nSize: ${screenshotBuffer.length} bytes`
           }
         ],
       };
