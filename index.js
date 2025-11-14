@@ -10,13 +10,30 @@ import { z } from "zod";
 import puppeteer from "puppeteer";
 import Jimp from "jimp";
 import pixelmatch from "pixelmatch";
-import { writeFileSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'fs';
 import { dirname } from 'path';
 import { spawn } from 'child_process';
 import http from 'http';
+import { fileURLToPath } from 'url';
+import path from 'path';
 
 // Figma token from environment variable (can be set in MCP config)
 const FIGMA_TOKEN = process.env.FIGMA_TOKEN || null;
+
+// Get current directory for loading utils
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load element finder utilities
+const elementFinderUtils = readFileSync(path.join(__dirname, 'element-finder-utils.js'), 'utf-8');
+
+// Import hints generator
+import {
+  generateNavigationHints,
+  generateClickHints,
+  generateFormSubmitHints,
+  generatePageHints
+} from './hints-generator.js';
 
 // Detect WSL environment
 const isWSL = (() => {
@@ -65,6 +82,9 @@ let chromeProcess = null;
 
 // Console logs storage
 const consoleLogs = [];
+
+// Page analysis cache (method 4)
+const pageAnalysisCache = new Map();
 
 // Debug port for Chrome remote debugging
 const CHROME_DEBUG_PORT = 9222;
@@ -470,6 +490,26 @@ const GetFigmaSpecsSchema = z.object({
   nodeId: z.string().describe("Figma frame/component ID")
 });
 
+// New AI optimization tools schemas
+const SmartFindElementSchema = z.object({
+  description: z.string().describe("Natural language description of element to find (e.g., 'login button', 'email field')"),
+  maxResults: z.number().min(1).max(20).optional().describe("Maximum number of candidates to return (default: 5)"),
+});
+
+const AnalyzePageSchema = z.object({
+  refresh: z.boolean().optional().describe("Force refresh of cached analysis (default: false)"),
+});
+
+const GetAllInteractiveElementsSchema = z.object({
+  includeHidden: z.boolean().optional().describe("Include hidden elements (default: false)"),
+});
+
+const FindElementsByTextSchema = z.object({
+  text: z.string().describe("Text to search for in elements"),
+  exact: z.boolean().optional().describe("Exact match only (default: false)"),
+  caseSensitive: z.boolean().optional().describe("Case sensitive search (default: false)"),
+});
+
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -723,6 +763,51 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["fileKey", "nodeId"],
         },
       },
+      {
+        name: "smartFindElement",
+        description: "AI-powered element finder that uses natural language to locate elements. Returns multiple candidates ranked by relevance, eliminating the need for trial-and-error selector searches. Much faster than multiple getElement calls.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            description: { type: "string", description: "Natural language description (e.g., 'login button', 'email input', 'submit form')" },
+            maxResults: { type: "number", minimum: 1, maximum: 20, description: "Max candidates to return (default: 5)" },
+          },
+          required: ["description"],
+        },
+      },
+      {
+        name: "analyzePage",
+        description: "Comprehensive page analysis that returns complete structure: all forms, inputs, buttons, links, and interactive elements with their selectors. Cached for fast repeated access. Use this ONCE at page load to understand the entire page structure.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            refresh: { type: "boolean", description: "Force refresh cached analysis (default: false)" },
+          },
+        },
+      },
+      {
+        name: "getAllInteractiveElements",
+        description: "Get all clickable and interactive elements on the page with their selectors and descriptions. Perfect for understanding what actions are available.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            includeHidden: { type: "boolean", description: "Include hidden elements (default: false)" },
+          },
+        },
+      },
+      {
+        name: "findElementsByText",
+        description: "Find all elements containing specific text. Returns elements with their selectors, making it easy to locate elements by visible text.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Text to search for" },
+            exact: { type: "boolean", description: "Exact match only (default: false)" },
+            caseSensitive: { type: "boolean", description: "Case sensitive (default: false)" },
+          },
+          required: ["text"],
+        },
+      },
     ],
   };
 });
@@ -753,11 +838,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const page = await getOrCreatePage(validatedArgs.url);
       const title = await page.title();
 
+      // Generate AI hints
+      const hints = await generateNavigationHints(page, validatedArgs.url);
+
       return {
         content: [
           {
             type: "text",
-            text: `Browser opened successfully!\nURL: ${validatedArgs.url}\nPage title: ${title}\n\nBrowser remains open for interaction.`,
+            text: `Browser opened successfully!\nURL: ${validatedArgs.url}\nPage title: ${title}\n\nBrowser remains open for interaction.\n\n** AI HINTS **\nPage type: ${hints.pageType}\nAvailable actions: ${hints.availableActions.join(', ')}\nSuggested next: ${hints.suggestedNext.join('; ')}`,
           },
         ],
       };
@@ -775,11 +863,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       await element.click();
       await new Promise(resolve => setTimeout(resolve, validatedArgs.waitAfter || 1500));
 
+      // Generate AI hints after click
+      const hints = await generateClickHints(page, validatedArgs.selector);
+
       const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
+
+      let hintsText = '\n\n** AI HINTS **';
+      if (hints.modalOpened) hintsText += '\nModal opened - interact with it or close';
+      if (hints.newElements.length > 0) {
+        hintsText += `\nNew elements appeared: ${hints.newElements.map(e => e.type).join(', ')}`;
+      }
+      if (hints.suggestedNext.length > 0) {
+        hintsText += `\nSuggested next: ${hints.suggestedNext.join('; ')}`;
+      }
 
       return {
         content: [
-          { type: "text", text: `Clicked: ${validatedArgs.selector}` },
+          { type: "text", text: `Clicked: ${validatedArgs.selector}${hintsText}` },
           { type: "image", data: screenshot, mimeType: "image/png" }
         ],
       };
@@ -1167,10 +1267,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const title = await page.title();
 
+      // Generate AI hints
+      const hints = await generateNavigationHints(page, validatedArgs.url);
+
       return {
         content: [{
           type: "text",
-          text: `Navigated to: ${validatedArgs.url}\nPage title: ${title}`
+          text: `Navigated to: ${validatedArgs.url}\nPage title: ${title}\n\n** AI HINTS **\nPage type: ${hints.pageType}\nAvailable actions: ${hints.availableActions.join(', ')}\nSuggested next: ${hints.suggestedNext.join('; ')}`
         }],
       };
     }
@@ -1463,6 +1566,346 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [
           { type: 'text', text: JSON.stringify(specs, null, 2) }
         ]
+      };
+    }
+
+    // New AI optimization tools
+    if (name === "smartFindElement") {
+      const validatedArgs = SmartFindElementSchema.parse(args);
+      const page = await getLastOpenPage();
+      const maxResults = validatedArgs.maxResults || 5;
+
+      // Execute smart search in page context
+      const results = await page.evaluate((description, maxResults, utilsCode) => {
+        // Inject utilities into page context
+        eval(utilsCode);
+
+        // Determine element type from description
+        const elementType = determineElementType(description);
+
+        // Build candidate selectors based on element type
+        let candidates = [];
+
+        if (elementType.type === 'input' || elementType.type === 'any') {
+          candidates.push(...document.querySelectorAll('input'));
+          candidates.push(...document.querySelectorAll('textarea'));
+        }
+
+        if (elementType.type === 'button' || elementType.type === 'any') {
+          candidates.push(...document.querySelectorAll('button'));
+          candidates.push(...document.querySelectorAll('input[type="submit"]'));
+          candidates.push(...document.querySelectorAll('input[type="button"]'));
+          candidates.push(...document.querySelectorAll('[role="button"]'));
+        }
+
+        if (elementType.type === 'link' || elementType.type === 'any') {
+          candidates.push(...document.querySelectorAll('a'));
+        }
+
+        // Analyze each candidate
+        const analyzed = candidates.map(el => {
+          const context = analyzeButtonContextInPage(el);
+          const score = scoreSubmitButton(el, context, description);
+          const selector = getUniqueSelectorInPage(el);
+
+          return {
+            selector,
+            text: context.text.substring(0, 100), // Limit text length
+            type: el.tagName.toLowerCase(),
+            score,
+            confidence: Math.min(Math.max(score / 100, 0), 1),
+            visible: context.isVisible,
+            reason: explainScore(context, description, score),
+            attributes: {
+              id: el.id || null,
+              class: el.className || null,
+              name: el.name || null,
+              type: el.type || null,
+            }
+          };
+        });
+
+        // Filter and sort
+        return analyzed
+          .filter(r => r.score > 5) // Minimum threshold
+          .sort((a, b) => b.score - a.score)
+          .slice(0, maxResults);
+
+      }, validatedArgs.description, maxResults, elementFinderUtils);
+
+      const hints = {
+        totalCandidates: results.length,
+        bestMatch: results[0] || null,
+        suggestion: results.length > 0
+          ? `Use selector: ${results[0].selector}`
+          : 'No good matches found. Try a different description.',
+      };
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ candidates: results, hints }, null, 2)
+        }]
+      };
+    }
+
+    if (name === "analyzePage") {
+      const validatedArgs = AnalyzePageSchema.parse(args);
+      const page = await getLastOpenPage();
+      const pageUrl = page.url();
+
+      // Check cache
+      if (!validatedArgs.refresh && pageAnalysisCache.has(pageUrl)) {
+        const cached = pageAnalysisCache.get(pageUrl);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ ...cached, fromCache: true }, null, 2)
+          }]
+        };
+      }
+
+      // Perform comprehensive analysis
+      const analysis = await page.evaluate((utilsCode) => {
+        // Inject utilities
+        eval(utilsCode);
+
+        const result = {
+          url: window.location.href,
+          title: document.title,
+          forms: [],
+          interactiveElements: [],
+          inputs: [],
+          buttons: [],
+          links: [],
+          navigation: [],
+        };
+
+        // Analyze forms
+        document.querySelectorAll('form').forEach((form, idx) => {
+          const formData = {
+            selector: form.id ? `#${form.id}` : `form:nth-of-type(${idx + 1})`,
+            action: form.action,
+            method: form.method,
+            fields: [],
+            submitButton: null,
+          };
+
+          // Find fields
+          form.querySelectorAll('input, textarea, select').forEach(field => {
+            if (field.type === 'submit' || field.type === 'button') return;
+
+            formData.fields.push({
+              selector: getUniqueSelectorInPage(field),
+              type: field.type || 'text',
+              name: field.name,
+              id: field.id,
+              placeholder: field.placeholder,
+              label: (() => {
+                const label = field.labels && field.labels[0];
+                return label ? label.textContent.trim() : null;
+              })(),
+              required: field.required,
+            });
+          });
+
+          // Find submit button
+          const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+          if (submitBtn) {
+            formData.submitButton = {
+              selector: getUniqueSelectorInPage(submitBtn),
+              text: submitBtn.textContent || submitBtn.value,
+            };
+          }
+
+          result.forms.push(formData);
+        });
+
+        // All buttons
+        document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"]').forEach(btn => {
+          if (btn.offsetWidth === 0 && btn.offsetHeight === 0) return; // Skip hidden
+
+          result.buttons.push({
+            selector: getUniqueSelectorInPage(btn),
+            text: (btn.textContent || btn.value || '').trim().substring(0, 50),
+            type: btn.type || 'button',
+            inForm: btn.closest('form') !== null,
+          });
+        });
+
+        // All inputs
+        document.querySelectorAll('input, textarea, select').forEach(input => {
+          if (input.type === 'submit' || input.type === 'button' || input.type === 'hidden') return;
+          if (input.offsetWidth === 0 && input.offsetHeight === 0) return;
+
+          result.inputs.push({
+            selector: getUniqueSelectorInPage(input),
+            type: input.type || 'text',
+            name: input.name,
+            placeholder: input.placeholder,
+          });
+        });
+
+        // All links
+        document.querySelectorAll('a[href]').forEach(link => {
+          if (link.offsetWidth === 0 && link.offsetHeight === 0) return;
+
+          const text = link.textContent.trim().substring(0, 50);
+          if (!text) return;
+
+          result.links.push({
+            selector: getUniqueSelectorInPage(link),
+            text,
+            href: link.href,
+          });
+        });
+
+        // Navigation elements
+        document.querySelectorAll('nav a, [role="navigation"] a').forEach(link => {
+          result.navigation.push({
+            selector: getUniqueSelectorInPage(link),
+            text: link.textContent.trim().substring(0, 50),
+            href: link.href,
+          });
+        });
+
+        // Interactive elements summary
+        document.querySelectorAll('button, a, input, select, textarea, [onclick], [role="button"]').forEach(el => {
+          if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+
+          const text = (el.textContent || el.value || el.getAttribute('aria-label') || '').trim();
+          if (!text) return;
+
+          result.interactiveElements.push({
+            selector: getUniqueSelectorInPage(el),
+            type: el.tagName.toLowerCase(),
+            text: text.substring(0, 50),
+          });
+        });
+
+        return result;
+      }, elementFinderUtils);
+
+      // Cache the result
+      pageAnalysisCache.set(pageUrl, analysis);
+
+      // Add hints
+      const hints = {
+        summary: `Found ${analysis.forms.length} forms, ${analysis.buttons.length} buttons, ${analysis.inputs.length} inputs, ${analysis.links.length} links`,
+        suggestion: analysis.forms.length > 0
+          ? `Start with form: ${analysis.forms[0].selector}`
+          : 'No forms found on this page',
+      };
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ...analysis, hints }, null, 2)
+        }]
+      };
+    }
+
+    if (name === "getAllInteractiveElements") {
+      const validatedArgs = GetAllInteractiveElementsSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const elements = await page.evaluate((includeHidden, utilsCode) => {
+        eval(utilsCode);
+
+        const results = [];
+        const selector = 'button, a[href], input, select, textarea, [onclick], [role="button"], [tabindex]:not([tabindex="-1"])';
+
+        document.querySelectorAll(selector).forEach(el => {
+          const isVisible = el.offsetWidth > 0 && el.offsetHeight > 0;
+
+          if (!includeHidden && !isVisible) return;
+
+          const text = (el.textContent || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim();
+
+          results.push({
+            selector: getUniqueSelectorInPage(el),
+            type: el.tagName.toLowerCase(),
+            text: text.substring(0, 100),
+            visible: isVisible,
+            attributes: {
+              id: el.id || null,
+              class: el.className || null,
+              role: el.getAttribute('role') || null,
+              type: el.type || null,
+            }
+          });
+        });
+
+        return results;
+      }, validatedArgs.includeHidden || false, elementFinderUtils);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            count: elements.length,
+            elements,
+            hints: {
+              suggestion: 'Use these selectors directly with click, type, or other tools'
+            }
+          }, null, 2)
+        }]
+      };
+    }
+
+    if (name === "findElementsByText") {
+      const validatedArgs = FindElementsByTextSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const elements = await page.evaluate((text, exact, caseSensitive, utilsCode) => {
+        eval(utilsCode);
+
+        const results = [];
+        const searchText = caseSensitive ? text : text.toLowerCase();
+
+        document.querySelectorAll('*').forEach(el => {
+          // Skip script, style, etc
+          if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'BR', 'HR'].includes(el.tagName)) return;
+
+          // Get element's own text (not children)
+          let elementText = '';
+          for (const node of el.childNodes) {
+            if (node.nodeType === Node.TEXT_NODE) {
+              elementText += node.textContent;
+            }
+          }
+
+          elementText = elementText.trim();
+          if (!elementText) return;
+
+          const compareText = caseSensitive ? elementText : elementText.toLowerCase();
+
+          const matches = exact
+            ? compareText === searchText
+            : compareText.includes(searchText);
+
+          if (matches) {
+            results.push({
+              selector: getUniqueSelectorInPage(el),
+              type: el.tagName.toLowerCase(),
+              text: elementText.substring(0, 100),
+              fullText: elementText,
+            });
+          }
+        });
+
+        return results;
+      }, validatedArgs.text, validatedArgs.exact || false, validatedArgs.caseSensitive || false, elementFinderUtils);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            query: validatedArgs.text,
+            count: elements.length,
+            elements,
+          }, null, 2)
+        }]
       };
     }
 
