@@ -12,6 +12,8 @@ import Jimp from "jimp";
 import pixelmatch from "pixelmatch";
 import { writeFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
+import { spawn } from 'child_process';
+import http from 'http';
 
 // Figma token from environment variable (can be set in MCP config)
 const FIGMA_TOKEN = process.env.FIGMA_TOKEN || null;
@@ -27,29 +29,127 @@ const isWSL = (() => {
   }
 })();
 
+// Detect Windows environment (including WSL)
+const isWindows = process.platform === 'win32' || isWSL;
+
+// Get Chrome executable path based on platform
+function getChromePath() {
+  if (process.platform === 'win32') {
+    // Native Windows
+    return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  } else if (isWSL) {
+    // WSL - use Windows Chrome
+    return '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe';
+  } else {
+    // Linux
+    return '/usr/bin/google-chrome';
+  }
+}
+
+// Get temp directory based on platform
+function getTempDir() {
+  if (process.platform === 'win32') {
+    return process.env.TEMP || 'C:\\Windows\\Temp';
+  } else if (isWSL) {
+    return '/mnt/c/Windows/Temp';
+  } else {
+    return process.env.TMPDIR || '/tmp';
+  }
+}
+
 // Global browser instance (persists between requests)
 let browserPromise = null;
 const openPages = new Map();
 let lastPage = null;
+let chromeProcess = null;
 
 // Console logs storage
 const consoleLogs = [];
+
+// Debug port for Chrome remote debugging
+const CHROME_DEBUG_PORT = 9222;
+
+// Helper function to get WebSocket endpoint from Chrome
+async function getChromeWebSocketEndpoint(port = CHROME_DEBUG_PORT, maxRetries = 10) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await new Promise((resolve, reject) => {
+        const req = http.get(`http://localhost:${port}/json/version`, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => resolve(data));
+        });
+        req.on('error', reject);
+        req.setTimeout(1000);
+      });
+
+      const info = JSON.parse(response);
+      if (info.webSocketDebuggerUrl) {
+        return info.webSocketDebuggerUrl;
+      }
+    } catch (err) {
+      // Chrome might not be ready yet, wait and retry
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  throw new Error('Could not get Chrome WebSocket endpoint after multiple retries');
+}
 
 // Initialize browser (singleton)
 async function getBrowser() {
   if (!browserPromise) {
     browserPromise = (async () => {
       try {
-        const browser = await puppeteer.launch({
-          headless: false,
-          defaultViewport: null,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-          ],
+        let browser;
+        let endpoint;
+
+        // Try to connect to existing Chrome with remote debugging
+        try {
+          endpoint = await getChromeWebSocketEndpoint(CHROME_DEBUG_PORT, 2);
+          browser = await puppeteer.connect({
+            browserWSEndpoint: endpoint,
+            defaultViewport: null,
+          });
+          console.error("[chrometools-mcp] Connected to existing Chrome instance");
+          console.error("[chrometools-mcp] WebSocket endpoint:", endpoint);
+          return browser;
+        } catch (connectError) {
+          console.error("[chrometools-mcp] No existing Chrome found, launching new instance...");
+        }
+
+        // Launch new Chrome with remote debugging enabled
+        const chromePath = getChromePath();
+        const userDataDir = `${getTempDir()}/chrome-mcp-profile`;
+
+        console.error("[chrometools-mcp] Chrome path:", chromePath);
+        console.error("[chrometools-mcp] User data dir:", userDataDir);
+
+        chromeProcess = spawn(chromePath, [
+          `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
+          '--no-first-run',
+          '--no-default-browser-check',
+          `--user-data-dir=${userDataDir}`,
+        ], {
+          detached: true,
+          stdio: 'ignore',
         });
-        console.error("[chrometools-mcp] Browser initialized (GUI mode)");
+
+        chromeProcess.unref(); // Allow Node to exit even if Chrome is running
+
+        console.error("[chrometools-mcp] Chrome launched with remote debugging on port", CHROME_DEBUG_PORT);
+
+        // Wait for Chrome to start and get the endpoint
+        endpoint = await getChromeWebSocketEndpoint(CHROME_DEBUG_PORT, 20);
+
+        // Connect to the Chrome instance
+        browser = await puppeteer.connect({
+          browserWSEndpoint: endpoint,
+          defaultViewport: null,
+        });
+
+        console.error("[chrometools-mcp] Connected to Chrome instance");
+        console.error("[chrometools-mcp] WebSocket endpoint:", endpoint);
+
         return browser;
       } catch (error) {
         // Check if it's a display-related error in WSL
