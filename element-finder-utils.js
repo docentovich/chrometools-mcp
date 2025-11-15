@@ -4,7 +4,7 @@
  */
 
 // Multilingual submit keywords
-export const SUBMIT_KEYWORDS = {
+const SUBMIT_KEYWORDS = {
   ru: ['войти', 'отправить', 'подтвердить', 'сохранить', 'зарегистрироваться',
        'применить', 'продолжить', 'далее', 'готово', 'ок', 'добавить', 'создать',
        'загрузить', 'вход', 'регистрация', 'авторизация', 'логин'],
@@ -21,7 +21,7 @@ export const SUBMIT_KEYWORDS = {
 };
 
 // Negative keywords (buttons that are NOT submit)
-export const NEGATIVE_KEYWORDS = {
+const NEGATIVE_KEYWORDS = {
   ru: ['отмена', 'отменить', 'назад', 'закрыть', 'удалить', 'очистить', 'сбросить', 'выход', 'выйти'],
   en: ['cancel', 'back', 'close', 'delete', 'clear', 'reset', 'remove', 'dismiss', 'decline', 'logout', 'exit'],
   es: ['cancelar', 'atrás', 'cerrar', 'eliminar', 'borrar', 'restablecer'],
@@ -34,7 +34,7 @@ export const NEGATIVE_KEYWORDS = {
 };
 
 // Link/anchor keywords
-export const LINK_KEYWORDS = {
+const LINK_KEYWORDS = {
   ru: ['подробнее', 'узнать', 'читать', 'перейти', 'смотреть', 'открыть'],
   en: ['learn more', 'read more', 'view', 'see', 'details', 'info', 'about', 'help'],
   es: ['más información', 'leer más', 'ver', 'detalles'],
@@ -47,7 +47,7 @@ export const LINK_KEYWORDS = {
 };
 
 // Input field keywords
-export const INPUT_KEYWORDS = {
+const INPUT_KEYWORDS = {
   email: {
     ru: ['email', 'почта', 'эл. почта', 'e-mail', 'электронная почта'],
     en: ['email', 'e-mail', 'mail', 'email address'],
@@ -73,7 +73,7 @@ export const INPUT_KEYWORDS = {
 /**
  * Check if text matches submit keywords
  */
-export function matchesSubmitKeyword(text, description) {
+function matchesSubmitKeyword(text, description) {
   if (!text) return false;
 
   const textLower = text.toLowerCase();
@@ -99,7 +99,7 @@ export function matchesSubmitKeyword(text, description) {
 /**
  * Check if text matches negative keywords
  */
-export function matchesNegativeKeyword(text) {
+function matchesNegativeKeyword(text) {
   if (!text) return false;
 
   const textLower = text.toLowerCase();
@@ -118,7 +118,7 @@ export function matchesNegativeKeyword(text) {
 /**
  * Check if text matches link keywords
  */
-export function matchesLinkKeyword(text) {
+function matchesLinkKeyword(text) {
   if (!text) return false;
 
   const textLower = text.toLowerCase();
@@ -138,7 +138,7 @@ export function matchesLinkKeyword(text) {
  * Analyze button context
  * This function is designed to be injected into the page context
  */
-export function analyzeButtonContextInPage(element) {
+function analyzeButtonContextInPage(element) {
   const context = {
     // Element type
     isButton: element.tagName === 'BUTTON',
@@ -194,7 +194,7 @@ export function analyzeButtonContextInPage(element) {
  * Score element as submit button
  * Higher score = more likely to be a submit button
  */
-export function scoreSubmitButton(element, context, description) {
+function scoreSubmitButton(element, context, description) {
   let score = 0;
   const text = context.text.toLowerCase();
   const descLower = description.toLowerCase();
@@ -239,9 +239,66 @@ export function scoreSubmitButton(element, context, description) {
 }
 
 /**
+ * Score element as input field
+ * Higher score = more likely to match the description
+ */
+function scoreInputField(element, context, description) {
+  let score = 0;
+  const descLower = description.toLowerCase();
+  const elementType = element.type || '';
+  const elementName = (element.name || '').toLowerCase();
+  const elementId = (element.id || '').toLowerCase();
+  const elementPlaceholder = (element.placeholder || '').toLowerCase();
+
+  // Type matching with description
+  if (elementType === 'email' && descLower.includes('email')) {
+    score += 20;
+  }
+  if (elementType === 'password' && descLower.includes('password')) {
+    score += 20;
+  }
+  if (elementType === 'tel' && (descLower.includes('phone') || descLower.includes('tel'))) {
+    score += 20;
+  }
+  if (elementType === 'search' && descLower.includes('search')) {
+    score += 20;
+  }
+
+  // ID/Name matching with description
+  if (elementId && descLower.includes(elementId)) {
+    score += 15;
+  }
+  if (elementName && descLower.includes(elementName)) {
+    score += 15;
+  }
+
+  // Placeholder matching
+  if (elementPlaceholder && descLower.includes(elementPlaceholder)) {
+    score += 10;
+  }
+
+  // Form context bonus
+  if (context.inForm) {
+    score += 20;
+  }
+
+  // Visibility bonus
+  if (context.isVisible) {
+    score += 10;
+  }
+
+  // Required field bonus
+  if (element.required) {
+    score += 5;
+  }
+
+  return score;
+}
+
+/**
  * Generate unique CSS selector for an element
  */
-export function getUniqueSelectorInPage(element) {
+function getUniqueSelectorInPage(element) {
   // Try ID first
   if (element.id) {
     return `#${element.id}`;
@@ -325,16 +382,42 @@ export function getUniqueSelectorInPage(element) {
 /**
  * Explain score for debugging
  */
-export function explainScore(context, description, score) {
+function explainScore(element, context, description, score) {
   const reasons = [];
+  const descLower = description.toLowerCase();
+  const elementType = element.type || '';
 
+  // Input field scoring reasons
+  if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+    if (elementType === 'email' && descLower.includes('email')) {
+      reasons.push('type=email matches description (+20)');
+    }
+    if (elementType === 'password' && descLower.includes('password')) {
+      reasons.push('type=password matches description (+20)');
+    }
+    if (elementType === 'tel' && (descLower.includes('phone') || descLower.includes('tel'))) {
+      reasons.push('type=tel matches description (+20)');
+    }
+    if (element.id && descLower.includes(element.id.toLowerCase())) {
+      reasons.push(`id="${element.id}" matches description (+15)`);
+    }
+    if (element.name && descLower.includes(element.name.toLowerCase())) {
+      reasons.push(`name="${element.name}" matches description (+15)`);
+    }
+    if (element.placeholder && descLower.includes(element.placeholder.toLowerCase())) {
+      reasons.push('placeholder matches (+10)');
+    }
+    if (element.required) {
+      reasons.push('required field (+5)');
+    }
+  }
+
+  // Button scoring reasons
   if (context.hasSubmitAttr) reasons.push('type=submit (+40)');
-  if (context.inForm) reasons.push('in form (+20)');
-  if (context.isLastInForm) reasons.push('last in form (+15)');
   if (context.hasSubmitClass) reasons.push('submit class (+10)');
   if (context.hasSubmitIcon) reasons.push('submit icon (+5)');
   if (context.isPrimary) reasons.push('primary style (+15)');
-  if (context.isVisible) reasons.push('visible (+10)');
+  if (context.isLastInForm) reasons.push('last in form (+15)');
   if (matchesSubmitKeyword(context.text, description)) {
     reasons.push('keyword match (+30)');
   }
@@ -348,13 +431,17 @@ export function explainScore(context, description, score) {
     reasons.push('link without submit keyword (-20)');
   }
 
+  // Common reasons
+  if (context.inForm) reasons.push('in form (+20)');
+  if (context.isVisible) reasons.push('visible (+10)');
+
   return reasons.length > 0 ? reasons.join(', ') : 'no matching criteria';
 }
 
 /**
  * Determine element type from description
  */
-export function determineElementType(description) {
+function determineElementType(description) {
   const lower = description.toLowerCase();
 
   // Check for input fields

@@ -33,7 +33,19 @@ import {
   generateClickHints,
   generateFormSubmitHints,
   generatePageHints
-} from './hints-generator.js';
+} from './utils/hints-generator.js';
+
+// Import Recorder modules
+import { injectRecorder } from './recorder/recorder-script.js';
+import { executeScenario } from './recorder/scenario-executor.js';
+import {
+  initializeStorage,
+  saveScenario,
+  loadScenario,
+  listScenarios,
+  searchScenarios,
+  deleteScenario
+} from './recorder/scenario-storage.js';
 
 // Detect WSL environment
 const isWSL = (() => {
@@ -806,6 +818,68 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             caseSensitive: { type: "boolean", description: "Case sensitive (default: false)" },
           },
           required: ["text"],
+        },
+      },
+      {
+        name: "enableRecorder",
+        description: "Inject recorder UI widget into the current page. Enables visual recording of user interactions with start/stop/save controls.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "executeScenario",
+        description: "Execute a recorded scenario by name with optional parameters. Runs all actions in the scenario chain with dependency resolution.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Scenario name to execute" },
+            parameters: { type: "object", description: "Parameters for scenario execution (e.g., { email: 'user@test.com', password: 'secret' })" },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "listScenarios",
+        description: "Get list of all available scenarios with metadata (name, description, tags, dependencies, timestamps).",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "searchScenarios",
+        description: "Search scenarios by text query or tags. Returns matching scenarios with metadata.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Text to search in name/description" },
+            tags: { type: "array", items: { type: "string" }, description: "Tags to filter by" },
+          },
+        },
+      },
+      {
+        name: "getScenarioInfo",
+        description: "Get detailed information about a specific scenario including actions, parameters, and dependencies.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Scenario name" },
+            includeSecrets: { type: "boolean", description: "Include secrets in response (default: false)" },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "deleteScenario",
+        description: "Delete a scenario and its associated secrets from storage.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Scenario name to delete" },
+          },
+          required: ["name"],
         },
       },
     ],
@@ -1605,7 +1679,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Analyze each candidate
         const analyzed = candidates.map(el => {
           const context = analyzeButtonContextInPage(el);
-          const score = scoreSubmitButton(el, context, description);
+
+          // Use appropriate scoring function based on element type
+          let score;
+          if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+            score = scoreInputField(el, context, description);
+          } else {
+            score = scoreSubmitButton(el, context, description);
+          }
+
           const selector = getUniqueSelectorInPage(el);
 
           return {
@@ -1615,7 +1697,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             score,
             confidence: Math.min(Math.max(score / 100, 0), 1),
             visible: context.isVisible,
-            reason: explainScore(context, description, score),
+            reason: explainScore(el, context, description, score),
             attributes: {
               id: el.id || null,
               class: el.className || null,
@@ -1905,6 +1987,77 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             count: elements.length,
             elements,
           }, null, 2)
+        }]
+      };
+    }
+
+    if (name === "enableRecorder") {
+      const page = await getLastOpenPage();
+      await injectRecorder(page);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: "Recorder UI injected into page. Click 'Start' to begin recording."
+          }, null, 2)
+        }]
+      };
+    }
+
+    if (name === "executeScenario") {
+      const page = await getLastOpenPage();
+      const result = await executeScenario(args.name, page, args.parameters || {});
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
+        }]
+      };
+    }
+
+    if (name === "listScenarios") {
+      const scenarios = await listScenarios();
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(scenarios, null, 2)
+        }]
+      };
+    }
+
+    if (name === "searchScenarios") {
+      const results = await searchScenarios(args);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(results, null, 2)
+        }]
+      };
+    }
+
+    if (name === "getScenarioInfo") {
+      const scenario = await loadScenario(args.name, args.includeSecrets || false);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(scenario, null, 2)
+        }]
+      };
+    }
+
+    if (name === "deleteScenario") {
+      const result = await deleteScenario(args.name);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
         }]
       };
     }
