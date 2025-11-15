@@ -7,12 +7,14 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 - [Installation](#installation)
 - [Usage](#usage)
 - [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
-- [Available Tools](#available-tools) - **20+ Tools Total**
+- [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
+- [Available Tools](#available-tools) - **26+ Tools Total**
   - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getAllInteractiveElements, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, hover, setStyles, setViewport, getViewport, navigateTo
+  - [Recorder Tools](#5-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
@@ -72,6 +74,32 @@ AI: smartFindElement("login button")
 **Performance:** 3-5x faster, 5-10x fewer requests
 
 📚 [Full AI Optimization Guide](AI_OPTIMIZATION.md)
+
+## Scenario Recorder
+
+⭐ **NEW**: Visual UI-based recorder for creating reusable test scenarios with automatic secret detection.
+
+### Features
+
+- **Visual Widget** - Floating recorder UI with compact mode (50x50px minimize button)
+- **Smart Recording** - Captures clicks, typing, navigation with intelligent optimization
+- **Secret Detection** - Auto-detects passwords/emails and stores them securely
+- **Action Optimization** - Combines sequential actions, removes duplicates
+- **Scenario Management** - Save, load, execute, search, and delete scenarios
+- **Dependencies** - Chain scenarios together with dependency resolution
+
+### Quick Start
+
+```javascript
+// 1. Enable recorder UI
+enableRecorder()
+
+// 2. Click "Start" in widget, perform actions, click "Stop & Save"
+// 3. Execute saved scenario
+executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
+```
+
+📚 [Full Recorder Guide](RECORDER_QUICKSTART.md) | [Recorder Spec](RECORDER_SPEC.md)
 
 ## Available Tools
 
@@ -248,6 +276,60 @@ Navigate to different URL while keeping browser instance.
   - `waitUntil` (optional): load event type
 - **Use case**: Moving between pages in workflow
 - **Returns**: New page title
+
+### 5. Recorder Tools ⭐ NEW
+
+#### enableRecorder
+Inject visual recorder UI widget into the current page.
+- **Parameters**: None
+- **Use case**: Start recording user interactions visually
+- **Returns**: Success status
+- **Features**:
+  - Floating widget with compact mode (minimize to 50x50px)
+  - Visual recording indicator (red pulsing border)
+  - Start/Pause/Stop/Stop & Save/Clear controls
+  - Real-time action list display
+  - Metadata fields (name, description, tags)
+
+#### executeScenario
+Execute a previously recorded scenario by name.
+- **Parameters**:
+  - `name` (required): Scenario name
+  - `parameters` (optional): Runtime parameters (e.g., { email: "user@test.com" })
+- **Use case**: Run automated test scenarios
+- **Returns**: Execution result with success/failure status
+- **Features**:
+  - Automatic dependency resolution
+  - Secret parameter injection
+  - Fallback selector retry logic
+
+#### listScenarios
+Get all available scenarios with metadata.
+- **Parameters**: None
+- **Use case**: Browse recorded scenarios
+- **Returns**: Array of scenarios with names, descriptions, tags, timestamps
+
+#### searchScenarios
+Search scenarios by text or tags.
+- **Parameters**:
+  - `text` (optional): Search in name/description
+  - `tags` (optional): Array of tags to filter
+- **Use case**: Find specific scenarios
+- **Returns**: Matching scenarios
+
+#### getScenarioInfo
+Get detailed information about a scenario.
+- **Parameters**:
+  - `name` (required): Scenario name
+  - `includeSecrets` (optional): Include secret values (default: false)
+- **Use case**: Inspect scenario actions and dependencies
+- **Returns**: Full scenario details (actions, metadata, dependencies)
+
+#### deleteScenario
+Delete a scenario and its associated secrets.
+- **Parameters**: `name` (required)
+- **Use case**: Clean up unused scenarios
+- **Returns**: Success confirmation
 
 ---
 
