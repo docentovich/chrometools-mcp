@@ -1993,14 +1993,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === "enableRecorder") {
       const page = await getLastOpenPage();
-      await injectRecorder(page);
+      const result = await injectRecorder(page);
 
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
+          text: JSON.stringify(result.success ? {
             success: true,
             message: "Recorder UI injected into page. Click 'Start' to begin recording."
+          } : {
+            success: false,
+            error: result.error
           }, null, 2)
         }]
       };

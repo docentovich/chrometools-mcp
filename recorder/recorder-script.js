@@ -37,6 +37,7 @@ export function generateRecorderScript() {
     actions: [],
     secrets: {},
     lastActionTime: 0,
+    isCompact: false, // Widget compact mode
     scenarioMetadata: {
       name: '',
       description: '',
@@ -78,6 +79,51 @@ export function generateRecorderScript() {
           z-index: 999999;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
           color: white;
+          transition: all 0.3s ease;
+        }
+
+        /* Compact mode */
+        #chrometools-recorder.compact {
+          width: 50px;
+          height: 50px;
+          border-radius: 50%;
+          background: rgba(102, 126, 234, 0.9);
+          cursor: pointer;
+          overflow: hidden;
+        }
+
+        #chrometools-recorder.compact > *:not(#chrometools-recorder-compact-icon) {
+          display: none;
+        }
+
+        #chrometools-recorder-compact-icon {
+          display: none;
+          width: 100%;
+          height: 100%;
+          align-items: center;
+          justify-content: center;
+          font-size: 24px;
+        }
+
+        #chrometools-recorder.compact #chrometools-recorder-compact-icon {
+          display: flex;
+        }
+
+        #chrometools-recorder-compact-icon::before {
+          content: '⏺';
+          color: #ef4444;
+          animation: recording-icon-pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes recording-icon-pulse {
+          0%, 100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.6;
+            transform: scale(1.1);
+          }
         }
 
         #chrometools-recorder-header {
@@ -228,10 +274,15 @@ export function generateRecorderScript() {
           margin-bottom: 8px;
           border: none;
           border-radius: 6px;
-          font-size: 14px;
-          min-height: 40px;
-          background: rgba(255, 255, 255, 0.9);
           font-size: 12px;
+          min-height: 40px;
+          background: rgba(255, 255, 255, 0.95);
+          color: #1f2937;
+        }
+
+        #chrometools-recorder-metadata input::placeholder {
+          color: #6b7280;
+          opacity: 0.8;
         }
 
         .recorder-collapse {
@@ -245,12 +296,17 @@ export function generateRecorderScript() {
         }
       </style>
 
+      <div id="chrometools-recorder-compact-icon"></div>
+
       <div id="chrometools-recorder-header">
         <div id="chrometools-recorder-title">
           <div id="chrometools-recorder-status"></div>
           <span>Scenario Recorder</span>
         </div>
-        <button class="recorder-btn recorder-btn-secondary" id="recorder-toggle-metadata" style="flex: none; min-width: auto; padding: 4px 8px;">⚙️</button>
+        <div style="display: flex; gap: 4px;">
+          <button class="recorder-btn recorder-btn-secondary" id="recorder-toggle-metadata" style="flex: none; min-width: auto; padding: 4px 8px;" title="Settings">⚙️</button>
+          <button class="recorder-btn recorder-btn-secondary" id="recorder-toggle-compact" style="flex: none; min-width: auto; padding: 4px 8px;" title="Minimize">−</button>
+        </div>
       </div>
 
       <div id="chrometools-recorder-metadata" class="recorder-collapse">
@@ -262,6 +318,7 @@ export function generateRecorderScript() {
       <div id="chrometools-recorder-controls">
         <button class="recorder-btn recorder-btn-primary" id="recorder-start">Start</button>
         <button class="recorder-btn recorder-btn-secondary" id="recorder-pause" disabled>Pause</button>
+        <button class="recorder-btn recorder-btn-secondary" id="recorder-stop-only" disabled>Stop</button>
         <button class="recorder-btn recorder-btn-danger" id="recorder-stop" disabled>Stop & Save</button>
         <button class="recorder-btn recorder-btn-secondary" id="recorder-clear">Clear</button>
       </div>
@@ -294,14 +351,34 @@ export function generateRecorderScript() {
   function setupUIEventListeners() {
     document.getElementById('recorder-start').addEventListener('click', startRecording);
     document.getElementById('recorder-pause').addEventListener('click', togglePause);
+    document.getElementById('recorder-stop-only').addEventListener('click', stopRecording);
     document.getElementById('recorder-stop').addEventListener('click', stopAndSave);
     document.getElementById('recorder-clear').addEventListener('click', clearActions);
     document.getElementById('recorder-toggle-metadata').addEventListener('click', toggleMetadata);
+    document.getElementById('recorder-toggle-compact').addEventListener('click', toggleCompactMode);
+
+    // Click on compact icon to expand
+    document.getElementById('chrometools-recorder-compact-icon').addEventListener('click', () => {
+      if (state.isCompact) {
+        toggleCompactMode();
+      }
+    });
   }
 
   function toggleMetadata() {
     const metadata = document.getElementById('chrometools-recorder-metadata');
     metadata.classList.toggle('expanded');
+  }
+
+  function toggleCompactMode() {
+    state.isCompact = !state.isCompact;
+    const widget = document.getElementById('chrometools-recorder');
+
+    if (state.isCompact) {
+      widget.classList.add('compact');
+    } else {
+      widget.classList.remove('compact');
+    }
   }
 
   function makeDraggable(element) {
@@ -347,6 +424,14 @@ export function generateRecorderScript() {
     updateUIState();
   }
 
+  function stopRecording() {
+    // Stop recording without saving
+    state.isRecording = false;
+    state.isPaused = false;
+    updateUIState();
+    detachEventListeners();
+  }
+
   async function stopAndSave() {
     // Check if scenario name is entered BEFORE stopping
     const scenarioName = document.getElementById('recorder-scenario-name').value.trim();
@@ -381,12 +466,14 @@ export function generateRecorderScript() {
     const status = document.getElementById('chrometools-recorder-status');
     const startBtn = document.getElementById('recorder-start');
     const pauseBtn = document.getElementById('recorder-pause');
+    const stopOnlyBtn = document.getElementById('recorder-stop-only');
     const stopBtn = document.getElementById('recorder-stop');
 
     if (state.isRecording) {
       status.classList.add('recording');
       startBtn.disabled = true;
       pauseBtn.disabled = false;
+      stopOnlyBtn.disabled = false;
       stopBtn.disabled = false;
       pauseBtn.textContent = state.isPaused ? 'Resume' : 'Pause';
 
@@ -396,6 +483,7 @@ export function generateRecorderScript() {
       status.classList.remove('recording');
       startBtn.disabled = false;
       pauseBtn.disabled = true;
+      stopOnlyBtn.disabled = true;
       stopBtn.disabled = true;
 
       // Remove visual indicator from body
