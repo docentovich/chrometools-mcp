@@ -1093,11 +1093,25 @@ export function generateRecorderScript() {
   // INITIALIZATION
   // ==========================
 
+  // Check if recorder already exists
+  if (document.getElementById('chrometools-recorder')) {
+    console.warn('⚠️  Chrometools Recorder already initialized on this page');
+    // Return existing control interface if available
+    if (window.__chrometoolsRecorderInstance) {
+      return window.__chrometoolsRecorderInstance;
+    }
+    // If widget exists but no instance, clean it up first
+    const existingWidget = document.getElementById('chrometools-recorder');
+    existingWidget.remove();
+    const existingHighlight = document.querySelector('.recorder-highlight');
+    if (existingHighlight) existingHighlight.remove();
+  }
+
   createRecorderUI();
   console.log('✅ Chrometools Recorder initialized');
 
-  // Return control interface
-  return {
+  // Return control interface and store globally
+  const controlInterface = {
     start: startRecording,
     stop: stopAndSave,
     pause: togglePause,
@@ -1105,6 +1119,11 @@ export function generateRecorderScript() {
     getState: () => ({ ...state }),
     getActions: () => [...state.actions]
   };
+
+  // Store instance globally to prevent duplicates
+  window.__chrometoolsRecorderInstance = controlInterface;
+
+  return controlInterface;
 })();
 `;
 }
