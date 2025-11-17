@@ -82,6 +82,7 @@ AI: smartFindElement("login button")
 ### Features
 
 - **Visual Widget** - Floating recorder UI with compact mode (50x50px minimize button)
+- **Auto-Reinjection** - Recorder persists across page reloads/navigation automatically ⭐ **NEW**
 - **Smart Recording** - Captures clicks, typing, navigation with intelligent optimization
 - **Secret Detection** - Auto-detects passwords/emails and stores them securely
 - **Action Optimization** - Combines sequential actions, removes duplicates
@@ -215,12 +216,32 @@ Get precise dimensions, positioning, margins, padding, and borders.
 - **Returns**: Box model data + metrics
 
 #### screenshot
-Capture PNG screenshot of specific element.
+Capture optimized screenshot of specific element with smart compression.
 - **Parameters**:
   - `selector` (required)
-  - `padding` (optional): Padding in pixels
+  - `padding` (optional): Padding in pixels (default: 0)
+  - `maxWidth` (optional): Max width for auto-scaling (default: 1024, null for original size)
+  - `maxHeight` (optional): Max height for auto-scaling (default: 8000, null for original size)
+  - `quality` (optional): JPEG quality 1-100 (default: 80)
+  - `format` (optional): 'png', 'jpeg', or 'auto' (default: 'auto')
 - **Use case**: Visual documentation, bug reports
-- **Returns**: Base64 PNG image
+- **Returns**: Optimized image with metadata
+- **Default behavior**: Auto-scales to 1024px width and 8000px height (API limit) and uses smart compression to reduce AI token usage
+- **For original quality**: Set `maxWidth: null`, `maxHeight: null` and `format: 'png'`
+
+#### saveScreenshot
+Save optimized screenshot to filesystem without returning in context.
+- **Parameters**:
+  - `selector` (required)
+  - `filePath` (required): Absolute path to save file
+  - `padding` (optional): Padding in pixels (default: 0)
+  - `maxWidth` (optional): Max width for auto-scaling (default: 1024, null for original)
+  - `maxHeight` (optional): Max height for auto-scaling (default: 8000, null for original)
+  - `quality` (optional): JPEG quality 1-100 (default: 80)
+  - `format` (optional): 'png', 'jpeg', or 'auto' (default: 'auto')
+- **Use case**: Baseline screenshots, file storage
+- **Returns**: File path and metadata (not image data)
+- **Default behavior**: Auto-scales and compresses to save disk space
 
 ### 4. Advanced Tools
 

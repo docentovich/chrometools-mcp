@@ -1053,11 +1053,37 @@ export function generateRecorderScript() {
  */
 export async function injectRecorder(page) {
   try {
-    // Expose save function for communication with MCP server
-    await page.exposeFunction('saveScenarioToMCP', async (scenarioData) => {
-      const { saveScenario } = await import('./scenario-storage.js');
-      return await saveScenario(scenarioData);
+    // Check if recorder is already injected
+    const alreadyInjected = await page.evaluate(() => {
+      return document.getElementById('chrometools-recorder') !== null;
     });
+
+    if (alreadyInjected) {
+      // Remove old recorder UI before re-injecting
+      await page.evaluate(() => {
+        const oldRecorder = document.getElementById('chrometools-recorder');
+        if (oldRecorder) oldRecorder.remove();
+
+        const oldHighlight = document.querySelector('.recorder-highlight');
+        if (oldHighlight) oldHighlight.remove();
+
+        // Remove body class
+        document.body.classList.remove('chrometools-recording');
+      });
+    }
+
+    // Check if function already exists
+    const functionExists = await page.evaluate(() => {
+      return typeof window.saveScenarioToMCP === 'function';
+    });
+
+    // Only expose function if it doesn't exist yet
+    if (!functionExists) {
+      await page.exposeFunction('saveScenarioToMCP', async (scenarioData) => {
+        const { saveScenario } = await import('./scenario-storage.js');
+        return await saveScenario(scenarioData);
+      });
+    }
 
     // Inject recorder script immediately into current page
     await page.evaluate(generateRecorderScript());

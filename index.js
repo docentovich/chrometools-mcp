@@ -98,6 +98,9 @@ const consoleLogs = [];
 // Page analysis cache (method 4)
 const pageAnalysisCache = new Map();
 
+// Track pages with recorder injected
+const pagesWithRecorder = new WeakSet();
+
 // Debug port for Chrome remote debugging
 const CHROME_DEBUG_PORT = 9222;
 
@@ -229,6 +232,25 @@ This requires an X server to display the browser GUI.
   return browserPromise;
 }
 
+// Setup navigation listener for recorder auto-reinjection
+async function setupRecorderAutoReinjection(page) {
+  page.on('framenavigated', async (frame) => {
+    // Only handle main frame navigation
+    if (frame !== page.mainFrame()) return;
+
+    // Check if this page had recorder before
+    if (pagesWithRecorder.has(page)) {
+      try {
+        console.error('[chrometools-mcp] Page navigated, re-injecting recorder...');
+        await injectRecorder(page);
+        console.error('[chrometools-mcp] Recorder re-injected successfully');
+      } catch (error) {
+        console.error('[chrometools-mcp] Failed to re-inject recorder:', error.message);
+      }
+    }
+  });
+}
+
 // Get or create page for URL
 async function getOrCreatePage(url) {
   const browser = await getBrowser();
@@ -279,6 +301,9 @@ async function getOrCreatePage(url) {
     });
   });
 
+  // Setup recorder auto-reinjection on navigation
+  setupRecorderAutoReinjection(page);
+
   await page.goto(url, { waitUntil: 'networkidle2' });
   openPages.set(url, page);
   lastPage = page;
@@ -291,6 +316,14 @@ async function getLastOpenPage() {
   if (!lastPage || lastPage.isClosed()) {
     throw new Error('No page is currently open. Use openBrowser first to open a page.');
   }
+
+  // Setup recorder auto-reinjection if not already set up
+  // Check if page already has navigation listener
+  const listenerCount = lastPage.listenerCount('framenavigated');
+  if (listenerCount === 0) {
+    setupRecorderAutoReinjection(lastPage);
+  }
+
   return lastPage;
 }
 
@@ -312,6 +345,108 @@ async function fetchFigmaAPI(endpoint, figmaToken) {
   }
 
   return response.json();
+}
+
+// Helper function to process screenshot with compression and scaling
+async function processScreenshot(screenshotBuffer, options = {}) {
+  const {
+    maxWidth = 1024,
+    maxHeight = 8000, // API limit is 8000px
+    quality = 80,
+    format = 'auto'
+  } = options;
+
+  // Load image with Jimp
+  const image = await Jimp.read(screenshotBuffer);
+  const originalWidth = image.bitmap.width;
+  const originalHeight = image.bitmap.height;
+  const originalSize = screenshotBuffer.length;
+
+  let processed = false;
+
+  // Apply scaling if needed to fit within maxWidth and maxHeight
+  if (maxWidth !== null || maxHeight !== null) {
+    let newWidth = originalWidth;
+    let newHeight = originalHeight;
+
+    // Calculate scale factors for both dimensions
+    let scaleWidth = 1.0;
+    let scaleHeight = 1.0;
+
+    if (maxWidth !== null && originalWidth > maxWidth) {
+      scaleWidth = maxWidth / originalWidth;
+    }
+
+    if (maxHeight !== null && originalHeight > maxHeight) {
+      scaleHeight = maxHeight / originalHeight;
+    }
+
+    // Use the smaller scale factor to ensure both dimensions fit
+    const scale = Math.min(scaleWidth, scaleHeight);
+
+    if (scale < 1.0) {
+      newWidth = Math.round(originalWidth * scale);
+      newHeight = Math.round(originalHeight * scale);
+      image.resize(newWidth, newHeight);
+      processed = true;
+    }
+  }
+
+  // Determine output format
+  let outputFormat = format;
+  let mimeType = 'image/png';
+
+  if (format === 'auto') {
+    // Auto-select: use JPEG for large images, PNG for small
+    const estimatedSize = image.bitmap.width * image.bitmap.height * 4;
+    outputFormat = estimatedSize > 500000 ? 'jpeg' : 'png'; // ~500KB threshold
+  }
+
+  // Convert to buffer with appropriate format and quality
+  let resultBuffer;
+  if (outputFormat === 'jpeg') {
+    image.quality(quality);
+    resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+    mimeType = 'image/jpeg';
+    processed = true;
+  } else {
+    resultBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
+    mimeType = 'image/png';
+  }
+
+  // Return original if no processing was needed and format is PNG
+  if (!processed && outputFormat === 'png') {
+    return {
+      buffer: screenshotBuffer,
+      mimeType: 'image/png',
+      metadata: {
+        width: originalWidth,
+        height: originalHeight,
+        originalSize,
+        finalSize: screenshotBuffer.length,
+        format: 'png',
+        compressed: false,
+        scaled: false
+      }
+    };
+  }
+
+  return {
+    buffer: resultBuffer,
+    mimeType,
+    metadata: {
+      width: image.bitmap.width,
+      height: image.bitmap.height,
+      originalWidth,
+      originalHeight,
+      originalSize,
+      finalSize: resultBuffer.length,
+      format: outputFormat,
+      compressed: outputFormat === 'jpeg',
+      scaled: processed,
+      compressionRatio: Math.round((1 - resultBuffer.length / originalSize) * 100)
+    }
+  };
 }
 
 // Calculate SSIM (Structural Similarity Index) for image comparison
@@ -425,12 +560,20 @@ const GetBoxModelSchema = z.object({
 const ScreenshotSchema = z.object({
   selector: z.string().describe("CSS selector for element to screenshot"),
   padding: z.number().optional().describe("Padding around element in pixels (default: 0)"),
+  maxWidth: z.number().nullable().optional().describe("Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)"),
+  maxHeight: z.number().nullable().optional().describe("Maximum height in pixels, auto-scales if larger (default: 8000 for API limit, set to null for original size)"),
+  quality: z.number().min(1).max(100).optional().describe("JPEG quality 1-100 (default: 80, only applies to JPEG format)"),
+  format: z.enum(['png', 'jpeg', 'auto']).optional().describe("Image format: 'png', 'jpeg', or 'auto' (default: 'auto' - chooses based on size)"),
 });
 
 const SaveScreenshotSchema = z.object({
   selector: z.string().describe("CSS selector for element to screenshot"),
-  filePath: z.string().describe("Absolute path where to save PNG file"),
+  filePath: z.string().describe("Absolute path where to save file"),
   padding: z.number().optional().describe("Padding around element in pixels (default: 0)"),
+  maxWidth: z.number().nullable().optional().describe("Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)"),
+  maxHeight: z.number().nullable().optional().describe("Maximum height in pixels, auto-scales if larger (default: 8000 for API limit, set to null for original size)"),
+  quality: z.number().min(1).max(100).optional().describe("JPEG quality 1-100 (default: 80, only applies to JPEG format)"),
+  format: z.enum(['png', 'jpeg', 'auto']).optional().describe("Image format: 'png', 'jpeg', or 'auto' (default: 'auto' - chooses based on size)"),
 });
 
 const ScrollToSchema = z.object({
@@ -606,25 +749,33 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "screenshot",
-        description: "Capture a PNG screenshot of a specific element. Perfect for visual documentation, design reviews, and debugging. Supports optional padding to include surrounding context.",
+        description: "Capture an optimized screenshot of a specific element. By default, auto-scales large images to 1024px width and 8000px height (API limit) and uses smart compression to reduce AI context usage. Perfect for visual documentation and design reviews. Use maxWidth: null and format: 'png' for original quality.",
         inputSchema: {
           type: "object",
           properties: {
             selector: { type: "string", description: "CSS selector for element to screenshot" },
             padding: { type: "number", description: "Padding around element in pixels (default: 0)" },
+            maxWidth: { type: "number", description: "Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)" },
+            maxHeight: { type: "number", description: "Maximum height in pixels, auto-scales if larger (default: 8000 for API limit, set to null for original size)" },
+            quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality 1-100 (default: 80, only applies to JPEG format)" },
+            format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Image format: 'png', 'jpeg', or 'auto' (default: 'auto' - chooses based on size)" },
           },
           required: ["selector"],
         },
       },
       {
         name: "saveScreenshot",
-        description: "Save PNG screenshot directly to filesystem. Unlike 'screenshot' tool, this saves to file instead of returning in context. Perfect for baseline screenshots that need to persist.",
+        description: "Save optimized screenshot directly to filesystem without returning in context. By default, auto-scales to 1024px width and 8000px height (API limit) and uses smart compression. Perfect for baseline screenshots and reducing file sizes. Use maxWidth: null and format: 'png' for original quality.",
         inputSchema: {
           type: "object",
           properties: {
             selector: { type: "string", description: "CSS selector for element to screenshot" },
-            filePath: { type: "string", description: "Absolute path where to save PNG (e.g., /path/to/file.png)" },
+            filePath: { type: "string", description: "Absolute path where to save file (extension auto-adjusted based on format)" },
             padding: { type: "number", description: "Padding around element in pixels (default: 0)" },
+            maxWidth: { type: "number", description: "Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)" },
+            maxHeight: { type: "number", description: "Maximum height in pixels, auto-scales if larger (default: 8000 for API limit, set to null for original size)" },
+            quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality 1-100 (default: 80, only applies to JPEG format)" },
+            format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Image format: 'png', 'jpeg', or 'auto' (default: 'auto' - chooses based on size)" },
           },
           required: ["selector", "filePath"],
         },
@@ -1096,14 +1247,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         height: Math.max(box.height + padding * 2, 1)
       };
 
-      const screenshot = await page.screenshot({ clip, encoding: 'base64' });
+      // Take screenshot as buffer
+      const screenshotBuffer = await page.screenshot({ clip, encoding: 'binary' });
+
+      // Process with compression and scaling
+      const processed = await processScreenshot(screenshotBuffer, {
+        maxWidth: validatedArgs.maxWidth ?? 1024,
+        maxHeight: validatedArgs.maxHeight ?? 8000,
+        quality: validatedArgs.quality ?? 80,
+        format: validatedArgs.format ?? 'auto'
+      });
+
+      // Build info message
+      const infoText = `Screenshot captured: ${processed.metadata.width}x${processed.metadata.height} ${processed.metadata.format.toUpperCase()}` +
+        (processed.metadata.scaled ? ` (scaled from ${processed.metadata.originalWidth}x${processed.metadata.originalHeight})` : '') +
+        (processed.metadata.compressed ? ` (${processed.metadata.compressionRatio}% compression)` : '') +
+        `\nSize: ${(processed.metadata.finalSize / 1024).toFixed(1)}KB` +
+        (processed.metadata.originalSize !== processed.metadata.finalSize ?
+          ` (original: ${(processed.metadata.originalSize / 1024).toFixed(1)}KB)` : '');
 
       return {
         content: [
           {
+            type: "text",
+            text: infoText
+          },
+          {
             type: "image",
-            data: screenshot,
-            mimeType: "image/png"
+            data: processed.buffer.toString('base64'),
+            mimeType: processed.mimeType
           }
         ],
       };
@@ -1134,18 +1306,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Get screenshot as buffer (not base64)
       const screenshotBuffer = await page.screenshot({ clip, encoding: 'binary' });
 
+      // Process with compression and scaling
+      const processed = await processScreenshot(screenshotBuffer, {
+        maxWidth: validatedArgs.maxWidth ?? 1024,
+        maxHeight: validatedArgs.maxHeight ?? 8000,
+        quality: validatedArgs.quality ?? 80,
+        format: validatedArgs.format ?? 'auto'
+      });
+
       // Ensure directory exists
       const dir = dirname(validatedArgs.filePath);
       mkdirSync(dir, { recursive: true });
 
       // Save to file
-      writeFileSync(validatedArgs.filePath, screenshotBuffer);
+      writeFileSync(validatedArgs.filePath, processed.buffer);
+
+      const infoText = `Screenshot saved to: ${validatedArgs.filePath}\n` +
+        `Dimensions: ${processed.metadata.width}x${processed.metadata.height}\n` +
+        `Format: ${processed.metadata.format.toUpperCase()}\n` +
+        `Size: ${(processed.metadata.finalSize / 1024).toFixed(1)}KB` +
+        (processed.metadata.scaled ? ` (scaled from ${processed.metadata.originalWidth}x${processed.metadata.originalHeight})` : '') +
+        (processed.metadata.compressed ? `\nCompression: ${processed.metadata.compressionRatio}% saved` : '');
 
       return {
         content: [
           {
             type: "text",
-            text: `Screenshot saved to: ${validatedArgs.filePath}\nSize: ${screenshotBuffer.length} bytes`
+            text: infoText
           }
         ],
       };
@@ -1995,12 +2182,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const page = await getLastOpenPage();
       const result = await injectRecorder(page);
 
+      // Track this page as having recorder enabled
+      if (result.success) {
+        pagesWithRecorder.add(page);
+      }
+
       return {
         content: [{
           type: 'text',
           text: JSON.stringify(result.success ? {
             success: true,
-            message: "Recorder UI injected into page. Click 'Start' to begin recording."
+            message: "Recorder UI injected into page. Click 'Start' to begin recording. Recorder will auto-reinject on page navigation/reload."
           } : {
             success: false,
             error: result.error
