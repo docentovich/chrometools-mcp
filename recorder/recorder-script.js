@@ -533,20 +533,82 @@ export function generateRecorderScript() {
     // DO NOT prevent default - let clicks work normally
     // Just record them without blocking
 
-    const selectorInfo = selectorGenerator.generateSelectorForElement(e.target);
-    const form = e.target.closest('form');
+    // Find the actual clickable element (element with click listener or interactive role)
+    const actualTarget = findActualClickTarget(e.target);
+    const selectorInfo = selectorGenerator.generateSelectorForElement(actualTarget);
+    const form = actualTarget.closest('form');
 
     recordAction({
       type: 'click',
       selector: selectorInfo,
       timestamp: Date.now(),
       data: {
-        text: e.target.textContent?.trim().substring(0, 50) || '',
-        href: e.target.href || null
+        text: actualTarget.textContent?.trim().substring(0, 50) || '',
+        href: actualTarget.href || null,
+        requiresWait: true // Flag for smart waiting during playback
       }
     });
 
-    highlightElement(e.target);
+    highlightElement(actualTarget);
+  }
+
+  // Find the actual clickable element by looking for click listeners
+  function findActualClickTarget(element) {
+    let current = element;
+    const maxDepth = 5; // Don't go too far up the tree
+    let depth = 0;
+
+    while (current && current !== document.body && depth < maxDepth) {
+      // Check if this element has event listeners
+      const hasClickListener = hasEventListener(current, 'click');
+
+      // Check if element is naturally interactive
+      const isInteractive = current.tagName === 'A' ||
+                           current.tagName === 'BUTTON' ||
+                           current.getAttribute('role') === 'button' ||
+                           current.getAttribute('role') === 'link' ||
+                           current.hasAttribute('onclick') ||
+                           current.style.cursor === 'pointer';
+
+      if (hasClickListener || isInteractive) {
+        return current;
+      }
+
+      current = current.parentElement;
+      depth++;
+    }
+
+    // If no clickable parent found, return original element
+    return element;
+  }
+
+  // Check if element has specific event listener
+  function hasEventListener(element, eventType) {
+    // Try to detect listeners through getEventListeners (Chrome DevTools API)
+    if (typeof getEventListeners === 'function') {
+      try {
+        const listeners = getEventListeners(element);
+        return listeners && listeners[eventType] && listeners[eventType].length > 0;
+      } catch (e) {
+        // getEventListeners not available
+      }
+    }
+
+    // Fallback: check common indicators
+    // Check onclick attribute
+    if (element.hasAttribute('onclick')) return true;
+
+    // Check for common event handler properties
+    if (element.onclick) return true;
+
+    // Check if element has data attributes that suggest it's interactive
+    if (element.hasAttribute('data-action') ||
+        element.hasAttribute('data-click') ||
+        element.hasAttribute('data-toggle')) {
+      return true;
+    }
+
+    return false;
   }
 
   let lastInputValue = new Map();

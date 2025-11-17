@@ -82,7 +82,10 @@ AI: smartFindElement("login button")
 ### Features
 
 - **Visual Widget** - Floating recorder UI with compact mode (50x50px minimize button)
-- **Auto-Reinjection** - Recorder persists across page reloads/navigation automatically ⭐ **NEW**
+- **Auto-Reinjection** - Recorder persists across page reloads/navigation automatically
+- **Smart Click Detection** - Finds actual clickable parent elements with event listeners ⭐ **NEW**
+- **Smart Waiters** - 2s minimum + animation/network/DOM change detection after clicks ⭐ **NEW**
+- **Detailed Error Reports** - Comprehensive failure analysis with context and suggestions ⭐ **NEW**
 - **Smart Recording** - Captures clicks, typing, navigation with intelligent optimization
 - **Secret Detection** - Auto-detects passwords/emails and stores them securely
 - **Action Optimization** - Combines sequential actions, removes duplicates
