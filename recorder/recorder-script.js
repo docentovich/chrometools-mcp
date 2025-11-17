@@ -38,13 +38,154 @@ export function generateRecorderScript() {
     secrets: {},
     lastActionTime: 0,
     isCompact: false, // Widget compact mode
+    startUrl: null, // URL when recording started
+    endUrl: null, // URL when recording ended
     scenarioMetadata: {
       name: '',
       description: '',
       tags: [],
       dependencies: []
-    }
+    },
+    // Track hovers that are candidates for deletion
+    hoverDeletionCandidates: new Set()
   };
+
+  // Track click listeners on elements (to detect if click follows hover)
+  const elementClickTracker = new WeakMap();
+
+  // LocalStorage key for persistence
+  const STORAGE_KEY = 'chrometools-recorder-state';
+  const CLEARING_FLAG_KEY = 'chrometools-recorder-clearing';
+
+  // ==========================
+  // STATE PERSISTENCE
+  // ==========================
+
+  function saveStateToLocalStorage() {
+    try {
+      // Check global clearing flag (across all instances)
+      const globalClearing = localStorage.getItem(CLEARING_FLAG_KEY);
+      if (globalClearing === 'true') {
+        return;
+      }
+
+      // Don't save if we're in the process of clearing
+      if (isClearing) {
+        return;
+      }
+
+      // Don't save if we're not recording and have no actions (clean state)
+      if (!state.isRecording && state.actions.length === 0) {
+        return; // Don't persist empty state
+      }
+
+      const persistentState = {
+        isRecording: state.isRecording,
+        isPaused: state.isPaused,
+        actions: state.actions,
+        secrets: state.secrets,
+        startUrl: state.startUrl,
+        endUrl: state.endUrl,
+        isCompact: state.isCompact,
+        scenarioMetadata: state.scenarioMetadata,
+        hoverDeletionCandidates: Array.from(state.hoverDeletionCandidates),
+        timestamp: Date.now()
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistentState));
+    } catch (error) {
+      console.error('[Recorder] Failed to save state:', error);
+    }
+  }
+
+  function loadStateFromLocalStorage() {
+    try {
+      // Check if we're in clearing mode
+      const globalClearing = localStorage.getItem(CLEARING_FLAG_KEY);
+      if (globalClearing === 'true') {
+        return null;
+      }
+
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return null;
+
+      const persistentState = JSON.parse(saved);
+
+      // Check if state is not too old (max 24 hours)
+      const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+      if (Date.now() - persistentState.timestamp > maxAge) {
+        clearStateFromLocalStorage();
+        resetClearingFlag();
+        return null;
+      }
+
+      return persistentState;
+    } catch (error) {
+      console.error('[Recorder] Failed to load state:', error);
+      return null;
+    }
+  }
+
+  function clearStateFromLocalStorage() {
+    try {
+      // Set global flag first to block all saves (PERMANENTLY - only reset on new recording start)
+      localStorage.setItem(CLEARING_FLAG_KEY, 'true');
+      // Then remove state
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (error) {
+      console.error('[Recorder] Failed to clear state:', error);
+    }
+  }
+
+  function resetClearingFlag() {
+    try {
+      localStorage.removeItem(CLEARING_FLAG_KEY);
+    } catch (error) {
+      console.error('[Recorder] Failed to reset clearing flag:', error);
+    }
+  }
+
+  // Flag to prevent saving after explicit clear
+  let isClearing = false;
+
+  function restoreState(savedState) {
+    state.isRecording = savedState.isRecording;
+    state.isPaused = savedState.isPaused;
+    state.actions = savedState.actions || [];
+    state.secrets = savedState.secrets || {};
+    state.startUrl = savedState.startUrl;
+    state.endUrl = savedState.endUrl;
+    state.isCompact = savedState.isCompact || false;
+    state.scenarioMetadata = savedState.scenarioMetadata || {
+      name: '',
+      description: '',
+      tags: [],
+      dependencies: []
+    };
+    state.hoverDeletionCandidates = new Set(savedState.hoverDeletionCandidates || []);
+
+    // Restore UI state
+    updateUIState();
+    updateActionsList();
+
+    // Restore compact mode
+    if (state.isCompact) {
+      const widget = document.getElementById('chrometools-recorder');
+      widget.classList.add('compact');
+    }
+
+    // Restore metadata form
+    document.getElementById('recorder-scenario-name').value = state.scenarioMetadata.name || '';
+    document.getElementById('recorder-scenario-desc').value = state.scenarioMetadata.description || '';
+    document.getElementById('recorder-scenario-tags').value = state.scenarioMetadata.tags.join(', ');
+
+    // Note: updateDependencyOptions() is called in initializeRecorder() with setTimeout
+    // to ensure DOM is fully ready
+
+    // If was recording, re-attach listeners
+    if (state.isRecording) {
+      attachEventListeners();
+    }
+  }
 
   // Selector generator (injected)
   ${browserSelectorGenerator}
@@ -268,7 +409,8 @@ export function generateRecorderScript() {
           border-bottom: 1px solid rgba(255, 255, 255, 0.2);
         }
 
-        #chrometools-recorder-metadata input {
+        #chrometools-recorder-metadata input,
+        #chrometools-recorder-metadata select {
           width: 100%;
           padding: 12px 8px;
           margin-bottom: 8px;
@@ -283,6 +425,22 @@ export function generateRecorderScript() {
         #chrometools-recorder-metadata input::placeholder {
           color: #6b7280;
           opacity: 0.8;
+        }
+
+        #chrometools-recorder-metadata select {
+          cursor: pointer;
+        }
+
+        #chrometools-recorder-metadata select option {
+          padding: 8px;
+        }
+
+        #recorder-dependency-info {
+          font-size: 11px;
+          color: rgba(255, 255, 255, 0.7);
+          margin-top: -4px;
+          margin-bottom: 8px;
+          padding-left: 4px;
         }
 
         .recorder-collapse {
@@ -313,6 +471,10 @@ export function generateRecorderScript() {
         <input type="text" id="recorder-scenario-name" placeholder="Scenario Name" />
         <input type="text" id="recorder-scenario-desc" placeholder="Description (optional)" />
         <input type="text" id="recorder-scenario-tags" placeholder="Tags (comma-separated)" />
+        <select id="recorder-scenario-dependency">
+          <option value="">No dependency</option>
+        </select>
+        <div id="recorder-dependency-info"></div>
       </div>
 
       <div id="chrometools-recorder-controls">
@@ -329,6 +491,12 @@ export function generateRecorderScript() {
         </div>
       </div>
     \`;
+
+    // Ensure body exists before appending
+    if (!document.body) {
+      console.error('[Recorder] ERROR: document.body is null, cannot create UI');
+      throw new Error('Cannot create recorder UI: document.body is null');
+    }
 
     document.body.appendChild(recorderUI);
 
@@ -379,6 +547,8 @@ export function generateRecorderScript() {
     } else {
       widget.classList.remove('compact');
     }
+
+    saveStateToLocalStorage(); // Persist compact state
   }
 
   function makeDraggable(element) {
@@ -413,15 +583,23 @@ export function generateRecorderScript() {
   // ==========================
 
   function startRecording() {
+    // Reset clearing flag - new recording can now save
+    resetClearingFlag();
+    isClearing = false;
+
     state.isRecording = true;
     state.isPaused = false;
+    state.startUrl = window.location.href; // Capture entry URL
+    state.endUrl = null;
     updateUIState();
     attachEventListeners();
+    saveStateToLocalStorage(); // Persist recording state
   }
 
   function togglePause() {
     state.isPaused = !state.isPaused;
     updateUIState();
+    saveStateToLocalStorage(); // Persist pause state
   }
 
   function stopRecording() {
@@ -430,9 +608,13 @@ export function generateRecorderScript() {
     state.isPaused = false;
     updateUIState();
     detachEventListeners();
+    clearStateFromLocalStorage(); // Clear persistence when stopping without save
   }
 
   async function stopAndSave() {
+    // Capture exit URL
+    state.endUrl = window.location.href;
+
     // Check if scenario name is entered BEFORE stopping
     const scenarioName = document.getElementById('recorder-scenario-name').value.trim();
 
@@ -445,6 +627,10 @@ export function generateRecorderScript() {
       }
       // Focus on name input
       document.getElementById('recorder-scenario-name').focus();
+
+      // Load and update dependency options
+      await updateDependencyOptions();
+
       return; // Don't stop recording yet!
     }
 
@@ -453,13 +639,85 @@ export function generateRecorderScript() {
     state.isPaused = false;
     updateUIState();
     detachEventListeners();
+
+    // Clean up useless hovers before saving
+    cleanupUselessHovers();
+
     await saveScenario();
+  }
+
+  // Update dependency dropdown with matching scenarios
+  async function updateDependencyOptions() {
+    try {
+      // Request scenario list from MCP server
+      if (!window.listScenariosFromMCP) {
+        console.warn('MCP listScenarios function not available');
+        return;
+      }
+
+      const result = await window.listScenariosFromMCP();
+
+      if (!result.success || !result.scenarios) {
+        console.warn('Failed to load scenarios for dependency matching');
+        return;
+      }
+
+      const scenarios = result.scenarios;
+      const select = document.getElementById('recorder-scenario-dependency');
+      const infoDiv = document.getElementById('recorder-dependency-info');
+
+      // Clear existing options except first
+      select.innerHTML = '<option value="">No dependency</option>';
+      infoDiv.textContent = '';
+
+      // Show all scenarios (no filtering)
+      if (scenarios.length > 0) {
+        scenarios.forEach(scenario => {
+          const option = document.createElement('option');
+          option.value = scenario.name;
+          // Show scenario name and exit URL if available
+          const exitUrlText = scenario.metadata?.exitUrl ? \` → \${scenario.metadata.exitUrl}\` : '';
+          option.textContent = \`\${scenario.name}\${exitUrlText}\`;
+          select.appendChild(option);
+        });
+
+        infoDiv.textContent = \`\${scenarios.length} scenario(s) available\`;
+      } else {
+        infoDiv.textContent = 'No scenarios found';
+      }
+
+    } catch (error) {
+      console.error('Error updating dependency options:', error);
+    }
+  }
+
+  // Remove hovers that are still marked as deletion candidates
+  function cleanupUselessHovers() {
+    if (state.hoverDeletionCandidates.size === 0) {
+      return; // Nothing to clean
+    }
+
+    // Filter out hovers that are deletion candidates
+    const indicesToDelete = Array.from(state.hoverDeletionCandidates).sort((a, b) => b - a);
+
+    indicesToDelete.forEach(index => {
+      if (index < state.actions.length && state.actions[index]?.type === 'hover') {
+        state.actions.splice(index, 1);
+      }
+    });
+
+    // Clear the set
+    state.hoverDeletionCandidates.clear();
+
+    console.log(\`Cleaned up \${indicesToDelete.length} useless hover events\`);
   }
 
   function clearActions() {
     state.actions = [];
     state.secrets = {};
+    state.hoverDeletionCandidates.clear();
     updateActionsList();
+    saveStateToLocalStorage(); // Persist cleared state
   }
 
   function updateUIState() {
@@ -538,6 +796,13 @@ export function generateRecorderScript() {
     const selectorInfo = selectorGenerator.generateSelectorForElement(actualTarget);
     const form = actualTarget.closest('form');
 
+    // Mark any hovers on this element or parent chain as NOT candidates for deletion
+    // (because click happened after hover - it's a meaningful hover)
+    markHoversAsUseful(actualTarget);
+
+    // Setup click tracking on this element (for future hover filtering)
+    setupClickTracking(actualTarget);
+
     recordAction({
       type: 'click',
       selector: selectorInfo,
@@ -550,6 +815,55 @@ export function generateRecorderScript() {
     });
 
     highlightElement(actualTarget);
+  }
+
+  // Setup click tracking on element to detect future clicks
+  function setupClickTracking(element) {
+    // Check if already has our tracking listener
+    if (elementClickTracker.has(element)) {
+      return; // Already tracked
+    }
+
+    // Create a capture listener that marks hovers as useful
+    const clickHandler = function(e) {
+      // Mark any recent hovers on this element as useful
+      markHoversAsUseful(element);
+    };
+
+    // Add listener in capture phase (before any other handlers)
+    element.addEventListener('click', clickHandler, { capture: true, passive: true });
+
+    // Track that we added the listener
+    elementClickTracker.set(element, clickHandler);
+  }
+
+  // Mark hovers on this element (and parents) as NOT candidates for deletion
+  function markHoversAsUseful(element) {
+    // Look through recent actions and remove hovers from deletion candidates
+    const selector = selectorGenerator.generateSelectorForElement(element);
+    const primarySelector = selector.primary;
+
+    // Also check parent selectors (for bubbling)
+    let current = element;
+    const selectorsToCheck = [primarySelector];
+
+    // Collect parent selectors
+    for (let i = 0; i < 3 && current.parentElement; i++) {
+      current = current.parentElement;
+      const parentSelector = selectorGenerator.generateSelectorForElement(current);
+      selectorsToCheck.push(parentSelector.primary);
+    }
+
+    // Remove matching hovers from deletion candidates
+    state.hoverDeletionCandidates.forEach(actionIndex => {
+      const action = state.actions[actionIndex];
+      if (action && action.type === 'hover') {
+        const hoverSelector = action.selector.primary || action.selector.value;
+        if (selectorsToCheck.includes(hoverSelector)) {
+          state.hoverDeletionCandidates.delete(actionIndex);
+        }
+      }
+    });
   }
 
   // Find the actual clickable element by looking for click listeners
@@ -745,12 +1059,18 @@ export function generateRecorderScript() {
       if (hasHoverEffect) {
         const selectorInfo = selectorGenerator.generateSelectorForElement(e.target);
 
+        // Record hover action
+        const actionIndex = state.actions.length;
         recordAction({
           type: 'hover',
           selector: selectorInfo,
           timestamp: Date.now(),
           data: {}
         });
+
+        // Mark this hover as a candidate for deletion
+        // It will be removed from candidates if a click happens on same/child element
+        state.hoverDeletionCandidates.add(actionIndex);
       }
 
       lastHoverTarget = e.target;
@@ -849,6 +1169,7 @@ export function generateRecorderScript() {
   function recordAction(action) {
     state.actions.push(action);
     updateActionsList();
+    saveStateToLocalStorage(); // Persist after each action
   }
 
   function updateActionsList() {
@@ -924,13 +1245,20 @@ export function generateRecorderScript() {
       return;
     }
 
+    // Get selected dependency
+    const dependencySelect = document.getElementById('recorder-scenario-dependency');
+    const selectedDependency = dependencySelect.value;
+    const dependencies = selectedDependency ? [{ scenario: selectedDependency }] : [];
+
     const metadata = {
       name: scenarioName,
       description: document.getElementById('recorder-scenario-desc').value.trim(),
       tags: document.getElementById('recorder-scenario-tags').value.split(',').map(t => t.trim()).filter(Boolean),
-      dependencies: [], // Will be set via UI later
+      dependencies,
       parameters: extractParameters(),
-      outputs: []
+      outputs: [],
+      entryUrl: state.startUrl, // URL when recording started
+      exitUrl: state.endUrl // URL when recording stopped
     };
 
     // Optimize actions before saving
@@ -948,8 +1276,45 @@ export function generateRecorderScript() {
       try {
         const result = await window.saveScenarioToMCP(scenario);
         if (result.success) {
+          // Set clearing flag to prevent any saves during cleanup
+          isClearing = true;
+
           alert(\`Scenario "\${scenarioName}" saved successfully!\`);
-          clearActions();
+
+          // Clear state
+          state.isRecording = false;
+          state.isPaused = false;
+          state.actions = [];
+          state.secrets = {};
+          state.hoverDeletionCandidates.clear();
+          state.startUrl = null;
+          state.endUrl = null;
+          state.scenarioMetadata = {
+            name: '',
+            description: '',
+            tags: [],
+            dependencies: []
+          };
+
+          // Clear UI
+          updateUIState();
+          updateActionsList();
+          document.getElementById('recorder-scenario-name').value = '';
+          document.getElementById('recorder-scenario-desc').value = '';
+          document.getElementById('recorder-scenario-tags').value = '';
+
+          // Clear localStorage (flag stays set until new recording starts)
+          clearStateFromLocalStorage();
+
+          // Keep clearing for a bit longer to catch any delayed saves from other instances
+          setTimeout(() => {
+            clearStateFromLocalStorage(); // Double clear after 200ms
+          }, 200);
+
+          setTimeout(() => {
+            clearStateFromLocalStorage(); // Triple clear after 500ms
+            isClearing = false;
+          }, 500);
         } else {
           alert(\`Error saving scenario: \${result.error}\`);
         }
@@ -1093,37 +1458,74 @@ export function generateRecorderScript() {
   // INITIALIZATION
   // ==========================
 
-  // Check if recorder already exists
-  if (document.getElementById('chrometools-recorder')) {
-    console.warn('⚠️  Chrometools Recorder already initialized on this page');
-    // Return existing control interface if available
-    if (window.__chrometoolsRecorderInstance) {
-      return window.__chrometoolsRecorderInstance;
-    }
-    // If widget exists but no instance, clean it up first
+  // Strict check: if recorder instance AND widget both exist, return existing instance
+  if (window.__chrometoolsRecorderInstance && document.getElementById('chrometools-recorder')) {
+    return window.__chrometoolsRecorderInstance;
+  }
+
+  // If instance exists but widget is missing (page navigation), clean up and reinitialize
+  if (window.__chrometoolsRecorderInstance && !document.getElementById('chrometools-recorder')) {
+    delete window.__chrometoolsRecorderInstance;
+  }
+
+  // If widget exists but instance was lost (shouldn't happen, but handle it)
+  if (!window.__chrometoolsRecorderInstance && document.getElementById('chrometools-recorder')) {
     const existingWidget = document.getElementById('chrometools-recorder');
     existingWidget.remove();
     const existingHighlight = document.querySelector('.recorder-highlight');
     if (existingHighlight) existingHighlight.remove();
   }
 
-  createRecorderUI();
-  console.log('✅ Chrometools Recorder initialized');
+  // Initialize recorder UI
+  function initializeRecorder() {
+    createRecorderUI();
+    console.log('✅ Chrometools Recorder initialized');
 
-  // Return control interface and store globally
-  const controlInterface = {
-    start: startRecording,
-    stop: stopAndSave,
-    pause: togglePause,
-    clear: clearActions,
-    getState: () => ({ ...state }),
-    getActions: () => [...state.actions]
-  };
+    // Try to restore previous recording session
+    const savedState = loadStateFromLocalStorage();
+    if (savedState) {
+      restoreState(savedState);
+    } else {
+      // No saved state but clearing flag might be set - reset it for fresh start
+      const clearingFlag = localStorage.getItem(CLEARING_FLAG_KEY);
+      if (clearingFlag === 'true') {
+        resetClearingFlag();
+      }
+    }
 
-  // Store instance globally to prevent duplicates
-  window.__chrometoolsRecorderInstance = controlInterface;
+    // Update dependency options after UI is fully initialized
+    // Use setTimeout to ensure DOM is ready
+    setTimeout(() => {
+      updateDependencyOptions().catch(err => {
+        console.error('[Recorder] Failed to update dependencies on init:', err);
+      });
+    }, 100);
 
-  return controlInterface;
+    // Return control interface and store globally
+    const controlInterface = {
+      start: startRecording,
+      stop: stopAndSave,
+      pause: togglePause,
+      clear: clearActions,
+      getState: () => ({ ...state }),
+      getActions: () => [...state.actions]
+    };
+
+    // Store instance globally to prevent duplicates
+    window.__chrometoolsRecorderInstance = controlInterface;
+
+    return controlInterface;
+  }
+
+  // Wait for DOM to be ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      return initializeRecorder();
+    });
+  } else {
+    // DOM already ready
+    return initializeRecorder();
+  }
 })();
 `;
 }
@@ -1158,11 +1560,28 @@ export async function injectRecorder(page) {
       return typeof window.saveScenarioToMCP === 'function';
     });
 
-    // Only expose function if it doesn't exist yet
+    // Only expose functions if they don't exist yet
     if (!functionExists) {
       await page.exposeFunction('saveScenarioToMCP', async (scenarioData) => {
         const { saveScenario } = await import('./scenario-storage.js');
         return await saveScenario(scenarioData);
+      });
+
+      await page.exposeFunction('listScenariosFromMCP', async () => {
+        const { loadIndex } = await import('./scenario-storage.js');
+        try {
+          const index = await loadIndex();
+          return {
+            success: true,
+            scenarios: Object.values(index)
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error.message,
+            scenarios: []
+          };
+        }
       });
     }
 

@@ -17,11 +17,12 @@ import { loadScenario, loadSecrets, loadIndex } from './scenario-storage.js';
  * @param {string} scenarioName - Scenario to execute
  * @param {Object} page - Puppeteer page instance
  * @param {Object} params - Parameters for scenario
- * @param {Object} options - Execution options { skipConditions, maxRetries }
+ * @param {Object} options - Execution options { executeDependencies, skipConditions, maxRetries, timeout }
  * @returns {Object} - Execution result
  */
 export async function executeScenario(scenarioName, page, params = {}, options = {}) {
   const {
+    executeDependencies = true,  // NEW: Execute dependencies by default
     skipConditions = false,
     maxRetries = 3,
     timeout = 30000
@@ -42,15 +43,19 @@ export async function executeScenario(scenarioName, page, params = {}, options =
     // Load scenario index
     const scenarioIndex = await loadIndex();
 
-    // Resolve dependencies
-    const resolution = resolveDependencies(scenarioName, scenarioIndex, { skipConditions });
+    let chain = [scenarioName]; // Default: execute only the requested scenario
 
-    if (resolution.errors.length > 0) {
-      result.errors = resolution.errors;
-      return result;
+    // Resolve and execute dependencies if enabled
+    if (executeDependencies) {
+      const resolution = resolveDependencies(scenarioName, scenarioIndex, { skipConditions });
+
+      if (resolution.errors.length > 0) {
+        result.errors.push(...resolution.errors);
+        return result;
+      }
+
+      chain = resolution.chain; // Use full dependency chain
     }
-
-    const { chain } = resolution;
 
     // Execute chain in order
     for (const name of chain) {
@@ -499,16 +504,29 @@ async function executeClick(action, page, timeout) {
  * Smart waiting after click - waits for animations and network requests
  */
 async function smartWaitAfterClick(page, action, timeout) {
-  const minWaitTime = 2000; // Minimum 2 seconds
   const startTime = Date.now();
-
-  // Wait minimum time (2 seconds)
-  await new Promise(resolve => setTimeout(resolve, minWaitTime));
-
   const maxWaitTime = timeout || 30000;
-  const endTime = startTime + maxWaitTime;
 
   try {
+    // Initial wait 500ms to let page respond
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Check if there's any activity (animations, network, DOM changes)
+    const hasActivity = await checkPageActivity(page);
+
+    if (!hasActivity) {
+      // No activity detected - we're done, fast exit
+      console.log('[Smart Wait] No activity detected, skipping extended wait');
+      return;
+    }
+
+    // Activity detected - wait minimum 2 seconds
+    console.log('[Smart Wait] Activity detected, waiting for completion');
+    const remainingMinWait = 2000 - 500; // Already waited 500ms
+    if (remainingMinWait > 0) {
+      await new Promise(resolve => setTimeout(resolve, remainingMinWait));
+    }
+
     // Wait for animations to complete
     await page.evaluate(() => {
       return new Promise((resolve) => {
@@ -536,8 +554,8 @@ async function smartWaitAfterClick(page, action, timeout) {
           }
         };
 
-        // Start checking after a short delay
-        setTimeout(checkAnimations, 100);
+        // Start checking immediately
+        checkAnimations();
         // Timeout after 3 seconds
         setTimeout(resolve, 3000);
       });
@@ -591,6 +609,88 @@ async function smartWaitAfterClick(page, action, timeout) {
   const elapsed = Date.now() - startTime;
   if (elapsed > maxWaitTime) {
     console.warn(`[Smart Wait] Exceeded max wait time (${maxWaitTime}ms)`);
+  }
+}
+
+/**
+ * Check if page has any ongoing activity (animations, network, DOM changes)
+ * Returns true if activity detected, false otherwise
+ */
+async function checkPageActivity(page) {
+  try {
+    const activity = await page.evaluate(() => {
+      // Check for animations
+      const elements = document.querySelectorAll('*');
+      for (const el of elements) {
+        const computedStyle = window.getComputedStyle(el);
+        const animations = computedStyle.getPropertyValue('animation-name');
+        const transitions = computedStyle.getPropertyValue('transition-property');
+
+        if ((animations && animations !== 'none') ||
+            (transitions && transitions !== 'none' && transitions !== 'all')) {
+          return { hasActivity: true, reason: 'animations' };
+        }
+      }
+
+      // Check for recent DOM changes (using performance API)
+      if (window.performance && window.performance.getEntriesByType) {
+        const entries = window.performance.getEntriesByType('measure');
+        if (entries.length > 0) {
+          const recentEntries = entries.filter(e =>
+            performance.now() - e.startTime < 500
+          );
+          if (recentEntries.length > 0) {
+            return { hasActivity: true, reason: 'performance_measures' };
+          }
+        }
+      }
+
+      return { hasActivity: false, reason: 'none' };
+    });
+
+    if (activity.hasActivity) {
+      console.log(`[Smart Wait] Activity detected: ${activity.reason}`);
+      return true;
+    }
+
+    // Check for pending network requests using CDP
+    try {
+      const client = await page.target().createCDPSession();
+      await client.send('Network.enable');
+
+      // Give a moment for network requests to start
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const hasNetworkActivity = await new Promise((resolve) => {
+        let requestCount = 0;
+
+        const requestListener = () => {
+          requestCount++;
+        };
+
+        client.on('Network.requestWillBeSent', requestListener);
+
+        setTimeout(() => {
+          client.off('Network.requestWillBeSent', requestListener);
+          client.detach().catch(() => {});
+          resolve(requestCount > 0);
+        }, 200);
+      });
+
+      if (hasNetworkActivity) {
+        console.log('[Smart Wait] Network activity detected');
+        return true;
+      }
+    } catch (netError) {
+      // Network check failed, assume no activity
+      console.log('[Smart Wait] Network check failed, assuming no activity');
+    }
+
+    return false;
+  } catch (error) {
+    // If check fails, assume there's activity to be safe
+    console.error('[Smart Wait] Activity check failed, assuming activity exists:', error.message);
+    return true;
   }
 }
 

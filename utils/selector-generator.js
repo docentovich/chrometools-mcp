@@ -256,52 +256,114 @@ export const browserSelectorGenerator = `
       info.nthOfType = sameTags.indexOf(element) + 1;
     }
 
-    // Generate selectors (same logic as server-side)
-    const selectors = [];
+    // Helper: Check if selector is unique
+    function isUnique(selector) {
+      try {
+        const matches = document.querySelectorAll(selector);
+        return matches.length === 1 && matches[0] === element;
+      } catch (e) {
+        return false;
+      }
+    }
 
-    // ID
+    // Generate and validate selectors by priority
+    const candidates = [];
+
+    // Priority 1: ID (if exists and unique)
     if (info.id && !/^[0-9]/.test(info.id)) {
-      selectors.push('#' + CSS.escape(info.id));
+      const idSelector = '#' + CSS.escape(info.id);
+      if (isUnique(idSelector)) {
+        candidates.push(idSelector);
+      }
     }
 
-    // Data attributes
+    // Priority 2: data-testid (testing best practice)
     if (info.dataTestId) {
-      selectors.push('[data-testid="' + CSS.escape(info.dataTestId) + '"]');
+      const testIdSelector = '[data-testid="' + CSS.escape(info.dataTestId) + '"]';
+      if (isUnique(testIdSelector)) {
+        candidates.push(testIdSelector);
+      }
     }
+
+    // Priority 3: data-test
     if (info.dataTest) {
-      selectors.push('[data-test="' + CSS.escape(info.dataTest) + '"]');
+      const dataTestSelector = '[data-test="' + CSS.escape(info.dataTest) + '"]';
+      if (isUnique(dataTestSelector)) {
+        candidates.push(dataTestSelector);
+      }
     }
 
-    // Name
-    if (info.name) {
-      selectors.push(info.tagName.toLowerCase() + '[name="' + CSS.escape(info.name) + '"]');
-    }
-
-    // Classes (stable only)
+    // Priority 4: Unique class combination
     if (info.classes.length > 0) {
       const stableClasses = info.classes.filter(cls => {
-        return !/\\d{4,}/.test(cls) && cls.length >= 2 &&
+        return !/\\\\\\\\d{4,}/.test(cls) && cls.length >= 2 &&
                !['active', 'visible', 'hidden', 'open', 'closed'].includes(cls);
       });
 
-      if (stableClasses.length > 0) {
-        const classString = stableClasses.slice(0, 3).map(cls => '.' + CSS.escape(cls)).join('');
-        selectors.push(info.tagName.toLowerCase() + classString);
+      // Try single class first
+      for (const cls of stableClasses) {
+        const singleClassSelector = info.tagName.toLowerCase() + '.' + CSS.escape(cls);
+        if (isUnique(singleClassSelector)) {
+          candidates.push(singleClassSelector);
+          break; // Found unique single class, use it
+        }
+      }
+
+      // If no unique single class, try combinations
+      if (candidates.length === 0 && stableClasses.length > 1) {
+        for (let i = 2; i <= Math.min(stableClasses.length, 3); i++) {
+          const classString = stableClasses.slice(0, i).map(cls => '.' + CSS.escape(cls)).join('');
+          const multiClassSelector = info.tagName.toLowerCase() + classString;
+          if (isUnique(multiClassSelector)) {
+            candidates.push(multiClassSelector);
+            break;
+          }
+        }
       }
     }
 
-    // Position-based
+    // Priority 5: Name attribute (for forms)
+    if (info.name) {
+      const nameSelector = info.tagName.toLowerCase() + '[name="' + CSS.escape(info.name) + '"]';
+      if (isUnique(nameSelector)) {
+        candidates.push(nameSelector);
+      }
+    }
+
+    // Priority 6: Attribute combinations (role, aria-label, etc.)
+    if (info.role || info.ariaLabel || info.placeholder) {
+      const attrParts = [info.tagName.toLowerCase()];
+      if (info.role) attrParts.push('[role="' + CSS.escape(info.role) + '"]');
+      if (info.ariaLabel) attrParts.push('[aria-label="' + CSS.escape(info.ariaLabel) + '"]');
+      if (info.placeholder) attrParts.push('[placeholder="' + CSS.escape(info.placeholder) + '"]');
+
+      const attrSelector = attrParts.join('');
+      if (isUnique(attrSelector)) {
+        candidates.push(attrSelector);
+      }
+    }
+
+    // Priority 7: Position-based (last resort)
     if (info.parentSelector) {
       if (info.nthOfType) {
-        selectors.push(info.parentSelector + ' > ' + info.tagName.toLowerCase() + ':nth-of-type(' + info.nthOfType + ')');
+        const nthTypeSelector = info.parentSelector + ' > ' + info.tagName.toLowerCase() + ':nth-of-type(' + info.nthOfType + ')';
+        candidates.push(nthTypeSelector);
       } else if (info.nthChild) {
-        selectors.push(info.parentSelector + ' > ' + info.tagName.toLowerCase() + ':nth-child(' + info.nthChild + ')');
+        const nthChildSelector = info.parentSelector + ' > ' + info.tagName.toLowerCase() + ':nth-child(' + info.nthChild + ')';
+        candidates.push(nthChildSelector);
       }
+    }
+
+    // Fallback: just tag name with nth-of-type from body
+    if (candidates.length === 0) {
+      const allOfType = Array.from(document.querySelectorAll(info.tagName.toLowerCase()));
+      const index = allOfType.indexOf(element) + 1;
+      candidates.push(info.tagName.toLowerCase() + ':nth-of-type(' + index + ')');
     }
 
     return {
-      primary: selectors[0] || info.tagName.toLowerCase(),
-      fallbacks: selectors.slice(1),
+      primary: candidates[0],
+      fallbacks: candidates.slice(1),
       elementInfo: info
     };
   }

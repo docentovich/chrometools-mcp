@@ -82,7 +82,7 @@ AI: smartFindElement("login button")
 ### Features
 
 - **Visual Widget** - Floating recorder UI with compact mode (50x50px minimize button)
-- **Auto-Reinjection** - Recorder persists across page reloads/navigation automatically
+- **Auto-Reinjection** - Recorder persists across page reloads/navigation automatically with duplicate prevention ⭐ **IMPROVED**
 - **Smart Click Detection** - Finds actual clickable parent elements with event listeners ⭐ **NEW**
 - **Smart Waiters** - 2s minimum + animation/network/DOM change detection after clicks ⭐ **NEW**
 - **Detailed Error Reports** - Comprehensive failure analysis with context and suggestions ⭐ **NEW**
@@ -91,6 +91,7 @@ AI: smartFindElement("login button")
 - **Action Optimization** - Combines sequential actions, removes duplicates
 - **Scenario Management** - Save, load, execute, search, and delete scenarios
 - **Dependencies** - Chain scenarios together with dependency resolution
+- **Multi-Instance Protection** - Prevents multiple recorder instances from interfering ⭐ **NEW**
 
 ### Quick Start
 
@@ -320,12 +321,21 @@ Execute a previously recorded scenario by name.
 - **Parameters**:
   - `name` (required): Scenario name
   - `parameters` (optional): Runtime parameters (e.g., { email: "user@test.com" })
+  - `executeDependencies` (optional): Execute dependencies before running scenario (default: true)
 - **Use case**: Run automated test scenarios
 - **Returns**: Execution result with success/failure status
 - **Features**:
-  - Automatic dependency resolution
+  - Automatic dependency resolution (enabled by default)
   - Secret parameter injection
   - Fallback selector retry logic
+- **Example**:
+  ```javascript
+  // Execute with dependencies (default)
+  executeScenario({ name: "create_post" })
+
+  // Execute without dependencies
+  executeScenario({ name: "create_post", executeDependencies: false })
+  ```
 
 #### listScenarios
 Get all available scenarios with metadata.

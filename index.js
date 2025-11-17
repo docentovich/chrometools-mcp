@@ -234,18 +234,49 @@ This requires an X server to display the browser GUI.
 
 // Setup navigation listener for recorder auto-reinjection
 async function setupRecorderAutoReinjection(page) {
+  let reinjectionTimeout = null;
+  let lastUrl = null;
+
+  // Handle navigation events (form submits, link clicks, history API)
   page.on('framenavigated', async (frame) => {
     // Only handle main frame navigation
     if (frame !== page.mainFrame()) return;
 
+    // Get current URL
+    const currentUrl = frame.url();
+
+    // Skip if URL hasn't changed (prevents duplicate injections on same page)
+    if (currentUrl === lastUrl) {
+      return;
+    }
+    lastUrl = currentUrl;
+
+    // Clear any pending reinjection
+    if (reinjectionTimeout) {
+      clearTimeout(reinjectionTimeout);
+    }
+
+    // Debounce reinjection (wait 100ms for navigation to settle)
+    reinjectionTimeout = setTimeout(async () => {
+      // Check if this page had recorder before
+      if (pagesWithRecorder.has(page)) {
+        try {
+          await injectRecorder(page);
+        } catch (error) {
+          console.error('[chrometools-mcp] Failed to re-inject recorder:', error.message);
+        }
+      }
+    }, 100);
+  });
+
+  // Handle page reloads (F5, Ctrl+R) - use 'load' event
+  page.on('load', async () => {
     // Check if this page had recorder before
     if (pagesWithRecorder.has(page)) {
       try {
-        console.error('[chrometools-mcp] Page navigated, re-injecting recorder...');
         await injectRecorder(page);
-        console.error('[chrometools-mcp] Recorder re-injected successfully');
       } catch (error) {
-        console.error('[chrometools-mcp] Failed to re-inject recorder:', error.message);
+        console.error('[chrometools-mcp] Failed to re-inject recorder after reload:', error.message);
       }
     }
   });
@@ -987,6 +1018,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             name: { type: "string", description: "Scenario name to execute" },
             parameters: { type: "object", description: "Parameters for scenario execution (e.g., { email: 'user@test.com', password: 'secret' })" },
+            executeDependencies: { type: "boolean", description: "Execute dependencies before running scenario (default: true)" },
           },
           required: ["name"],
         },
@@ -2203,7 +2235,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === "executeScenario") {
       const page = await getLastOpenPage();
-      const result = await executeScenario(args.name, page, args.parameters || {});
+      const options = {};
+
+      // Pass executeDependencies option if provided
+      if (args.executeDependencies !== undefined) {
+        options.executeDependencies = args.executeDependencies;
+      }
+
+      const result = await executeScenario(args.name, page, args.parameters || {}, options);
 
       return {
         content: [{

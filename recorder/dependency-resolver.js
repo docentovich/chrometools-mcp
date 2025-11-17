@@ -54,14 +54,19 @@ export function resolveDependencies(scenarioName, scenarioIndex, options = {}) {
 
     // Visit dependencies first
     const scenario = scenarioIndex[name];
-    if (scenario.metadata?.dependencies) {
-      for (const dep of scenario.metadata.dependencies) {
+    if (scenario.dependencies && scenario.dependencies.length > 0) {
+      for (const dep of scenario.dependencies) {
+        // Handle both string format and object format { scenario: "name" }
+        const depName = typeof dep === 'string' ? dep : dep.scenario;
+
         // Skip if conditional and skipConditions is true
         if (options.skipConditions && dep.optional && dep.condition) {
           continue;
         }
 
-        visit(dep.scenario);
+        if (depName) {
+          visit(depName);
+        }
       }
     }
 
@@ -85,9 +90,13 @@ function buildDependencyGraph(scenarioIndex) {
   for (const [name, scenario] of Object.entries(scenarioIndex)) {
     graph[name] = [];
 
-    if (scenario.metadata?.dependencies) {
-      for (const dep of scenario.metadata.dependencies) {
-        graph[name].push(dep.scenario);
+    if (scenario.dependencies && scenario.dependencies.length > 0) {
+      for (const dep of scenario.dependencies) {
+        // Handle both string format and object format { scenario: "name" }
+        const depName = typeof dep === 'string' ? dep : dep.scenario;
+        if (depName) {
+          graph[name].push(depName);
+        }
       }
     }
   }
