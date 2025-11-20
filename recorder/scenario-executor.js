@@ -160,6 +160,48 @@ async function executeSingleScenario(scenario, page, params = {}, options = {}) 
       }
     }
 
+    // Validate final URL if exitUrl is specified in metadata
+    if (scenario.metadata?.exitUrl) {
+      const currentUrl = page.url();
+      const expectedUrl = scenario.metadata.exitUrl;
+
+      // Normalize URLs for comparison (remove trailing slashes, fragments)
+      const normalizeUrl = (url) => {
+        try {
+          const parsed = new URL(url);
+          // Remove fragment and trailing slash
+          return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}${parsed.search}`;
+        } catch {
+          return url.replace(/\/$/, '');
+        }
+      };
+
+      const normalizedCurrent = normalizeUrl(currentUrl);
+      const normalizedExpected = normalizeUrl(expectedUrl);
+
+      if (normalizedCurrent !== normalizedExpected) {
+        result.errors.push(
+          `❌ URL Validation Failed\n\n` +
+          `Expected final URL: ${expectedUrl}\n` +
+          `Actual final URL:   ${currentUrl}\n\n` +
+          `The scenario ended on a different page than expected.\n` +
+          `This may indicate:\n` +
+          `  - Navigation flow has changed\n` +
+          `  - An action failed silently\n` +
+          `  - Page redirected unexpectedly\n\n` +
+          `💡 Suggestion: Check if the page flow or redirects have changed since recording.`
+        );
+        return result;
+      }
+
+      // URL validation passed
+      result.urlValidation = {
+        success: true,
+        expectedUrl,
+        actualUrl: currentUrl
+      };
+    }
+
     result.success = true;
   } catch (error) {
     result.errors.push(`Scenario execution error: ${error.message}`);

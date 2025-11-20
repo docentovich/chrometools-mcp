@@ -1552,11 +1552,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === "navigateTo") {
       const validatedArgs = NavigateToSchema.parse(args);
-      const page = await getOrCreatePage(validatedArgs.url);
+      const page = await getLastOpenPage();
 
-      if (validatedArgs.waitUntil) {
-        await page.goto(validatedArgs.url, { waitUntil: validatedArgs.waitUntil });
-      }
+      // Navigate to the new URL (always navigate, don't use cache)
+      await page.goto(validatedArgs.url, { waitUntil: validatedArgs.waitUntil || 'networkidle2' });
 
       const title = await page.title();
 
