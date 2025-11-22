@@ -358,6 +358,13 @@ async function getLastOpenPage() {
   return lastPage;
 }
 
+// Helper function to normalize Figma node ID (convert URL format to API format)
+function normalizeFigmaNodeId(nodeId) {
+  // Figma URLs use format like "47361-19211" but API expects "47361:19211"
+  // This function automatically converts between formats
+  return nodeId.replace(/-/g, ':');
+}
+
 // Figma API helper function
 async function fetchFigmaAPI(endpoint, figmaToken) {
   if (!figmaToken) {
@@ -1578,20 +1585,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
       }
 
+      // Normalize node ID (convert URL format like "123-456" to API format "123:456")
+      const nodeId = normalizeFigmaNodeId(validatedArgs.nodeId);
+
       const scale = validatedArgs.scale || 2;
       const format = validatedArgs.format || 'png';
 
       // Get export URL from Figma
       const exportData = await fetchFigmaAPI(
-        `images/${validatedArgs.fileKey}?ids=${validatedArgs.nodeId}&scale=${scale}&format=${format}`,
+        `images/${validatedArgs.fileKey}?ids=${nodeId}&scale=${scale}&format=${format}`,
         token
       );
 
-      if (!exportData.images || !exportData.images[validatedArgs.nodeId]) {
-        throw new Error(`Failed to export node ${validatedArgs.nodeId} from file ${validatedArgs.fileKey}`);
+      if (!exportData.images || !exportData.images[nodeId]) {
+        throw new Error(`Failed to export node ${nodeId} from file ${validatedArgs.fileKey}`);
       }
 
-      const imageUrl = exportData.images[validatedArgs.nodeId];
+      const imageUrl = exportData.images[nodeId];
 
       // Download image
       const imageResponse = await fetch(imageUrl);
@@ -1602,13 +1612,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
 
       // Get frame info
-      const nodesData = await fetchFigmaAPI(`files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(validatedArgs.nodeId)}`, token);
-      const frameInfo = nodesData.nodes?.[validatedArgs.nodeId]?.document;
+      const nodesData = await fetchFigmaAPI(`files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(nodeId)}`, token);
+      const frameInfo = nodesData.nodes?.[nodeId]?.document;
 
       const result = {
         figmaInfo: {
           fileName: nodesData.name || 'Unknown',
-          frameId: validatedArgs.nodeId,
+          frameId: nodeId,
           frameName: frameInfo?.name || 'Unknown',
           dimensions: frameInfo ? {
             width: frameInfo.absoluteBoundingBox?.width,
@@ -1645,17 +1655,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const figmaScale = validatedArgs.figmaScale || 2;
       const threshold = validatedArgs.threshold || 0.05;
 
+      // Normalize node ID (convert URL format like "123-456" to API format "123:456")
+      const nodeId = normalizeFigmaNodeId(validatedArgs.nodeId);
+
       // Get Figma image
       const exportData = await fetchFigmaAPI(
-        `images/${validatedArgs.fileKey}?ids=${validatedArgs.nodeId}&scale=${figmaScale}&format=png`,
+        `images/${validatedArgs.fileKey}?ids=${nodeId}&scale=${figmaScale}&format=png`,
         token
       );
 
-      if (!exportData.images || !exportData.images[validatedArgs.nodeId]) {
-        throw new Error(`Failed to export Figma node ${validatedArgs.nodeId}`);
+      if (!exportData.images || !exportData.images[nodeId]) {
+        throw new Error(`Failed to export Figma node ${nodeId}`);
       }
 
-      const figmaImageUrl = exportData.images[validatedArgs.nodeId];
+      const figmaImageUrl = exportData.images[nodeId];
       const figmaResponse = await fetch(figmaImageUrl);
       const figmaBuffer = Buffer.from(await figmaResponse.arrayBuffer());
 
@@ -1741,14 +1754,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
       }
 
-      // Get specific node via nodes API
-      const nodesData = await fetchFigmaAPI(`files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(validatedArgs.nodeId)}`, token);
+      // Normalize node ID (convert URL format like "123-456" to API format "123:456")
+      const nodeId = normalizeFigmaNodeId(validatedArgs.nodeId);
 
-      if (!nodesData.nodes || !nodesData.nodes[validatedArgs.nodeId]) {
-        throw new Error(`Node ${validatedArgs.nodeId} not found in Figma file`);
+      // Get specific node via nodes API
+      const nodesData = await fetchFigmaAPI(`files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(nodeId)}`, token);
+
+      if (!nodesData.nodes || !nodesData.nodes[nodeId]) {
+        throw new Error(`Node ${nodeId} not found in Figma file`);
       }
 
-      const node = nodesData.nodes[validatedArgs.nodeId].document;
+      const node = nodesData.nodes[nodeId].document;
 
       // Extract specifications
       const specs = {
