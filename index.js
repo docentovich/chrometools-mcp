@@ -691,6 +691,16 @@ const GetFigmaSpecsSchema = z.object({
 const SmartFindElementSchema = z.object({
   description: z.string().describe("Natural language description of element to find (e.g., 'login button', 'email field')"),
   maxResults: z.number().min(1).max(20).optional().describe("Maximum number of candidates to return (default: 5)"),
+  action: z.object({
+    type: z.enum(['click', 'type', 'scrollTo', 'screenshot', 'hover', 'setStyles']).describe("Action to perform on the best match"),
+    text: z.string().optional().describe("Text to type (required for 'type' action)"),
+    styles: z.array(z.object({
+      name: z.string(),
+      value: z.string()
+    })).optional().describe("Styles to apply (required for 'setStyles' action)"),
+    screenshot: z.boolean().optional().describe("Capture screenshot after action (default: false)"),
+    waitAfter: z.number().optional().describe("Wait time in ms after action"),
+  }).optional().describe("Optional action to perform on the best matching element"),
 });
 
 const AnalyzePageSchema = z.object({
@@ -705,6 +715,16 @@ const FindElementsByTextSchema = z.object({
   text: z.string().describe("Text to search for in elements"),
   exact: z.boolean().optional().describe("Exact match only (default: false)"),
   caseSensitive: z.boolean().optional().describe("Case sensitive search (default: false)"),
+  action: z.object({
+    type: z.enum(['click', 'type', 'scrollTo', 'screenshot', 'hover', 'setStyles']).describe("Action to perform on the first match"),
+    text: z.string().optional().describe("Text to type (required for 'type' action)"),
+    styles: z.array(z.object({
+      name: z.string(),
+      value: z.string()
+    })).optional().describe("Styles to apply (required for 'setStyles' action)"),
+    screenshot: z.boolean().optional().describe("Capture screenshot after action (default: false)"),
+    waitAfter: z.number().optional().describe("Wait time in ms after action"),
+  }).optional().describe("Optional action to perform on the first matching element"),
 });
 
 // List available tools
@@ -974,12 +994,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "smartFindElement",
-        description: "AI-powered element finder that uses natural language to locate elements. Returns multiple candidates ranked by relevance, eliminating the need for trial-and-error selector searches. Much faster than multiple getElement calls.",
+        description: "AI-powered element finder that uses natural language to locate elements. Returns multiple candidates ranked by relevance. Can optionally perform actions (click, type, etc.) on the best match immediately.",
         inputSchema: {
           type: "object",
           properties: {
             description: { type: "string", description: "Natural language description (e.g., 'login button', 'email input', 'submit form')" },
             maxResults: { type: "number", minimum: 1, maximum: 20, description: "Max candidates to return (default: 5)" },
+            action: {
+              type: "object",
+              properties: {
+                type: { type: "string", enum: ["click", "type", "scrollTo", "screenshot", "hover", "setStyles"], description: "Action to perform on best match" },
+                text: { type: "string", description: "Text to type (for 'type' action)" },
+                styles: { type: "array", items: { type: "object", properties: { name: { type: "string" }, value: { type: "string" } } }, description: "Styles to apply (for 'setStyles' action)" },
+                screenshot: { type: "boolean", description: "Capture screenshot after action (default: false)" },
+                waitAfter: { type: "number", description: "Wait time in ms after action" },
+              },
+              required: ["type"],
+              description: "Optional action to perform on the best matching element",
+            },
           },
           required: ["description"],
         },
@@ -1006,13 +1038,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "findElementsByText",
-        description: "Find all elements containing specific text. Returns elements with their selectors, making it easy to locate elements by visible text.",
+        description: "Find all elements containing specific text. Returns elements with their selectors. Can optionally perform actions (click, type, etc.) on the first match immediately.",
         inputSchema: {
           type: "object",
           properties: {
             text: { type: "string", description: "Text to search for" },
             exact: { type: "boolean", description: "Exact match only (default: false)" },
             caseSensitive: { type: "boolean", description: "Case sensitive (default: false)" },
+            action: {
+              type: "object",
+              properties: {
+                type: { type: "string", enum: ["click", "type", "scrollTo", "screenshot", "hover", "setStyles"], description: "Action to perform on first match" },
+                text: { type: "string", description: "Text to type (for 'type' action)" },
+                styles: { type: "array", items: { type: "object", properties: { name: { type: "string" }, value: { type: "string" } } }, description: "Styles to apply (for 'setStyles' action)" },
+                screenshot: { type: "boolean", description: "Capture screenshot after action (default: false)" },
+                waitAfter: { type: "number", description: "Wait time in ms after action" },
+              },
+              required: ["type"],
+              description: "Optional action to perform on the first matching element",
+            },
           },
           required: ["text"],
         },
@@ -1083,6 +1127,122 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     ],
   };
 });
+
+// Helper function to execute actions on elements
+async function executeElementAction(page, selector, action) {
+  if (!action || !action.type) {
+    return null;
+  }
+
+  const element = await page.$(selector);
+  if (!element) {
+    throw new Error(`Element not found for action: ${selector}`);
+  }
+
+  const result = {
+    action: action.type,
+    selector,
+    success: true,
+  };
+
+  switch (action.type) {
+    case 'click':
+      await element.click();
+      await new Promise(resolve => setTimeout(resolve, action.waitAfter || 1500));
+      result.message = `Clicked on ${selector}`;
+
+      if (action.screenshot) {
+        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
+        result.screenshot = screenshot;
+      }
+      break;
+
+    case 'type':
+      if (!action.text) {
+        throw new Error('text parameter is required for type action');
+      }
+      await element.click({ clickCount: 3 });
+      await page.keyboard.press('Backspace');
+      await element.type(action.text, { delay: 0 });
+      await new Promise(resolve => setTimeout(resolve, action.waitAfter || 500));
+      result.message = `Typed "${action.text}" into ${selector}`;
+
+      if (action.screenshot) {
+        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
+        result.screenshot = screenshot;
+      }
+      break;
+
+    case 'scrollTo':
+      await element.scrollIntoView({ behavior: 'auto' });
+      await new Promise(resolve => setTimeout(resolve, action.waitAfter || 300));
+      const position = await page.evaluate(() => ({
+        x: window.scrollX,
+        y: window.scrollY
+      }));
+      result.message = `Scrolled to ${selector}`;
+      result.position = position;
+      break;
+
+    case 'screenshot':
+      const box = await element.boundingBox();
+      if (!box) {
+        throw new Error(`Element not visible: ${selector}`);
+      }
+      const clip = {
+        x: Math.max(box.x, 0),
+        y: Math.max(box.y, 0),
+        width: Math.max(box.width, 1),
+        height: Math.max(box.height, 1)
+      };
+      const screenshot = await page.screenshot({ clip, encoding: 'base64' });
+      result.message = `Captured screenshot of ${selector}`;
+      result.screenshot = screenshot;
+      break;
+
+    case 'hover':
+      await element.hover();
+      await new Promise(resolve => setTimeout(resolve, action.waitAfter || 100));
+      result.message = `Hovered over ${selector}`;
+
+      if (action.screenshot) {
+        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
+        result.screenshot = screenshot;
+      }
+      break;
+
+    case 'setStyles':
+      if (!action.styles || !Array.isArray(action.styles)) {
+        throw new Error('styles parameter is required for setStyles action');
+      }
+      const stylesObject = {};
+      for (const style of action.styles) {
+        stylesObject[style.name] = style.value;
+      }
+      await page.evaluate((sel, styles) => {
+        const el = document.querySelector(sel);
+        if (el) {
+          Object.entries(styles).forEach(([key, value]) => {
+            el.style.setProperty(key, value);
+          });
+        }
+      }, selector, stylesObject);
+      await new Promise(resolve => setTimeout(resolve, action.waitAfter || 100));
+      result.message = `Applied styles to ${selector}`;
+      result.styles = stylesObject;
+
+      if (action.screenshot) {
+        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
+        result.screenshot = screenshot;
+      }
+      break;
+
+    default:
+      throw new Error(`Unknown action type: ${action.type}`);
+  }
+
+  return result;
+}
 
 // Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -1993,10 +2153,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           : 'No good matches found. Try a different description.',
       };
 
+      const response = {
+        candidates: results,
+        hints
+      };
+
+      // Execute action if provided
+      if (validatedArgs.action && results.length > 0) {
+        const bestMatch = results[0];
+        try {
+          const actionResult = await executeElementAction(page, bestMatch.selector, validatedArgs.action);
+          response.actionExecuted = actionResult;
+
+          // If screenshot was captured, add it to content
+          if (actionResult && actionResult.screenshot) {
+            return {
+              content: [
+                { type: 'text', text: JSON.stringify(response, null, 2) },
+                { type: 'image', data: actionResult.screenshot, mimeType: 'image/png' }
+              ]
+            };
+          }
+        } catch (error) {
+          response.actionError = error.message;
+        }
+      }
+
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ candidates: results, hints }, null, 2)
+          text: JSON.stringify(response, null, 2)
         }]
       };
     }
@@ -2249,14 +2435,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return results;
       }, validatedArgs.text, validatedArgs.exact || false, validatedArgs.caseSensitive || false, elementFinderUtils);
 
+      const response = {
+        query: validatedArgs.text,
+        count: elements.length,
+        elements,
+      };
+
+      // Execute action if provided and elements found
+      if (validatedArgs.action && elements.length > 0) {
+        const firstMatch = elements[0];
+        try {
+          const actionResult = await executeElementAction(page, firstMatch.selector, validatedArgs.action);
+          response.actionExecuted = actionResult;
+
+          // If screenshot was captured, add it to content
+          if (actionResult && actionResult.screenshot) {
+            return {
+              content: [
+                { type: 'text', text: JSON.stringify(response, null, 2) },
+                { type: 'image', data: actionResult.screenshot, mimeType: 'image/png' }
+              ]
+            };
+          }
+        } catch (error) {
+          response.actionError = error.message;
+        }
+      }
+
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
-            query: validatedArgs.text,
-            count: elements.length,
-            elements,
-          }, null, 2)
+          text: JSON.stringify(response, null, 2)
         }]
       };
     }

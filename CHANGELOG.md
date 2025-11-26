@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.2] - 2025-01-26
+
+### Added
+- `action` parameter for `smartFindElement` - perform actions (click, type, scrollTo, screenshot, hover, setStyles) on the best match immediately
+- `action` parameter for `findElementsByText` - perform actions on the first matching element immediately
+- New helper function `executeElementAction` for unified action execution
+
+### Changed
+- `smartFindElement` can now execute actions on found elements in a single call
+- `findElementsByText` can now execute actions on found elements in a single call
+- Reduces need for separate find + action calls, improving performance
+
+### Examples
+```javascript
+// Find and click in one call
+smartFindElement({
+  description: 'login button',
+  action: { type: 'click' }
+})
+
+// Find and type in one call
+findElementsByText({
+  text: 'Email',
+  action: { type: 'type', text: 'user@example.com' }
+})
+
+// Find, style and screenshot
+smartFindElement({
+  description: 'submit button',
+  action: {
+    type: 'setStyles',
+    styles: [{ name: 'background', value: 'red' }],
+    screenshot: true
+  }
+})
+```
+
 ## [1.3.1] - 2025-01-26
 
 ### Performance Improvements
