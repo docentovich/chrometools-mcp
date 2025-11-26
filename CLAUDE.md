@@ -143,11 +143,13 @@ xvfb provides virtual X server, allowing Chrome GUI to run without external X se
 
 When making changes to the codebase:
 
-### What to Update
+### What to Update (ALWAYS)
 
-1. **CHANGELOG.md** - Add concise entry with version, date, and changes
-2. **README.md** - Update relevant sections if user-facing behavior changes
-3. **package.json** - Increment version number appropriately
+1. **CHANGELOG.md** - ALWAYS add concise entry with version, date, and changes
+2. **README.md** - ALWAYS update when adding new tools or changing user-facing behavior
+3. **package.json** - ALWAYS increment version number appropriately
+
+**IMPORTANT**: For new tools/features, ALWAYS update README.md to document them. This is NOT optional.
 
 ### What NOT to Create
 
@@ -159,10 +161,15 @@ When making changes to the codebase:
 
 ### Documentation Rules
 
-1. **CHANGELOG.md only** - All change documentation goes in CHANGELOG.md
-2. **Keep it concise** - Brief summary of what changed and why
-3. **Update existing docs** - Modify README.md sections instead of creating new files
-4. **Version control** - Let git history track detailed changes
+1. **CHANGELOG.md** - All change documentation goes here (version history)
+2. **README.md** - MUST be updated for new tools/features with:
+   - Tool description in appropriate section
+   - Parameters and usage examples
+   - Update tool count in Features section
+   - Add to Table of Contents if needed
+3. **Keep it concise** - Brief but complete summary of what changed and why
+4. **No separate files** - Never create separate documentation files for features
+5. **Version control** - Let git history track detailed changes
 
 ### CHANGELOG.md Format
 
@@ -183,3 +190,42 @@ When making changes to the codebase:
 ```
 
 Keep entries short and focused. Detailed explanations belong in code comments or git commit messages, not separate files.
+
+### Example: Adding a New Tool
+
+When adding a new tool like `getNetworkRequests`:
+
+1. ✅ **Update README.md**:
+   - Add tool to appropriate section (e.g., Advanced Tools)
+   - Include parameters, use cases, examples
+   - Update tool count in Features section
+   - Add to Table of Contents
+
+2. ✅ **Update CHANGELOG.md**:
+   - Add new version entry
+   - List the new tool under "Added"
+   - Include brief examples
+
+3. ✅ **Update package.json**:
+   - Increment version (e.g., 1.3.2 → 1.3.3)
+
+4. ❌ **DO NOT create**:
+   - `NETWORK_MONITORING.md`
+   - `GET_NETWORK_REQUESTS_GUIDE.md`
+   - Any other separate documentation files
+
+### Example: Changing Existing Behavior
+
+When modifying an existing tool (e.g., making screenshots optional):
+
+1. ✅ **Update README.md**:
+   - Update the tool's parameter documentation
+   - Add performance notes if relevant
+   - Update examples if behavior changed
+
+2. ✅ **Update CHANGELOG.md**:
+   - Add version entry with "Changed" or "Performance" section
+   - Include migration notes if breaking change
+
+3. ✅ **Update package.json**:
+   - Increment version appropriately
