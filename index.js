@@ -574,6 +574,8 @@ const OpenBrowserSchema = z.object({
 const ClickSchema = z.object({
   selector: z.string().describe("CSS selector for element to click"),
   waitAfter: z.number().optional().describe("Milliseconds to wait after click (default: 1500)"),
+  screenshot: z.boolean().optional().describe("Capture screenshot after click (default: false for performance)"),
+  timeout: z.number().optional().describe("Maximum time to wait for operation in ms (default: 30000)"),
 });
 
 const TypeSchema = z.object({
@@ -622,6 +624,8 @@ const ScrollToSchema = z.object({
 const ExecuteScriptSchema = z.object({
   script: z.string().describe("JavaScript code to execute in page context"),
   waitAfter: z.number().optional().describe("Milliseconds to wait after execution (default: 500)"),
+  screenshot: z.boolean().optional().describe("Capture screenshot after execution (default: false for performance)"),
+  timeout: z.number().optional().describe("Maximum time to wait for operation in ms (default: 30000)"),
 });
 
 // Phase 2 schemas
@@ -730,12 +734,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "click",
-        description: "Click on an element to trigger interactions like opening modals, navigating, or submitting forms. Waits for animations and returns a screenshot showing the result.",
+        description: "Click on an element to trigger interactions like opening modals, navigating, or submitting forms. Waits for animations. Screenshot is optional for better performance.",
         inputSchema: {
           type: "object",
           properties: {
             selector: { type: "string", description: "CSS selector for element to click" },
             waitAfter: { type: "number", description: "Milliseconds to wait after click (default: 1500)" },
+            screenshot: { type: "boolean", description: "Capture screenshot after click (default: false for performance)" },
+            timeout: { type: "number", description: "Maximum time to wait for operation in ms (default: 30000)" },
           },
           required: ["selector"],
         },
@@ -832,12 +838,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "executeScript",
-        description: "Execute arbitrary JavaScript code in the page context. Perfect for complex interactions, setting values, triggering events, or any custom page manipulation. Returns execution result and a screenshot.",
+        description: "Execute arbitrary JavaScript code in the page context. Perfect for complex interactions, setting values, triggering events, or any custom page manipulation. Returns execution result. Screenshot is optional for better performance.",
         inputSchema: {
           type: "object",
           properties: {
             script: { type: "string", description: "JavaScript code to execute" },
             waitAfter: { type: "number", description: "Milliseconds to wait after execution (default: 500)" },
+            screenshot: { type: "boolean", description: "Capture screenshot after execution (default: false for performance)" },
+            timeout: { type: "number", description: "Maximum time to wait for operation in ms (default: 30000)" },
           },
           required: ["script"],
         },
@@ -1118,35 +1126,49 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "click") {
       const validatedArgs = ClickSchema.parse(args);
       const page = await getLastOpenPage();
+      const timeout = validatedArgs.timeout || 30000;
 
-      const element = await page.$(validatedArgs.selector);
-      if (!element) {
-        throw new Error(`Element not found: ${validatedArgs.selector}`);
-      }
+      // Wrap operation in timeout
+      const clickOperation = async () => {
+        const element = await page.$(validatedArgs.selector);
+        if (!element) {
+          throw new Error(`Element not found: ${validatedArgs.selector}`);
+        }
 
-      await element.click();
-      await new Promise(resolve => setTimeout(resolve, validatedArgs.waitAfter || 1500));
+        await element.click();
+        await new Promise(resolve => setTimeout(resolve, validatedArgs.waitAfter || 1500));
 
-      // Generate AI hints after click
-      const hints = await generateClickHints(page, validatedArgs.selector);
+        // Generate AI hints after click
+        const hints = await generateClickHints(page, validatedArgs.selector);
 
-      const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
+        let hintsText = '\n\n** AI HINTS **';
+        if (hints.modalOpened) hintsText += '\nModal opened - interact with it or close';
+        if (hints.newElements.length > 0) {
+          hintsText += `\nNew elements appeared: ${hints.newElements.map(e => e.type).join(', ')}`;
+        }
+        if (hints.suggestedNext.length > 0) {
+          hintsText += `\nSuggested next: ${hints.suggestedNext.join('; ')}`;
+        }
 
-      let hintsText = '\n\n** AI HINTS **';
-      if (hints.modalOpened) hintsText += '\nModal opened - interact with it or close';
-      if (hints.newElements.length > 0) {
-        hintsText += `\nNew elements appeared: ${hints.newElements.map(e => e.type).join(', ')}`;
-      }
-      if (hints.suggestedNext.length > 0) {
-        hintsText += `\nSuggested next: ${hints.suggestedNext.join('; ')}`;
-      }
+        const content = [
+          { type: "text", text: `Clicked: ${validatedArgs.selector}${hintsText}` }
+        ];
 
-      return {
-        content: [
-          { type: "text", text: `Clicked: ${validatedArgs.selector}${hintsText}` },
-          { type: "image", data: screenshot, mimeType: "image/png" }
-        ],
+        // Only add screenshot if requested
+        if (validatedArgs.screenshot === true) {
+          const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
+          content.push({ type: "image", data: screenshot, mimeType: "image/png" });
+        }
+
+        return { content };
       };
+
+      // Execute with timeout
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Click operation timed out after ${timeout}ms`)), timeout)
+      );
+
+      return Promise.race([clickOperation(), timeoutPromise]);
     }
 
     if (name === "type") {
@@ -1404,32 +1426,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "executeScript") {
       const validatedArgs = ExecuteScriptSchema.parse(args);
       const page = await getLastOpenPage();
+      const timeout = validatedArgs.timeout || 30000;
 
-      const result = await page.evaluate((code) => {
-        try {
-          // eslint-disable-next-line no-eval
-          const evalResult = eval(code);
-          return { success: true, result: evalResult };
-        } catch (error) {
-          return { success: false, error: error.message };
-        }
-      }, validatedArgs.script);
+      // Wrap operation in timeout
+      const executeOperation = async () => {
+        const result = await page.evaluate((code) => {
+          try {
+            // eslint-disable-next-line no-eval
+            const evalResult = eval(code);
+            return { success: true, result: evalResult };
+          } catch (error) {
+            return { success: false, error: error.message };
+          }
+        }, validatedArgs.script);
 
-      await new Promise(resolve => setTimeout(resolve, validatedArgs.waitAfter || 500));
+        await new Promise(resolve => setTimeout(resolve, validatedArgs.waitAfter || 500));
 
-      const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
-
-      return {
-        content: [
+        const content = [
           {
             type: "text",
             text: result.success
               ? `Script executed successfully.\nResult: ${JSON.stringify(result.result)}`
               : `Script execution failed: ${result.error}`
-          },
-          { type: "image", data: screenshot, mimeType: "image/png" }
-        ],
+          }
+        ];
+
+        // Only add screenshot if requested
+        if (validatedArgs.screenshot === true) {
+          const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
+          content.push({ type: "image", data: screenshot, mimeType: "image/png" });
+        }
+
+        return { content };
       };
+
+      // Execute with timeout
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Script execution timed out after ${timeout}ms`)), timeout)
+      );
+
+      return Promise.race([executeOperation(), timeoutPromise]);
     }
 
     if (name === "getConsoleLogs") {

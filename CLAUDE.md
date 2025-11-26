@@ -138,3 +138,48 @@ For WSL development with GUI support, use xvfb-run:
 ```
 
 xvfb provides virtual X server, allowing Chrome GUI to run without external X server (VcXsrv).
+
+## Documentation Guidelines
+
+When making changes to the codebase:
+
+### What to Update
+
+1. **CHANGELOG.md** - Add concise entry with version, date, and changes
+2. **README.md** - Update relevant sections if user-facing behavior changes
+3. **package.json** - Increment version number appropriately
+
+### What NOT to Create
+
+**DO NOT create separate documentation files** for individual changes, such as:
+- ❌ `PERFORMANCE_IMPROVEMENTS.md`
+- ❌ `NEW_FEATURES.md`
+- ❌ `MIGRATION_GUIDE.md`
+- ❌ Individual feature documentation files
+
+### Documentation Rules
+
+1. **CHANGELOG.md only** - All change documentation goes in CHANGELOG.md
+2. **Keep it concise** - Brief summary of what changed and why
+3. **Update existing docs** - Modify README.md sections instead of creating new files
+4. **Version control** - Let git history track detailed changes
+
+### CHANGELOG.md Format
+
+```markdown
+## [X.Y.Z] - YYYY-MM-DD
+
+### Added
+- New feature description
+
+### Changed
+- Modified behavior description
+
+### Fixed
+- Bug fix description
+
+### Performance
+- Performance improvement description
+```
+
+Keep entries short and focused. Detailed explanations belong in code comments or git commit messages, not separate files.

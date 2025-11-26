@@ -174,12 +174,15 @@ Opens browser and navigates to URL. Browser stays open for further interactions.
 ### 2. Interaction Tools
 
 #### click
-Click an element and capture result screenshot.
+Click an element with optional result screenshot.
 - **Parameters**:
   - `selector` (required): CSS selector
   - `waitAfter` (optional): Wait time in ms (default: 1500)
+  - `screenshot` (optional): Capture screenshot (default: false for performance) ⚡
+  - `timeout` (optional): Max operation time in ms (default: 30000)
 - **Use case**: Buttons, links, form submissions
-- **Returns**: Confirmation text + screenshot
+- **Returns**: Confirmation text + optional screenshot
+- **Performance**: 2-10x faster without screenshot
 
 #### type
 Type text into input fields with optional clearing and typing delay.
@@ -250,12 +253,15 @@ Save optimized screenshot to filesystem without returning in context.
 ### 4. Advanced Tools
 
 #### executeScript
-Execute arbitrary JavaScript in page context.
+Execute arbitrary JavaScript in page context with optional screenshot.
 - **Parameters**:
   - `script` (required): JavaScript code
   - `waitAfter` (optional): Wait time in ms (default: 500)
+  - `screenshot` (optional): Capture screenshot (default: false for performance) ⚡
+  - `timeout` (optional): Max operation time in ms (default: 30000)
 - **Use case**: Complex interactions, custom manipulations
-- **Returns**: Execution result + screenshot
+- **Returns**: Execution result + optional screenshot
+- **Performance**: 2-10x faster without screenshot
 
 #### getConsoleLogs
 Retrieve browser console logs (log, warn, error, etc.).
