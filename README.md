@@ -13,7 +13,7 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
-  - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, hover, setStyles, setViewport, getViewport, navigateTo
+  - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, getNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
   - [Recorder Tools](#5-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
@@ -271,6 +271,20 @@ Retrieve browser console logs (log, warn, error, etc.).
 - **Use case**: Debugging JavaScript errors, tracking behavior
 - **Returns**: Array of log entries with timestamps
 
+#### getNetworkRequests
+Retrieve all network requests (XHR, Fetch, API calls, resources).
+- **Parameters**:
+  - `types` (optional): Array of request types (XHR, Fetch, Script, Document, Image, etc.)
+  - `status` (optional): Filter by status (pending, completed, failed, all)
+  - `urlPattern` (optional): Filter by URL using regex
+  - `clear` (optional): Clear requests after reading (default: false)
+- **Use case**: Debugging API calls, monitoring backend requests, tracking failed requests
+- **Returns**: Array of requests with URL, method, status, headers, timing, errors
+- **Examples**:
+  - `getNetworkRequests({ types: ['XHR', 'Fetch'] })` - API calls only
+  - `getNetworkRequests({ status: 'failed' })` - failed requests
+  - `getNetworkRequests({ urlPattern: 'api\\.' })` - requests to API endpoints
+
 #### hover
 Simulate mouse hover over element.
 - **Parameters**: `selector` (required)
@@ -511,12 +525,16 @@ npx @modelcontextprotocol/inspector node index.js
 
 ## Features
 
-- **16 Powerful Tools**: Complete toolkit for browser automation
+- **27+ Powerful Tools**: Complete toolkit for browser automation
   - Core: ping, openBrowser
   - Interaction: click, type, scrollTo
   - Inspection: getElement, getComputedCss, getBoxModel, screenshot
-  - Advanced: executeScript, getConsoleLogs, hover, setStyles, setViewport, getViewport, navigateTo
+  - Advanced: executeScript, getConsoleLogs, getNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
+  - AI-Powered: smartFindElement, analyzePage, getAllInteractiveElements, findElementsByText
+  - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario
+  - Figma: getFigmaFrame, compareFigmaToElement, getFigmaSpecs
 - **Console Log Capture**: Automatic JavaScript console monitoring
+- **Network Request Monitoring**: Track all HTTP/API requests (XHR, Fetch, etc.)
 - **Persistent Browser Sessions**: Browser tabs remain open between requests
 - **Visual Browser (GUI Mode)**: See automation in real-time
 - **Cross-platform**: Works on Windows/WSL, Linux, macOS
