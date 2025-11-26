@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.5] - 2025-01-26
+
+### Added
+- **Request/Response payload and headers now included in getNetworkRequests**
+- `postData` - POST request body (e.g., form data, JSON payload)
+- `requestHeaders` - Request headers
+- `responseHeaders` - Response headers
+
+### Changed
+- `getNetworkRequests` now returns complete request/response details
+- Essential for debugging API calls with payloads
+
+### Example
+```javascript
+getNetworkRequests({ urlPattern: 'send_otp' })
+
+// Now returns:
+{
+  "url": "http://localhost:4200/api/auth/send_otp/",
+  "method": "POST",
+  "postData": "{\"phone\":\"+79001234567\"}",  // ← NEW!
+  "requestHeaders": {                           // ← NEW!
+    "content-type": "application/json",
+    "authorization": "Bearer ..."
+  },
+  "responseHeaders": {                          // ← NEW!
+    "content-type": "application/json"
+  },
+  "status": 200,
+  ...
+}
+```
+
 ## [1.3.4] - 2025-01-26
 
 ### Fixed

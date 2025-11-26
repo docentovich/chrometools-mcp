@@ -1822,6 +1822,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           errorText: req.errorText,
           canceled: req.canceled,
           encodedDataLength: req.encodedDataLength,
+          // Request details
+          requestHeaders: req.headers,
+          postData: req.postData,
+          // Response details
+          responseHeaders: req.responseHeaders,
         }))
       };
 
