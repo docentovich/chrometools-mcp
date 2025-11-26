@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.4] - 2025-01-26
+
+### Fixed
+- **Network monitoring now persists across page navigations** - auto-reinitializes on navigation
+- Network requests are now captured correctly after form submissions, link clicks, and redirects
+- Added WeakSet tracking to prevent duplicate CDP session setup
+- Added 100ms debounce on navigation to ensure stability
+
+### Changed
+- Refactored network monitoring into `setupNetworkMonitoring()` helper function
+- Network monitoring automatically re-enables on framenavigated events
+- Global `networkRequests[]` array preserves history across all navigations
+
+### Technical Details
+- CDP (Chrome DevTools Protocol) session is recreated on each navigation
+- Network.enable is automatically re-sent after navigation completes
+- Request history accumulates across multiple pages in the same session
+- Use `getNetworkRequests({ clear: true })` to reset history when needed
+
+### Example Use Case
+```javascript
+// 1. Open login page
+openBrowser({ url: 'https://app.com/login' })
+// Network monitoring: ✅ active
+
+// 2. Fill form and submit (navigates to /dashboard)
+click({ selector: 'button[type="submit"]' })
+// Network monitoring: ✅ auto-reinitialized
+// Captures POST /api/login, GET /dashboard, etc.
+
+// 3. Check all requests from both pages
+getNetworkRequests({ types: ['XHR', 'Fetch'] })
+// Returns requests from /login AND /dashboard
+```
+
 ## [1.3.3] - 2025-01-26
 
 ### Added

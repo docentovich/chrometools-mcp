@@ -272,7 +272,7 @@ Retrieve browser console logs (log, warn, error, etc.).
 - **Returns**: Array of log entries with timestamps
 
 #### getNetworkRequests
-Retrieve all network requests (XHR, Fetch, API calls, resources).
+Retrieve all network requests (XHR, Fetch, API calls, resources). **Auto-captures across page navigations**.
 - **Parameters**:
   - `types` (optional): Array of request types (XHR, Fetch, Script, Document, Image, etc.)
   - `status` (optional): Filter by status (pending, completed, failed, all)
@@ -280,10 +280,12 @@ Retrieve all network requests (XHR, Fetch, API calls, resources).
   - `clear` (optional): Clear requests after reading (default: false)
 - **Use case**: Debugging API calls, monitoring backend requests, tracking failed requests
 - **Returns**: Array of requests with URL, method, status, headers, timing, errors
+- **Auto-reinitialization**: Monitoring continues automatically after form submissions, redirects, and navigation
 - **Examples**:
   - `getNetworkRequests({ types: ['XHR', 'Fetch'] })` - API calls only
   - `getNetworkRequests({ status: 'failed' })` - failed requests
   - `getNetworkRequests({ urlPattern: 'api\\.' })` - requests to API endpoints
+  - `getNetworkRequests({ clear: true })` - get requests and clear history
 
 #### hover
 Simulate mouse hover over element.
