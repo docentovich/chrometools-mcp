@@ -95,6 +95,9 @@ let chromeProcess = null;
 // Console logs storage
 const consoleLogs = [];
 
+// Network requests storage
+const networkRequests = [];
+
 // Page analysis cache (method 4)
 const pageAnalysisCache = new Map();
 
@@ -330,6 +333,58 @@ async function getOrCreatePage(url) {
       url: entry.url,
       lineNumber: entry.lineNumber
     });
+  });
+
+  // Set up network request capture
+  await client.send('Network.enable');
+
+  client.on('Network.requestWillBeSent', (event) => {
+    const timestamp = new Date().toISOString();
+    networkRequests.push({
+      requestId: event.requestId,
+      url: event.request.url,
+      method: event.request.method,
+      headers: event.request.headers,
+      postData: event.request.postData,
+      timestamp,
+      type: event.type, // Document, Stylesheet, Image, Media, Font, Script, XHR, Fetch, etc.
+      initiator: event.initiator.type, // parser, script, other
+      status: 'pending',
+      documentURL: event.documentURL
+    });
+  });
+
+  client.on('Network.responseReceived', (event) => {
+    const req = networkRequests.find(r => r.requestId === event.requestId);
+    if (req) {
+      req.status = event.response.status;
+      req.statusText = event.response.statusText;
+      req.responseHeaders = event.response.headers;
+      req.mimeType = event.response.mimeType;
+      req.fromCache = event.response.fromDiskCache || event.response.fromServiceWorker;
+      req.timing = event.response.timing;
+    }
+  });
+
+  client.on('Network.loadingFinished', (event) => {
+    const req = networkRequests.find(r => r.requestId === event.requestId);
+    if (req && req.status === 'pending') {
+      req.status = 'completed';
+    }
+    if (req) {
+      req.encodedDataLength = event.encodedDataLength;
+      req.finishedTimestamp = new Date().toISOString();
+    }
+  });
+
+  client.on('Network.loadingFailed', (event) => {
+    const req = networkRequests.find(r => r.requestId === event.requestId);
+    if (req) {
+      req.status = 'failed';
+      req.errorText = event.errorText;
+      req.canceled = event.canceled;
+      req.finishedTimestamp = new Date().toISOString();
+    }
   });
 
   // Setup recorder auto-reinjection on navigation
@@ -636,6 +691,17 @@ const GetConsoleLogsSchema = z.object({
   clear: z.boolean().optional().describe("Clear logs after reading (default: false)"),
 });
 
+const GetNetworkRequestsSchema = z.object({
+  types: z.array(z.enum(['Document', 'Stylesheet', 'Image', 'Media', 'Font', 'Script', 'XHR', 'Fetch', 'WebSocket', 'Other']))
+    .optional()
+    .describe("Filter by request types (default: all)"),
+  status: z.enum(['pending', 'completed', 'failed', 'all'])
+    .optional()
+    .describe("Filter by status (default: all)"),
+  urlPattern: z.string().optional().describe("Filter by URL pattern (regex)"),
+  clear: z.boolean().optional().describe("Clear requests after reading (default: false)"),
+});
+
 const HoverSchema = z.object({
   selector: z.string().describe("CSS selector for element to hover"),
 });
@@ -878,6 +944,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             types: { type: "array", items: { type: "string", enum: ["log", "warn", "error", "info", "debug", "verbose", "warning"] }, description: "Filter by log types (default: all)" },
             clear: { type: "boolean", description: "Clear logs after reading (default: false)" },
+          },
+        },
+      },
+      {
+        name: "getNetworkRequests",
+        description: "Retrieve all network requests (XHR, Fetch, API calls, resources) made by the browser. Essential for debugging API calls, monitoring backend requests, and tracking resource loading. Requests are captured automatically from page load.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter by request types (default: all)" },
+            status: { type: "string", enum: ["pending", "completed", "failed", "all"], description: "Filter by status (default: all)" },
+            urlPattern: { type: "string", description: "Filter by URL pattern (regex)" },
+            clear: { type: "boolean", description: "Clear requests after reading (default: false)" },
           },
         },
       },
@@ -1650,6 +1729,64 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Clear logs if requested
       if (validatedArgs.clear) {
         consoleLogs.length = 0;
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }],
+      };
+    }
+
+    if (name === "getNetworkRequests") {
+      const validatedArgs = GetNetworkRequestsSchema.parse(args);
+
+      let requests = networkRequests;
+
+      // Filter by types if specified
+      if (validatedArgs.types && validatedArgs.types.length > 0) {
+        requests = requests.filter(req => validatedArgs.types.includes(req.type));
+      }
+
+      // Filter by status if specified
+      if (validatedArgs.status && validatedArgs.status !== 'all') {
+        requests = requests.filter(req => req.status === validatedArgs.status);
+      }
+
+      // Filter by URL pattern if specified
+      if (validatedArgs.urlPattern) {
+        try {
+          const regex = new RegExp(validatedArgs.urlPattern);
+          requests = requests.filter(req => regex.test(req.url));
+        } catch (error) {
+          throw new Error(`Invalid URL pattern regex: ${error.message}`);
+        }
+      }
+
+      const result = {
+        count: requests.length,
+        requests: requests.map(req => ({
+          url: req.url,
+          method: req.method,
+          type: req.type,
+          status: req.status,
+          statusCode: req.status === 'completed' || req.status === 'failed' ? req.status : undefined,
+          statusText: req.statusText,
+          timestamp: req.timestamp,
+          finishedTimestamp: req.finishedTimestamp,
+          mimeType: req.mimeType,
+          initiator: req.initiator,
+          fromCache: req.fromCache,
+          errorText: req.errorText,
+          canceled: req.canceled,
+          encodedDataLength: req.encodedDataLength,
+        }))
+      };
+
+      // Clear requests if requested
+      if (validatedArgs.clear) {
+        networkRequests.length = 0;
       }
 
       return {

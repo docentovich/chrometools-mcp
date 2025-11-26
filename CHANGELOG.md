@@ -2,6 +2,48 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.3] - 2025-01-26
+
+### Added
+- `getNetworkRequests` tool - monitor all network requests (XHR, Fetch, API calls, resources)
+- Network monitoring via Chrome DevTools Protocol (CDP)
+- Automatic capture of all HTTP/HTTPS requests from page load
+- Filter requests by type (XHR, Fetch, Script, Document, etc.)
+- Filter by status (pending, completed, failed)
+- Filter by URL pattern (regex support)
+- Request details include: URL, method, status, headers, timing, cache info, errors
+
+### Changed
+- Network.enable added to CDP session setup in getOrCreatePage
+- Global networkRequests array for request storage
+
+### Examples
+```javascript
+// Get all network requests
+getNetworkRequests()
+
+// Get only XHR and Fetch requests (API calls)
+getNetworkRequests({
+  types: ['XHR', 'Fetch']
+})
+
+// Get failed requests
+getNetworkRequests({
+  status: 'failed'
+})
+
+// Get requests to specific API
+getNetworkRequests({
+  urlPattern: 'api\\.example\\.com'
+})
+
+// Get requests and clear history
+getNetworkRequests({
+  types: ['XHR', 'Fetch'],
+  clear: true
+})
+```
+
 ## [1.3.2] - 2025-01-26
 
 ### Added
