@@ -8,13 +8,14 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 - [Usage](#usage)
 - [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
 - [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
-- [Available Tools](#available-tools) - **26+ Tools Total**
+- [Available Tools](#available-tools) - **33+ Tools Total**
   - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getAllInteractiveElements, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
-  - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, getNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
-  - [Recorder Tools](#5-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario
+  - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
+  - [Angular Tools](#6-angular-tools) ⭐ **NEW** - listAngularComponents, getAngularComponent, callAngularMethod, getAngularForm, submitAngularForm
+  - [Recorder Tools](#7-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
@@ -66,12 +67,17 @@ AI: smartFindElement("login button")
 
 ### Key Features
 
-1. **`smartFindElement`** - Natural language element search with multilingual support
-2. **`analyzePage`** - Complete page structure in one request (cached)
+1. **`analyzePage`** - 🔥 **USE FREQUENTLY** - Get current page state after loads, clicks, submissions (cached, use refresh:true)
+2. **`smartFindElement`** - Natural language element search with multilingual support
 3. **AI Hints** - Automatic context in all tools (page type, available actions, suggestions)
 4. **Batch helpers** - `getAllInteractiveElements`, `findElementsByText`
 
 **Performance:** 3-5x faster, 5-10x fewer requests
+
+**Best Practice:**
+- Use `analyzePage()` after page loads AND after interactions (clicks, submissions)
+- Use `analyzePage({ refresh: true })` after page changes to see current state
+- Prefer `analyzePage` over `screenshot` for debugging form data
 
 📚 [Full AI Optimization Guide](AI_OPTIMIZATION.md)
 
@@ -135,13 +141,26 @@ Find elements using natural language descriptions instead of CSS selectors.
   }
   ```
 
-#### analyzePage ⭐
-Get complete page structure in one request. Results are cached per URL.
+#### analyzePage ⭐ **USE FREQUENTLY**
+Get current page state and structure. Returns complete map of forms (with values), inputs, buttons, links with selectors.
+- **When to use**:
+  - After opening/navigating to page (initial analysis)
+  - **After clicking buttons** (see what changed)
+  - **After form submissions** (check results, errors)
+  - **After AJAX updates** (dynamic content loaded)
+  - When debugging (see actual form values, not just visual)
 - **Parameters**:
-  - `refresh` (optional): Force refresh cache (default: false)
-- **Use case**: Understanding page structure before planning actions
-- **Returns**: Complete map of forms, inputs, buttons, links, navigation with selectors
-- **Example**: Returns structured data for all interactive elements on the page
+  - `refresh` (optional): Force refresh cache to get CURRENT state after changes (default: false)
+- **Why better than screenshot**:
+  - Shows actual data (form values, validation errors) not just visual
+  - Uses 2-5k tokens vs screenshot 15-25k tokens
+  - Returns structured data with selectors
+- **Returns**: Complete map of forms (with current values), inputs, buttons, links, navigation with selectors
+- **Example workflow**:
+  1. `openBrowser({ url: "..." })`
+  2. `analyzePage()` ← Initial analysis
+  3. `click({ selector: "submit-btn" })`
+  4. **`analyzePage({ refresh: true })`** ← See what changed after click!
 
 #### getAllInteractiveElements
 Get all clickable/fillable elements with their selectors.
@@ -271,21 +290,42 @@ Retrieve browser console logs (log, warn, error, etc.).
 - **Use case**: Debugging JavaScript errors, tracking behavior
 - **Returns**: Array of log entries with timestamps
 
-#### getNetworkRequests
-Retrieve all network requests (XHR, Fetch, API calls, resources). **Auto-captures across page navigations**.
+#### Network Monitoring (3 specialized tools)
+
+**Auto-captures across page navigations**. All network requests are monitored automatically.
+
+##### listNetworkRequests
+Get compact summary of network requests - **minimal token usage**.
 - **Parameters**:
-  - `types` (optional): Array of request types (XHR, Fetch, Script, Document, Image, etc.)
+  - `types` (optional): Array of request types (default: `['Fetch', 'XHR']`)
   - `status` (optional): Filter by status (pending, completed, failed, all)
-  - `urlPattern` (optional): Filter by URL using regex
   - `clear` (optional): Clear requests after reading (default: false)
-- **Use case**: Debugging API calls, monitoring backend requests, tracking failed requests
-- **Returns**: Array of requests with URL, method, status, headers, timing, errors
-- **Auto-reinitialization**: Monitoring continues automatically after form submissions, redirects, and navigation
-- **Examples**:
-  - `getNetworkRequests({ types: ['XHR', 'Fetch'] })` - API calls only
-  - `getNetworkRequests({ status: 'failed' })` - failed requests
-  - `getNetworkRequests({ urlPattern: 'api\\.' })` - requests to API endpoints
-  - `getNetworkRequests({ clear: true })` - get requests and clear history
+- **Returns**: Array with `requestId`, `method`, `url`, `status`, `statusCode`, `type`
+- **Use case**: Quick overview of API calls, identify requests of interest
+- **Example**: `listNetworkRequests()` → `[{ requestId: "123", method: "POST", url: "/api/login", status: "completed", statusCode: 200 }]`
+
+##### getNetworkRequest
+Get full details of a single request by ID.
+- **Parameters**:
+  - `requestId` (required): Request ID from listNetworkRequests
+- **Returns**: Complete request/response with headers, payload, timing, mime type
+- **Use case**: Deep dive into specific request after identifying it in list
+- **Example**: `getNetworkRequest({ requestId: "123" })` → full details with headers, body, timing
+
+##### filterNetworkRequests
+Filter requests by URL pattern with full details.
+- **Parameters**:
+  - `urlPattern` (required): URL pattern (regex or partial match)
+  - `types` (optional): Array of request types (default: `['Fetch', 'XHR']`)
+  - `clear` (optional): Clear requests after reading (default: false)
+- **Returns**: Array of full request details matching pattern
+- **Use case**: Get all API calls to specific endpoint with complete data
+- **Example**: `filterNetworkRequests({ urlPattern: "api/users" })` → all requests to /api/users with full details
+
+**Workflow**:
+1. `listNetworkRequests()` - see all requests (compact)
+2. `getNetworkRequest({ requestId: "..." })` - inspect specific request
+3. `filterNetworkRequests({ urlPattern: "api/..." })` - get all matching requests with details
 
 #### hover
 Simulate mouse hover over element.
@@ -324,7 +364,104 @@ Navigate to different URL while keeping browser instance.
 - **Use case**: Moving between pages in workflow
 - **Returns**: New page title
 
-### 5. Recorder Tools ⭐ NEW
+### 6. Angular Tools ⭐ NEW
+
+Specialized tools for Angular applications. Much better than `executeScript` for Angular-specific operations.
+
+#### listAngularComponents
+List all Angular components on the page with their available methods and properties.
+- **Parameters**:
+  - `includeHidden` (optional): Include components in hidden tabs/panels (default: false)
+- **Returns**: Array of components with selector, component name, methods, properties count
+- **Use case**: **Use this FIRST** to discover what Angular components are available before trying to call methods
+- **Example**:
+  ```javascript
+  listAngularComponents()
+  → {
+    "components": [
+      {
+        "selector": "kp-admin-create-notifications",
+        "componentName": "CreateNotificationsComponent",
+        "methods": ["resetForm", "loadData"],
+        "sampleProperties": ["notificationForm", "isLoading"]
+      }
+    ]
+  }
+  ```
+
+#### getAngularComponent
+Get detailed information about a specific Angular component.
+- **Parameters**:
+  - `selector` (required): CSS selector for the component
+  - `includePrivate` (optional): Include private methods/properties (default: false)
+- **Returns**: Component name, all methods, all properties with types and values
+- **Use case**: Inspect specific component to see available methods and current state
+- **Example**: `getAngularComponent({ selector: "kp-admin-chat-notifications" })`
+
+#### callAngularMethod
+Call a public method on an Angular component.
+- **Parameters**:
+  - `selector` (required): CSS selector for the component
+  - `method` (required): Method name to call
+  - `args` (optional): Array of method arguments (default: [])
+- **Returns**: Method return value
+- **Use case**: Reliably call component methods without executeScript. Automatically triggers change detection.
+- **Example**:
+  ```javascript
+  callAngularMethod({
+    selector: "kp-admin-notifications",
+    method: "sendNotification",
+    args: []
+  })
+  ```
+
+#### getAngularForm
+Get Angular reactive form data, validation state, and errors. Returns both `value` and `rawValue` - use `rawValue` to see disabled controls.
+- **Parameters**:
+  - `selector` (required): CSS selector for component containing the form
+  - `formProperty` (optional): Form property name (auto-detects if omitted)
+- **Returns**: Form validity, `value`, `rawValue` (includes disabled controls), errors (all fields), status
+- **Use case**: Check form state before submission, debug validation errors, inspect disabled controls
+- **Example**:
+  ```javascript
+  getAngularForm({ selector: "kp-admin-chat-notifications" })
+  → {
+    "valid": false,
+    "value": { "message": "", "recipients": [] },
+    "rawValue": { "message": "", "recipients": [], "recipients_by_selected_filters": [...] },
+    "errors": {
+      "message": { "required": true },
+      "recipients.0": { "minLength": {...} }
+    },
+    "note": "rawValue includes disabled controls that are excluded from value"
+  }
+  ```
+
+  **Important**: If a form control is disabled, it won't appear in `value` but WILL appear in `rawValue`. This is Angular's default behavior - use `rawValue` when debugging why data is "missing".
+
+#### submitAngularForm
+Submit Angular form programmatically with automatic fallback strategies.
+- **Parameters**:
+  - `selector` (required): CSS selector for component containing the form
+  - `formProperty` (optional): Form property name (auto-detects if omitted)
+  - `waitForResponse` (optional): Wait for network request after submit (default: true)
+- **Returns**: Success status and which strategy worked
+- **Automatic strategies** (tries in order):
+  1. Component submit methods (submit, submitForm, onSubmit, save, send, submitNotificationForm)
+  2. Form.submit() if form property specified
+  3. Click submit button
+  4. Dispatch native submit event
+- **Use case**: Most reliable way to submit Angular forms - tries multiple methods automatically
+- **Example**: `submitAngularForm({ selector: "kp-admin-create-notifications" })`
+
+**Workflow for Angular apps**:
+```javascript
+1. listAngularComponents() → see all components and their methods
+2. getAngularForm({ selector: "..." }) → check form is valid
+3. submitAngularForm({ selector: "..." }) → submit with auto fallbacks
+```
+
+### 7. Recorder Tools ⭐ NEW
 
 #### enableRecorder
 Inject visual recorder UI widget into the current page.

@@ -47,6 +47,15 @@ import {
   deleteScenario
 } from './recorder/scenario-storage.js';
 
+// Import Angular tools
+import {
+  listAngularComponents,
+  getAngularComponent,
+  callAngularMethod,
+  getAngularForm,
+  submitAngularForm
+} from './angular-tools.js';
+
 // Detect WSL environment
 const isWSL = (() => {
   try {
@@ -135,6 +144,22 @@ async function getChromeWebSocketEndpoint(port = CHROME_DEBUG_PORT, maxRetries =
 
 // Initialize browser (singleton)
 async function getBrowser() {
+  // Check if we have a cached browser and if it's still connected
+  if (browserPromise) {
+    try {
+      const cachedBrowser = await browserPromise;
+      if (cachedBrowser && cachedBrowser.isConnected()) {
+        return cachedBrowser;
+      }
+      // Browser disconnected, reset the promise
+      console.error("[chrometools-mcp] Browser disconnected, will reconnect...");
+      browserPromise = null;
+    } catch (error) {
+      console.error("[chrometools-mcp] Error checking cached browser:", error.message);
+      browserPromise = null;
+    }
+  }
+
   if (!browserPromise) {
     browserPromise = (async () => {
       try {
@@ -150,6 +175,13 @@ async function getBrowser() {
           });
           console.error("[chrometools-mcp] Connected to existing Chrome instance");
           console.error("[chrometools-mcp] WebSocket endpoint:", endpoint);
+
+          // Set up disconnect handler to reset browserPromise
+          browser.on('disconnected', () => {
+            console.error("[chrometools-mcp] Browser disconnected");
+            browserPromise = null;
+          });
+
           return browser;
         } catch (connectError) {
           console.error("[chrometools-mcp] No existing Chrome found, launching new instance...");
@@ -187,6 +219,12 @@ async function getBrowser() {
 
         console.error("[chrometools-mcp] Connected to Chrome instance");
         console.error("[chrometools-mcp] WebSocket endpoint:", endpoint);
+
+        // Set up disconnect handler to reset browserPromise
+        browser.on('disconnected', () => {
+          console.error("[chrometools-mcp] Browser disconnected");
+          browserPromise = null;
+        });
 
         return browser;
       } catch (error) {
@@ -717,6 +755,12 @@ const ScrollToSchema = z.object({
   behavior: z.enum(['auto', 'smooth']).optional().describe("Scroll behavior (default: auto)"),
 });
 
+const WaitForElementSchema = z.object({
+  selector: z.string().describe("CSS selector to wait for"),
+  timeout: z.number().optional().describe("Maximum time to wait in milliseconds (default: 5000)"),
+  visible: z.boolean().optional().describe("Wait for element to be visible (default: true)"),
+});
+
 const ExecuteScriptSchema = z.object({
   script: z.string().describe("JavaScript code to execute in page context"),
   waitAfter: z.number().optional().describe("Milliseconds to wait after execution (default: 500)"),
@@ -732,14 +776,28 @@ const GetConsoleLogsSchema = z.object({
   clear: z.boolean().optional().describe("Clear logs after reading (default: false)"),
 });
 
-const GetNetworkRequestsSchema = z.object({
+// Network tools schemas
+const ListNetworkRequestsSchema = z.object({
   types: z.array(z.enum(['Document', 'Stylesheet', 'Image', 'Media', 'Font', 'Script', 'XHR', 'Fetch', 'WebSocket', 'Other']))
     .optional()
-    .describe("Filter by request types (default: all)"),
+    .default(['Fetch', 'XHR'])
+    .describe("Filter by request types (default: Fetch, XHR)"),
   status: z.enum(['pending', 'completed', 'failed', 'all'])
     .optional()
     .describe("Filter by status (default: all)"),
-  urlPattern: z.string().optional().describe("Filter by URL pattern (regex)"),
+  clear: z.boolean().optional().describe("Clear requests after reading (default: false)"),
+});
+
+const GetNetworkRequestSchema = z.object({
+  requestId: z.string().describe("Request ID to get details for"),
+});
+
+const FilterNetworkRequestsSchema = z.object({
+  urlPattern: z.string().describe("URL pattern to filter by (regex or partial match)"),
+  types: z.array(z.enum(['Document', 'Stylesheet', 'Image', 'Media', 'Font', 'Script', 'XHR', 'Fetch', 'WebSocket', 'Other']))
+    .optional()
+    .default(['Fetch', 'XHR'])
+    .describe("Filter by request types (default: Fetch, XHR)"),
   clear: z.boolean().optional().describe("Clear requests after reading (default: false)"),
 });
 
@@ -768,6 +826,33 @@ const NavigateToSchema = z.object({
   waitUntil: z.enum(['load', 'domcontentloaded', 'networkidle0', 'networkidle2'])
     .optional()
     .describe("Wait until event (default: networkidle2)"),
+});
+
+// Angular tools schemas
+const ListAngularComponentsSchema = z.object({
+  includeHidden: z.boolean().optional().describe("Include components in hidden tabs/panels (default: false)"),
+});
+
+const GetAngularComponentSchema = z.object({
+  selector: z.string().describe("CSS selector for the Angular component element"),
+  includePrivate: z.boolean().optional().describe("Include private methods/properties (default: false)"),
+});
+
+const CallAngularMethodSchema = z.object({
+  selector: z.string().describe("CSS selector for the Angular component element"),
+  method: z.string().describe("Method name to call"),
+  args: z.array(z.any()).optional().describe("Method arguments (default: [])"),
+});
+
+const GetAngularFormSchema = z.object({
+  selector: z.string().describe("CSS selector for the component containing the form"),
+  formProperty: z.string().optional().describe("Form property name (auto-detects if omitted)"),
+});
+
+const SubmitAngularFormSchema = z.object({
+  selector: z.string().describe("CSS selector for the component containing the form"),
+  formProperty: z.string().optional().describe("Form property name (auto-detects if omitted)"),
+  waitForResponse: z.boolean().optional().describe("Wait for network request after submit (default: true)"),
 });
 
 // Figma tools schemas
@@ -889,7 +974,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "getElement",
-        description: "Get the HTML markup of an element for inspection and debugging. If no selector is provided, returns the entire <body> element. Useful for understanding component structure.",
+        description: "Get HTML markup of specific element. TIP: Use analyzePage instead to get structured data of ALL page elements at once - much more efficient than inspecting elements one by one.",
         inputSchema: {
           type: "object",
           properties: {
@@ -920,7 +1005,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "screenshot",
-        description: "Capture an optimized screenshot of a specific element. By default, auto-scales large images to 1024px width and 8000px height (API limit) and uses smart compression to reduce AI context usage. Perfect for visual documentation and design reviews. Use maxWidth: null and format: 'png' for original quality.",
+        description: "Capture visual image of element (uses 15-25k tokens). USE FOR: visual comparison with design, documentation, checking layout/colors. DON'T USE FOR debugging form data (use analyzePage to see actual values), after button clicks (use analyzePage with refresh:true to see what changed), validation errors (use analyzePage or getAngularForm). Screenshot shows visual appearance - for debugging DATA use analyzePage.",
         inputSchema: {
           type: "object",
           properties: {
@@ -964,8 +1049,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "waitForElement",
+        description: "Wait for an element to appear on the page. Essential for dynamic content, autocomplete dropdowns, lazy-loaded elements. Use this instead of executeScript with setTimeout when waiting for elements to load.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector to wait for" },
+            timeout: { type: "number", description: "Maximum time to wait in milliseconds (default: 5000)" },
+            visible: { type: "boolean", description: "Wait for element to be visible (default: true)" },
+          },
+          required: ["selector"],
+        },
+      },
+      {
         name: "executeScript",
-        description: "Execute arbitrary JavaScript code in the page context. Perfect for complex interactions, setting values, triggering events, or any custom page manipulation. Returns execution result. Screenshot is optional for better performance.",
+        description: "Execute JavaScript code. USE ONLY when specialized tools insufficient. DO NOT use for: Angular components (use getAngularComponent), Angular forms (use getAngularForm), calling Angular methods (use callAngularMethod), finding elements (use analyzePage or findElementsByText). Before using, check if Angular tools (listAngularComponents, getAngularComponent, getAngularForm, callAngularMethod) can solve your task. Last resort only.",
         inputSchema: {
           type: "object",
           properties: {
@@ -989,16 +1087,39 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
-        name: "getNetworkRequests",
-        description: "Retrieve all network requests (XHR, Fetch, API calls, resources) made by the browser. Essential for debugging API calls, monitoring backend requests, and tracking resource loading. Requests are captured automatically from page load.",
+        name: "listNetworkRequests",
+        description: "Get compact list of network requests with method, URL, and status only. Perfect for overview of API calls. Use getNetworkRequest for full details of specific request. Requests captured automatically from page load.",
         inputSchema: {
           type: "object",
           properties: {
-            types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter by request types (default: all)" },
+            types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter by request types (default: Fetch, XHR)" },
             status: { type: "string", enum: ["pending", "completed", "failed", "all"], description: "Filter by status (default: all)" },
-            urlPattern: { type: "string", description: "Filter by URL pattern (regex)" },
             clear: { type: "boolean", description: "Clear requests after reading (default: false)" },
           },
+        },
+      },
+      {
+        name: "getNetworkRequest",
+        description: "Get full details of a specific network request including headers, payload, and response. Use requestId from listNetworkRequests.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            requestId: { type: "string", description: "Request ID to get details for" },
+          },
+          required: ["requestId"],
+        },
+      },
+      {
+        name: "filterNetworkRequests",
+        description: "Filter network requests by URL pattern and get full details. Returns all matching requests with headers, payloads, and responses.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            urlPattern: { type: "string", description: "URL pattern to filter by (regex or partial match)" },
+            types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter by request types (default: Fetch, XHR)" },
+            clear: { type: "boolean", description: "Clear requests after reading (default: false)" },
+          },
+          required: ["urlPattern"],
         },
       },
       {
@@ -1069,6 +1190,66 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "listAngularComponents",
+        description: "List all Angular components on the page with their selectors, methods, and properties. Use this FIRST to discover what components are available before calling methods. Much better than blind executeScript attempts.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            includeHidden: { type: "boolean", description: "Include components in hidden tabs/panels (default: false)" },
+          },
+        },
+      },
+      {
+        name: "getAngularComponent",
+        description: "PREFERRED tool for inspecting Angular components (instead of executeScript with ng.getComponent). Get all methods, properties, and current state. Automatically extracts public methods and properties with type information. Use this BEFORE executeScript when working with Angular. Example: Instead of executeScript('ng.getComponent(el).someProperty'), use this tool.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for the Angular component element" },
+            includePrivate: { type: "boolean", description: "Include private methods/properties (default: false)" },
+          },
+          required: ["selector"],
+        },
+      },
+      {
+        name: "callAngularMethod",
+        description: "Call a public method on an Angular component. Much more reliable than executeScript. Automatically handles change detection and error reporting.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for the Angular component element" },
+            method: { type: "string", description: "Method name to call" },
+            args: { type: "array", description: "Method arguments (default: [])" },
+          },
+          required: ["selector", "method"],
+        },
+      },
+      {
+        name: "getAngularForm",
+        description: "PREFERRED tool for debugging Angular forms (instead of executeScript). Get form data, validation state, errors. Shows BOTH .value and .getRawValue() (includes disabled controls). Works with ReactiveFormsModule and Template-driven. Auto-detects form. Use when: debugging form submission, checking validation, inspecting disabled controls. Example: When form.value seems wrong, this shows both value and rawValue.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for the component containing the form" },
+            formProperty: { type: "string", description: "Form property name (auto-detects if omitted)" },
+          },
+          required: ["selector"],
+        },
+      },
+      {
+        name: "submitAngularForm",
+        description: "Submit Angular form programmatically. Tries multiple strategies automatically: component submit method, form.submit(), native submit event, clicking submit button. Most reliable way to submit Angular forms.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for the component containing the form" },
+            formProperty: { type: "string", description: "Form property name (auto-detects if omitted)" },
+            waitForResponse: { type: "boolean", description: "Wait for network request after submit (default: true)" },
+          },
+          required: ["selector"],
+        },
+      },
+      {
         name: "getFigmaFrame",
         description: "Export and download a Figma frame as PNG image for comparison. Requires Figma API token and file/node IDs from Figma URLs.",
         inputSchema: {
@@ -1114,7 +1295,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "smartFindElement",
-        description: "AI-powered element finder that uses natural language to locate elements. Returns multiple candidates ranked by relevance. Can optionally perform actions (click, type, etc.) on the best match immediately.",
+        description: "AI-powered element finder using natural language. TIP: Use analyzePage first to get complete page structure with all selectors - it's faster and more reliable. This tool is best for ambiguous searches when exact selector is unknown. Returns multiple candidates ranked by relevance.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1138,7 +1319,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "analyzePage",
-        description: "Comprehensive page analysis that returns complete structure: all forms, inputs, buttons, links, and interactive elements with their selectors. Cached for fast repeated access. Use this ONCE at page load to understand the entire page structure.",
+        description: "Get current page state and structure: forms (with values), inputs, buttons, links, selectors. USE AFTER: page load, button clicks, form submissions, AJAX updates, ANY page changes. Use refresh:true to get latest state after interactions. BETTER than screenshot for debugging: shows actual data (form values, errors, validation states) not just visual. 2-5k tokens vs screenshot 15-25k. Cached per URL, use refresh:true after page changes.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1683,13 +1864,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const validatedArgs = ScrollToSchema.parse(args);
       const page = await getLastOpenPage();
 
-      const element = await page.$(validatedArgs.selector);
-      if (!element) {
+      // Check if element exists
+      const elementExists = await page.$(validatedArgs.selector);
+      if (!elementExists) {
         throw new Error(`Element not found: ${validatedArgs.selector}`);
       }
 
-      await element.scrollIntoView({ behavior: validatedArgs.behavior || 'auto' });
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Scroll to element using page.evaluate
+      await page.evaluate((selector, behavior) => {
+        const element = document.querySelector(selector);
+        if (element) {
+          element.scrollIntoView({ behavior: behavior || 'auto', block: 'center' });
+        }
+      }, validatedArgs.selector, validatedArgs.behavior || 'auto');
+
+      // Wait for scroll to complete
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       const position = await page.evaluate(() => ({
         x: window.scrollX,
@@ -1701,6 +1891,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           { type: "text", text: `Scrolled to ${validatedArgs.selector} (position: ${position.x}, ${position.y})` }
         ],
       };
+    }
+
+    if (name === "waitForElement") {
+      const validatedArgs = WaitForElementSchema.parse(args);
+      const page = await getLastOpenPage();
+      const timeout = validatedArgs.timeout || 5000;
+      const waitForVisible = validatedArgs.visible !== false;
+
+      try {
+        if (waitForVisible) {
+          // Wait for element to be visible
+          await page.waitForSelector(validatedArgs.selector, { timeout, visible: true });
+        } else {
+          // Just wait for element to exist in DOM
+          await page.waitForSelector(validatedArgs.selector, { timeout });
+        }
+
+        // Get info about the element
+        const elementInfo = await page.evaluate((selector) => {
+          const el = document.querySelector(selector);
+          if (!el) return null;
+
+          const rect = el.getBoundingClientRect();
+          return {
+            visible: el.offsetParent !== null,
+            inViewport: rect.top >= 0 && rect.left >= 0 &&
+                       rect.bottom <= window.innerHeight &&
+                       rect.right <= window.innerWidth,
+            tagName: el.tagName.toLowerCase(),
+            text: el.textContent?.trim().substring(0, 100) || ''
+          };
+        }, validatedArgs.selector);
+
+        return {
+          content: [{
+            type: "text",
+            text: `Element appeared: ${validatedArgs.selector}\n${JSON.stringify(elementInfo, null, 2)}`
+          }],
+        };
+      } catch (error) {
+        if (error.name === 'TimeoutError') {
+          throw new Error(`Element not found within ${timeout}ms: ${validatedArgs.selector}`);
+        }
+        throw error;
+      }
     }
 
     if (name === "executeScript") {
@@ -1780,12 +2015,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === "getNetworkRequests") {
-      const validatedArgs = GetNetworkRequestsSchema.parse(args);
+    // Tool 1: listNetworkRequests - compact summary
+    if (name === "listNetworkRequests") {
+      const validatedArgs = ListNetworkRequestsSchema.parse(args);
 
       let requests = networkRequests;
 
-      // Filter by types if specified
+      // Filter by types (defaults to Fetch and XHR only)
       if (validatedArgs.types && validatedArgs.types.length > 0) {
         requests = requests.filter(req => validatedArgs.types.includes(req.type));
       }
@@ -1795,38 +2031,129 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         requests = requests.filter(req => req.status === validatedArgs.status);
       }
 
-      // Filter by URL pattern if specified
-      if (validatedArgs.urlPattern) {
-        try {
-          const regex = new RegExp(validatedArgs.urlPattern);
-          requests = requests.filter(req => regex.test(req.url));
-        } catch (error) {
-          throw new Error(`Invalid URL pattern regex: ${error.message}`);
-        }
-      }
-
       const result = {
         count: requests.length,
         requests: requests.map(req => ({
+          requestId: req.requestId,
+          method: req.method,
+          url: req.url,
+          status: req.status,
+          statusCode: req.status === 'completed' ? req.status : undefined,
+          type: req.type,
+        }))
+      };
+
+      // Clear requests if requested
+      if (validatedArgs.clear) {
+        networkRequests.length = 0;
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }],
+      };
+    }
+
+    // Tool 2: getNetworkRequest - full details of single request
+    if (name === "getNetworkRequest") {
+      const validatedArgs = GetNetworkRequestSchema.parse(args);
+
+      const req = networkRequests.find(r => r.requestId === validatedArgs.requestId);
+      if (!req) {
+        throw new Error(`Request not found: ${validatedArgs.requestId}`);
+      }
+
+      // Helper to minify JSON strings
+      const minifyJson = (str) => {
+        if (!str) return str;
+        try {
+          const parsed = JSON.parse(str);
+          return JSON.stringify(parsed); // Minified (no spacing)
+        } catch {
+          return str; // Return as-is if not valid JSON
+        }
+      };
+
+      const result = {
+        requestId: req.requestId,
+        url: req.url,
+        method: req.method,
+        type: req.type,
+        status: req.status,
+        statusCode: req.status,
+        statusText: req.statusText,
+        timestamp: req.timestamp,
+        finishedTimestamp: req.finishedTimestamp,
+        duration: req.finishedTimestamp ? new Date(req.finishedTimestamp) - new Date(req.timestamp) + 'ms' : undefined,
+        fromCache: req.fromCache,
+        headers: req.headers,
+        postData: req.postData ? minifyJson(req.postData) : undefined,
+        responseHeaders: req.responseHeaders,
+        mimeType: req.mimeType,
+        errorText: req.errorText,
+        canceled: req.canceled,
+      };
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }],
+      };
+    }
+
+    // Tool 3: filterNetworkRequests - filter by URL pattern with full details
+    if (name === "filterNetworkRequests") {
+      const validatedArgs = FilterNetworkRequestsSchema.parse(args);
+
+      let requests = networkRequests;
+
+      // Filter by types (defaults to Fetch and XHR only)
+      if (validatedArgs.types && validatedArgs.types.length > 0) {
+        requests = requests.filter(req => validatedArgs.types.includes(req.type));
+      }
+
+      // Filter by URL pattern
+      try {
+        const regex = new RegExp(validatedArgs.urlPattern);
+        requests = requests.filter(req => regex.test(req.url));
+      } catch (error) {
+        // Try partial match if regex fails
+        requests = requests.filter(req => req.url.includes(validatedArgs.urlPattern));
+      }
+
+      // Helper to minify JSON strings
+      const minifyJson = (str) => {
+        if (!str) return str;
+        try {
+          const parsed = JSON.parse(str);
+          return JSON.stringify(parsed); // Minified (no spacing)
+        } catch {
+          return str; // Return as-is if not valid JSON
+        }
+      };
+
+      const result = {
+        count: requests.length,
+        pattern: validatedArgs.urlPattern,
+        requests: requests.map(req => ({
+          requestId: req.requestId,
           url: req.url,
           method: req.method,
           type: req.type,
           status: req.status,
-          statusCode: req.status === 'completed' || req.status === 'failed' ? req.status : undefined,
+          statusCode: req.status,
           statusText: req.statusText,
           timestamp: req.timestamp,
-          finishedTimestamp: req.finishedTimestamp,
-          mimeType: req.mimeType,
-          initiator: req.initiator,
+          duration: req.finishedTimestamp ? new Date(req.finishedTimestamp) - new Date(req.timestamp) + 'ms' : undefined,
           fromCache: req.fromCache,
-          errorText: req.errorText,
-          canceled: req.canceled,
-          encodedDataLength: req.encodedDataLength,
-          // Request details
-          requestHeaders: req.headers,
-          postData: req.postData,
-          // Response details
+          headers: req.headers,
+          postData: req.postData ? minifyJson(req.postData) : undefined,
           responseHeaders: req.responseHeaders,
+          mimeType: req.mimeType,
+          errorText: req.errorText,
         }))
       };
 
@@ -1952,6 +2279,77 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{
           type: "text",
           text: `Navigated to: ${validatedArgs.url}\nPage title: ${title}\n\n** AI HINTS **\nPage type: ${hints.pageType}\nAvailable actions: ${hints.availableActions.join(', ')}\nSuggested next: ${hints.suggestedNext.join('; ')}`
+        }],
+      };
+    }
+
+    // Angular tools
+    if (name === "listAngularComponents") {
+      const validatedArgs = ListAngularComponentsSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const components = await listAngularComponents(page, validatedArgs.includeHidden);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(components, null, 2)
+        }],
+      };
+    }
+
+    if (name === "getAngularComponent") {
+      const validatedArgs = GetAngularComponentSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const componentInfo = await getAngularComponent(page, validatedArgs.selector, validatedArgs.includePrivate);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(componentInfo, null, 2)
+        }],
+      };
+    }
+
+    if (name === "callAngularMethod") {
+      const validatedArgs = CallAngularMethodSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const result = await callAngularMethod(page, validatedArgs.selector, validatedArgs.method, validatedArgs.args);
+
+      return {
+        content: [{
+          type: "text",
+          text: `Method '${validatedArgs.method}' called successfully.\n${JSON.stringify(result, null, 2)}`
+        }],
+      };
+    }
+
+    if (name === "getAngularForm") {
+      const validatedArgs = GetAngularFormSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const formData = await getAngularForm(page, validatedArgs.selector, validatedArgs.formProperty);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(formData, null, 2)
+        }],
+      };
+    }
+
+    if (name === "submitAngularForm") {
+      const validatedArgs = SubmitAngularFormSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const result = await submitAngularForm(page, validatedArgs.selector, validatedArgs.formProperty, validatedArgs.waitForResponse);
+
+      return {
+        content: [{
+          type: "text",
+          text: `Form submitted successfully!\n${JSON.stringify(result, null, 2)}`
         }],
       };
     }
@@ -2609,8 +3007,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             results.push({
               selector: getUniqueSelectorInPage(el),
               type: el.tagName.toLowerCase(),
-              text: elementText.substring(0, 100),
-              fullText: elementText,
+              text: elementText.substring(0, 100), // Only first 100 chars for preview
+              visible: el.offsetParent !== null, // Add visibility check
             });
           }
         });
@@ -2618,10 +3016,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return results;
       }, validatedArgs.text, validatedArgs.exact || false, validatedArgs.caseSensitive || false, elementFinderUtils);
 
+      // Prioritize visible elements and limit results to prevent token overflow
+      const visibleElements = elements.filter(el => el.visible);
+      const hiddenElements = elements.filter(el => !el.visible);
+      const limitedElements = [...visibleElements, ...hiddenElements].slice(0, 20); // Max 20 results
+
       const response = {
         query: validatedArgs.text,
-        count: elements.length,
-        elements,
+        totalCount: elements.length,
+        visibleCount: visibleElements.length,
+        count: limitedElements.length,
+        elements: limitedElements,
+        truncated: elements.length > 20
       };
 
       // Execute action if provided and elements found

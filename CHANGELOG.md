@@ -2,6 +2,76 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.7] - 2025-12-01
+
+### Added
+- **Angular-specific tools** - 5 new tools for working with Angular applications
+- `listAngularComponents` - Discover all Angular components on page with methods/properties
+- `getAngularComponent` - Get detailed info about specific component (methods, properties, state)
+- `callAngularMethod` - Call component methods reliably with auto change detection
+- `getAngularForm` - Get form data, validation state, errors (ReactiveFormsModule & Template-driven)
+- `submitAngularForm` - Submit forms with automatic fallback strategies (method → button → event)
+- **`waitForElement`** - Wait for elements to appear (autocomplete, lazy loading, dynamic content)
+
+### Fixed (additional)
+- **`findElementsByText` token overflow** - removed `fullText`, added visibility check, limit 20 results
+- Prioritizes visible elements over hidden ones
+- Now returns `truncated: true` when results are limited
+
+### Fixed
+- **Auto-reconnection after Chrome closure**
+- Browser now automatically reconnects when Chrome is closed and reopened with debug port
+- Added `browser.isConnected()` check before reusing cached browser instance
+- Added `disconnected` event handler to reset browser state
+- Fixes "Connection closed" error when Chrome debug session is manually restarted
+- **scrollTo tool now works correctly**
+- Fixed incorrect usage of `element.scrollIntoView()` method (not available in Puppeteer ElementHandle)
+- Now uses `page.evaluate()` to properly execute `scrollIntoView()` in browser context
+- Added `block: 'center'` for better element positioning
+- Increased wait time to 500ms for smooth scrolling completion
+
+### Changed
+- **Angular tools descriptions updated** - emphasize use BEFORE executeScript
+- `getAngularComponent` - marked as PREFERRED over executeScript with ng.getComponent
+- `getAngularForm` - now returns both value and rawValue (shows disabled controls!)
+- `executeScript` - explicit warnings: DO NOT use for Angular (use specialized tools instead)
+- **`analyzePage` description updated** - clarified use AFTER page changes (clicks, submissions, AJAX)
+- Now emphasizes `refresh:true` to get current state after interactions
+- Compares favorably to screenshot for debugging (2-5k vs 15-25k tokens, actual data vs visual)
+- **`screenshot` description updated** - clarified when NOT to use (debugging data, after clicks)
+- Emphasizes use for visual comparison only, not for inspecting form values or state
+- **Network monitoring split into 3 specialized tools** (massive token reduction)
+- `listNetworkRequests` - compact summary (requestId, method, URL, status only)
+- `getNetworkRequest` - full details of single request by requestId
+- `filterNetworkRequests` - filter by URL pattern with full details
+- Replaces monolithic `getNetworkRequests` with targeted workflow
+- **`analyzePage` description emphasizes REQUIRED usage on every page**
+- Tool descriptions updated to prioritize `analyzePage` over manual element searching
+- `executeScript` description clarified as last resort after `analyzePage`
+- `smartFindElement` now recommends `analyzePage` first for better performance
+- `getElement` now recommends `analyzePage` for bulk element inspection
+- `getBrowser()` now validates connection status before returning cached browser
+- Browser promise is reset on disconnect for automatic reconnection
+- `scrollTo` implementation rewritten to use proper Puppeteer API
+
+### Removed
+- `getNetworkRequests` tool (replaced by 3 specialized tools above)
+
+## [1.3.6] - 2025-12-01
+
+### Changed
+- **Optimized getNetworkRequests output for reduced token usage**
+- Default filter now Fetch/XHR only (excludes images, scripts, stylesheets, etc.)
+- Minified JSON payloads (request/response bodies now compact, no whitespace)
+- Essential headers only (content-type, authorization, x-api-key, set-cookie)
+- Conditional fields (error details only on failure, cache flag only when true)
+- Duration calculation instead of separate timestamp fields
+
+### Performance
+- Significantly reduced output size (50-80% reduction typical)
+- Better for AI context windows with large API traces
+- Essential data preserved, noise eliminated
+
 ## [1.3.5] - 2025-01-26
 
 ### Added
