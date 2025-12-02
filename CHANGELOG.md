@@ -2,15 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.3.9] - 2025-12-02
+## [1.4.0] - 2025-12-02
 
 ### Added
+- **getFigmaSpecs text extraction** - Extract all text content from Figma designs (buttons, labels, headings, paragraphs)
+  - `textContent`: Direct text for TEXT nodes with character count
+  - `allTextContent`: Array of all text nodes (name, text, visibility) from entire tree
+  - `textSummary`: Statistics (total nodes, visible nodes, combined text)
+  - Recursive extraction from all child elements
+  - Example use: Get button labels, form placeholders, UI copy from designs
 - **getComputedCss filtering** - Intelligent CSS property filtering to reduce token usage from ~14k to ~1-2k tokens
   - `category` parameter: Filter by 'layout', 'typography', 'colors', 'visual', or 'all' (default)
   - `properties` parameter: Request specific CSS properties (e.g., `['color', 'font-size']`)
   - `includeDefaults` parameter: Optionally include/exclude properties with default values (default: false)
   - Returns metadata: total properties, filtered count, applied filters
   - Example: `{ selector: ".header", category: "layout" }` returns only layout-related properties
+
+### Changed
+- **getFigmaSpecs children structure enhanced** - Now includes text content and dimensions for all child elements
 
 ### Performance
 - **getComputedCss now 7-14x more efficient** - Filtering reduces output from ~300 properties to 10-50 properties

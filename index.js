@@ -2865,6 +2865,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
       }
 
+      // Text content (for TEXT nodes)
+      if (node.type === 'TEXT' && node.characters) {
+        specs.textContent = {
+          text: node.characters,
+          characterCount: node.characters.length
+        };
+      }
+
       // Typography
       if (node.style) {
         specs.styling.typography = {
@@ -2904,15 +2912,66 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      // Analyze children
+      // Helper function to recursively extract text from all children
+      function extractTextFromNode(n, depth = 0) {
+        const result = {
+          id: n.id,
+          name: n.name,
+          type: n.type,
+          visible: n.visible !== false
+        };
+
+        // Extract text content for TEXT nodes
+        if (n.type === 'TEXT' && n.characters) {
+          result.text = n.characters;
+        }
+
+        // Add dimensions if available
+        if (n.absoluteBoundingBox) {
+          result.dimensions = {
+            width: n.absoluteBoundingBox.width,
+            height: n.absoluteBoundingBox.height,
+            x: n.absoluteBoundingBox.x,
+            y: n.absoluteBoundingBox.y
+          };
+        }
+
+        // Recursively process children
+        if (n.children && n.children.length > 0) {
+          result.children = n.children.map(child => extractTextFromNode(child, depth + 1));
+        }
+
+        return result;
+      }
+
+      // Analyze children with text extraction
       if (node.children && node.children.length > 0) {
-        specs.children = node.children.map(child => ({
-          id: child.id,
-          name: child.name,
-          type: child.type,
-          dimensions: child.absoluteBoundingBox,
-          visible: child.visible !== false
-        }));
+        specs.children = node.children.map(child => extractTextFromNode(child));
+      }
+
+      // Extract all text content from the entire tree
+      function collectAllText(n, texts = []) {
+        if (n.type === 'TEXT' && n.characters) {
+          texts.push({
+            name: n.name,
+            text: n.characters,
+            visible: n.visible !== false
+          });
+        }
+        if (n.children) {
+          n.children.forEach(child => collectAllText(child, texts));
+        }
+        return texts;
+      }
+
+      const allTexts = collectAllText(node);
+      if (allTexts.length > 0) {
+        specs.allTextContent = allTexts;
+        specs.textSummary = {
+          totalTextNodes: allTexts.length,
+          visibleTextNodes: allTexts.filter(t => t.visible).length,
+          combinedText: allTexts.filter(t => t.visible).map(t => t.text).join(' ')
+        };
       }
 
       return {

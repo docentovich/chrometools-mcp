@@ -405,13 +405,20 @@ The GOLD STANDARD for design-to-code validation. Compares Figma design pixel-per
 - **Automatic compression**: All three images are automatically compressed if they exceed 3 MB
 
 #### getFigmaSpecs
-Extract detailed design specifications from Figma (colors, fonts, dimensions, spacing).
+Extract detailed design specifications from Figma including text content, colors, fonts, dimensions, and spacing.
 - **Parameters**:
   - `figmaToken` (optional): Figma API token
   - `fileKey` (required): Figma file key
   - `nodeId` (required): Figma frame/component ID
-- **Use case**: Getting exact design specifications for implementation
-- **Returns**: Complete design specs (colors, typography, spacing, dimensions)
+- **Use case**: Getting exact design specifications and text content for implementation
+- **Returns**: Complete design specs with:
+  - **Text content**: All text from TEXT nodes (buttons, labels, headings, paragraphs)
+  - **textContent**: Direct text for TEXT nodes
+  - **allTextContent**: Array of all text nodes with names and visibility
+  - **textSummary**: Total text nodes count, visible count, combined text
+  - **Styling**: Colors (fills, strokes), typography (fonts, sizes, weights), effects (shadows, blur)
+  - **Dimensions**: Width, height, x, y coordinates
+  - **Children**: Recursive tree with text extraction from all child elements
 
 ### 6. Angular Tools ⭐ NEW
 
