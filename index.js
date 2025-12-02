@@ -56,6 +56,21 @@ import {
   submitAngularForm
 } from './angular-tools.js';
 
+// Import Figma tools
+import {
+  parseFigmaUrl,
+  normalizeFigmaNodeId,
+  fetchFigmaAPI,
+  getFigmaFile,
+  listFigmaPages,
+  searchFigmaFrames,
+  getFigmaComponents,
+  getFigmaStyles,
+  getFigmaColorPalette,
+  extractTextFromNode,
+  collectAllText
+} from './figma-tools.js';
+
 // Detect WSL environment
 const isWSL = (() => {
   try {
@@ -493,31 +508,7 @@ async function getLastOpenPage() {
 }
 
 // Helper function to normalize Figma node ID (convert URL format to API format)
-function normalizeFigmaNodeId(nodeId) {
-  // Figma URLs use format like "47361-19211" but API expects "47361:19211"
-  // This function automatically converts between formats
-  return nodeId.replace(/-/g, ':');
-}
-
-// Figma API helper function
-async function fetchFigmaAPI(endpoint, figmaToken) {
-  if (!figmaToken) {
-    throw new Error('Figma token is required. Get it from https://www.figma.com/developers/api#access-tokens');
-  }
-
-  const response = await fetch(`https://api.figma.com/v1/${endpoint}`, {
-    headers: {
-      'X-Figma-Token': figmaToken
-    }
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Figma API error: ${response.status} - ${error}`);
-  }
-
-  return response.json();
-}
+// Figma helper functions moved to figma-tools.js
 
 // Helper function to process screenshot with compression and scaling
 async function processScreenshot(screenshotBuffer, options = {}) {
@@ -1073,6 +1064,36 @@ const GetFigmaSpecsSchema = z.object({
   nodeId: z.string().describe("Figma frame/component ID")
 });
 
+const ParseFigmaUrlSchema = z.object({
+  url: z.string().describe("Full Figma URL or fileKey")
+});
+
+const ListFigmaPagesSchema = z.object({
+  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  fileKey: z.string().describe("Figma file key or full Figma URL")
+});
+
+const SearchFigmaFramesSchema = z.object({
+  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  fileKey: z.string().describe("Figma file key or full Figma URL"),
+  searchQuery: z.string().describe("Search query")
+});
+
+const GetFigmaComponentsSchema = z.object({
+  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  fileKey: z.string().describe("Figma file key or full Figma URL")
+});
+
+const GetFigmaStylesSchema = z.object({
+  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  fileKey: z.string().describe("Figma file key or full Figma URL")
+});
+
+const GetFigmaColorPaletteSchema = z.object({
+  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  fileKey: z.string().describe("Figma file key or full Figma URL")
+});
+
 // New AI optimization tools schemas
 const SmartFindElementSchema = z.object({
   description: z.string().describe("Natural language description of element to find (e.g., 'login button', 'email field')"),
@@ -1499,6 +1520,78 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             nodeId: { type: "string", description: "Figma frame/component ID" },
           },
           required: ["fileKey", "nodeId"],
+        },
+      },
+      {
+        name: "parseFigmaUrl",
+        description: "Parse Figma URL to extract fileKey and nodeId. Accepts full Figma URLs (figma.com/file/..., figma.com/design/...) and automatically extracts parameters. Makes it easy to work with Figma links without manual parsing.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "Full Figma URL (e.g., https://www.figma.com/file/ABC123/Design?node-id=1-2) or just fileKey" },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "listFigmaPages",
+        description: "Get file structure: all pages and frames from Figma file. Returns hierarchical list of pages with their frames, IDs, names, and dimensions. Use this FIRST to discover what's in the file before requesting specific nodes.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
+            fileKey: { type: "string", description: "Figma file key or full Figma URL" },
+          },
+          required: ["fileKey"],
+        },
+      },
+      {
+        name: "searchFigmaFrames",
+        description: "Search for frames/components by name in Figma file. Case-insensitive search across all pages. Returns matching nodes with IDs, types, pages, and dimensions.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
+            fileKey: { type: "string", description: "Figma file key or full Figma URL" },
+            searchQuery: { type: "string", description: "Search query (e.g., 'login', 'button', 'header')" },
+          },
+          required: ["fileKey", "searchQuery"],
+        },
+      },
+      {
+        name: "getFigmaComponents",
+        description: "Get all components from Figma file (Design System). Returns all COMPONENT and COMPONENT_SET nodes with names, descriptions, and dimensions. Perfect for extracting design system components.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
+            fileKey: { type: "string", description: "Figma file key or full Figma URL" },
+          },
+          required: ["fileKey"],
+        },
+      },
+      {
+        name: "getFigmaStyles",
+        description: "Get all styles from Figma file: color styles, text styles, effect styles, grid styles. Returns design system styles with names and descriptions. Use for extracting shared design tokens.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
+            fileKey: { type: "string", description: "Figma file key or full Figma URL" },
+          },
+          required: ["fileKey"],
+        },
+      },
+      {
+        name: "getFigmaColorPalette",
+        description: "Extract complete color palette from Figma file. Analyzes all fills and strokes, returns unique colors with hex values, rgba, usage count, and examples. Sorted by usage frequency.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
+            fileKey: { type: "string", description: "Figma file key or full Figma URL" },
+          },
+          required: ["fileKey"],
         },
       },
       {
@@ -2912,56 +3005,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      // Helper function to recursively extract text from all children
-      function extractTextFromNode(n, depth = 0) {
-        const result = {
-          id: n.id,
-          name: n.name,
-          type: n.type,
-          visible: n.visible !== false
-        };
-
-        // Extract text content for TEXT nodes
-        if (n.type === 'TEXT' && n.characters) {
-          result.text = n.characters;
-        }
-
-        // Add dimensions if available
-        if (n.absoluteBoundingBox) {
-          result.dimensions = {
-            width: n.absoluteBoundingBox.width,
-            height: n.absoluteBoundingBox.height,
-            x: n.absoluteBoundingBox.x,
-            y: n.absoluteBoundingBox.y
-          };
-        }
-
-        // Recursively process children
-        if (n.children && n.children.length > 0) {
-          result.children = n.children.map(child => extractTextFromNode(child, depth + 1));
-        }
-
-        return result;
-      }
-
-      // Analyze children with text extraction
+      // Analyze children with text extraction (using imported function)
       if (node.children && node.children.length > 0) {
         specs.children = node.children.map(child => extractTextFromNode(child));
-      }
-
-      // Extract all text content from the entire tree
-      function collectAllText(n, texts = []) {
-        if (n.type === 'TEXT' && n.characters) {
-          texts.push({
-            name: n.name,
-            text: n.characters,
-            visible: n.visible !== false
-          });
-        }
-        if (n.children) {
-          n.children.forEach(child => collectAllText(child, texts));
-        }
-        return texts;
       }
 
       const allTexts = collectAllText(node);
@@ -2977,6 +3023,117 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [
           { type: 'text', text: JSON.stringify(specs, null, 2) }
+        ]
+      };
+    }
+
+    if (name === "parseFigmaUrl") {
+      const validatedArgs = ParseFigmaUrlSchema.parse(args);
+      const result = parseFigmaUrl(validatedArgs.url);
+
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(result, null, 2) }
+        ]
+      };
+    }
+
+    if (name === "listFigmaPages") {
+      const validatedArgs = ListFigmaPagesSchema.parse(args);
+      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
+      if (!token) {
+        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
+      }
+
+      // Parse fileKey from URL if needed
+      const parsed = parseFigmaUrl(validatedArgs.fileKey);
+      const fileKey = parsed.fileKey;
+
+      const result = await listFigmaPages(fileKey, token);
+
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(result, null, 2) }
+        ]
+      };
+    }
+
+    if (name === "searchFigmaFrames") {
+      const validatedArgs = SearchFigmaFramesSchema.parse(args);
+      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
+      if (!token) {
+        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
+      }
+
+      // Parse fileKey from URL if needed
+      const parsed = parseFigmaUrl(validatedArgs.fileKey);
+      const fileKey = parsed.fileKey;
+
+      const result = await searchFigmaFrames(fileKey, token, validatedArgs.searchQuery);
+
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(result, null, 2) }
+        ]
+      };
+    }
+
+    if (name === "getFigmaComponents") {
+      const validatedArgs = GetFigmaComponentsSchema.parse(args);
+      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
+      if (!token) {
+        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
+      }
+
+      // Parse fileKey from URL if needed
+      const parsed = parseFigmaUrl(validatedArgs.fileKey);
+      const fileKey = parsed.fileKey;
+
+      const result = await getFigmaComponents(fileKey, token);
+
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(result, null, 2) }
+        ]
+      };
+    }
+
+    if (name === "getFigmaStyles") {
+      const validatedArgs = GetFigmaStylesSchema.parse(args);
+      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
+      if (!token) {
+        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
+      }
+
+      // Parse fileKey from URL if needed
+      const parsed = parseFigmaUrl(validatedArgs.fileKey);
+      const fileKey = parsed.fileKey;
+
+      const result = await getFigmaStyles(fileKey, token);
+
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(result, null, 2) }
+        ]
+      };
+    }
+
+    if (name === "getFigmaColorPalette") {
+      const validatedArgs = GetFigmaColorPaletteSchema.parse(args);
+      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
+      if (!token) {
+        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
+      }
+
+      // Parse fileKey from URL if needed
+      const parsed = parseFigmaUrl(validatedArgs.fileKey);
+      const fileKey = parsed.fileKey;
+
+      const result = await getFigmaColorPalette(fileKey, token);
+
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(result, null, 2) }
         ]
       };
     }

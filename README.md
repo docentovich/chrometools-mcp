@@ -8,7 +8,7 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 - [Usage](#usage)
 - [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
 - [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
-- [Available Tools](#available-tools) - **33+ Tools Total**
+- [Available Tools](#available-tools) - **39+ Tools Total**
   - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getAllInteractiveElements, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo
@@ -375,9 +375,89 @@ Navigate to different URL while keeping browser instance.
 - **Use case**: Moving between pages in workflow
 - **Returns**: New page title
 
-### 5. Figma Tools
+### 5. Figma Tools ⭐ ENHANCED
 
-Design-to-code validation and comparison tools with automatic 3 MB compression for all images.
+Design-to-code validation, file browsing, design system extraction, and comparison tools with automatic 3 MB compression.
+
+#### parseFigmaUrl ⭐ NEW
+Parse Figma URL to extract fileKey and nodeId automatically.
+- **Parameters**:
+  - `url` (required): Full Figma URL or just fileKey
+- **Supported formats**:
+  - `https://www.figma.com/file/ABC123/Title?node-id=1-2`
+  - `https://www.figma.com/design/ABC123/Title?node-id=1-2`
+  - `ABC123` (just fileKey)
+- **Use case**: No need to manually extract fileKey and nodeId from URLs
+- **Returns**: `{ fileKey, nodeId }` object
+
+#### listFigmaPages ⭐ NEW
+Browse entire Figma file structure: all pages and frames with IDs.
+- **Parameters**:
+  - `figmaToken` (optional): Figma API token
+  - `fileKey` (required): Figma file key or full URL
+- **Use case**: **Use FIRST** to discover what's in the Figma file before requesting specific nodes
+- **Returns**: Hierarchical structure with:
+  - File metadata (name, version, lastModified)
+  - All pages with names and IDs
+  - All frames in each page with names, IDs, types, dimensions
+- **Example output**:
+  ```json
+  {
+    "fileName": "Design System",
+    "pagesCount": 3,
+    "pages": [
+      {
+        "name": "🎨 Components",
+        "framesCount": 25,
+        "frames": [
+          { "id": "123:456", "name": "Button/Primary", "type": "FRAME" }
+        ]
+      }
+    ]
+  }
+  ```
+
+#### searchFigmaFrames ⭐ NEW
+Search frames/components by name across entire Figma file.
+- **Parameters**:
+  - `figmaToken` (optional): Figma API token
+  - `fileKey` (required): Figma file key or full URL
+  - `searchQuery` (required): Search text (case-insensitive)
+- **Use case**: Find specific frames/components without browsing manually
+- **Returns**: All matching nodes with IDs, names, types, pages, dimensions
+- **Example**: Search for "login" returns all frames containing "login" in name
+
+#### getFigmaComponents ⭐ NEW
+Extract all components from Figma file (Design System).
+- **Parameters**:
+  - `figmaToken` (optional): Figma API token
+  - `fileKey` (required): Figma file key or full URL
+- **Use case**: Get complete list of design system components
+- **Returns**: All COMPONENT and COMPONENT_SET nodes with names, descriptions, dimensions
+
+#### getFigmaStyles ⭐ NEW
+Get all shared styles from Figma file (color, text, effect, grid styles).
+- **Parameters**:
+  - `figmaToken` (optional): Figma API token
+  - `fileKey` (required): Figma file key or full URL
+- **Use case**: Extract design tokens and shared styles for CSS/Tailwind generation
+- **Returns**: Categorized styles:
+  - Fill styles (colors)
+  - Text styles (typography)
+  - Effect styles (shadows, blur)
+  - Grid styles
+
+#### getFigmaColorPalette ⭐ NEW
+Extract complete color palette with usage statistics.
+- **Parameters**:
+  - `figmaToken` (optional): Figma API token
+  - `fileKey` (required): Figma file key or full URL
+- **Use case**: Generate CSS color variables, understand color usage
+- **Returns**: All unique colors with:
+  - Hex and RGBA values
+  - Usage count
+  - Usage examples (where the color is used)
+  - Sorted by usage frequency
 
 #### getFigmaFrame
 Export and download a Figma frame as PNG/JPG image with automatic compression.

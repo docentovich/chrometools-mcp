@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0] - 2025-12-02
+
+### Added
+- **6 new Figma tools** - Major enhancement to Figma integration (total: 9 Figma tools)
+  - `parseFigmaUrl` - Parse full Figma URLs to extract fileKey and nodeId automatically
+  - `listFigmaPages` - Browse entire file structure: all pages and frames with IDs
+  - `searchFigmaFrames` - Search frames/components by name across entire file
+  - `getFigmaComponents` - Extract all components (Design System)
+  - `getFigmaStyles` - Get all shared styles (colors, text, effects, grids)
+  - `getFigmaColorPalette` - Extract complete color palette with usage statistics
+- **figma-tools.js module** - All Figma functionality moved to dedicated module for better organization
+- **URL support for all Figma tools** - All tools now accept full Figma URLs or fileKeys
+- **Automatic URL parsing** - No need to manually extract fileKey and nodeId from Figma links
+
+### Changed
+- **Figma code refactored** - Moved all Figma functions to separate figma-tools.js module
+- **Improved Figma workflow** - Use `listFigmaPages` → `searchFigmaFrames` → specific tool workflow
+
+### Use Cases
+- Browse Figma files without opening Figma UI
+- Extract design system components and styles
+- Generate CSS variables from color palette
+- Find frames by name across all pages
+- Copy-paste Figma URLs directly into tools
+
 ## [1.4.0] - 2025-12-02
 
 ### Added
