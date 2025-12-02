@@ -525,7 +525,8 @@ async function processScreenshot(screenshotBuffer, options = {}) {
     maxWidth = 1024,
     maxHeight = 8000, // API limit is 8000px
     quality = 80,
-    format = 'auto'
+    format = 'auto',
+    maxFileSize = 3 * 1024 * 1024 // 3 MB limit
   } = options;
 
   // Load image with Jimp
@@ -575,19 +576,72 @@ async function processScreenshot(screenshotBuffer, options = {}) {
   }
 
   // Convert to buffer with appropriate format and quality
+  let currentQuality = quality;
   let resultBuffer;
+  let compressionAttempts = 0;
+  const maxCompressionAttempts = 10;
+
   if (outputFormat === 'jpeg') {
-    image.quality(quality);
+    image.quality(currentQuality);
     resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
     mimeType = 'image/jpeg';
     processed = true;
+
+    // If file exceeds maxFileSize, reduce quality iteratively
+    while (resultBuffer.length > maxFileSize && compressionAttempts < maxCompressionAttempts) {
+      compressionAttempts++;
+      // Reduce quality by 10 points each iteration
+      currentQuality = Math.max(10, currentQuality - 10);
+      image.quality(currentQuality);
+      resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+
+      // If quality is already at minimum and still too large, scale down the image
+      if (currentQuality === 10 && resultBuffer.length > maxFileSize) {
+        const scaleFactor = Math.sqrt(maxFileSize / resultBuffer.length * 0.9); // 0.9 for safety margin
+        const newWidth = Math.round(image.bitmap.width * scaleFactor);
+        const newHeight = Math.round(image.bitmap.height * scaleFactor);
+        image.resize(newWidth, newHeight);
+        image.quality(currentQuality);
+        resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+        processed = true;
+      }
+    }
   } else {
     resultBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
     mimeType = 'image/png';
+
+    // If PNG exceeds maxFileSize, convert to JPEG and compress
+    if (resultBuffer.length > maxFileSize) {
+      outputFormat = 'jpeg';
+      mimeType = 'image/jpeg';
+      currentQuality = quality;
+      image.quality(currentQuality);
+      resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+      processed = true;
+
+      // Reduce quality iteratively if still too large
+      while (resultBuffer.length > maxFileSize && compressionAttempts < maxCompressionAttempts) {
+        compressionAttempts++;
+        currentQuality = Math.max(10, currentQuality - 10);
+        image.quality(currentQuality);
+        resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+
+        // If quality is already at minimum and still too large, scale down the image
+        if (currentQuality === 10 && resultBuffer.length > maxFileSize) {
+          const scaleFactor = Math.sqrt(maxFileSize / resultBuffer.length * 0.9);
+          const newWidth = Math.round(image.bitmap.width * scaleFactor);
+          const newHeight = Math.round(image.bitmap.height * scaleFactor);
+          image.resize(newWidth, newHeight);
+          image.quality(currentQuality);
+          resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+          processed = true;
+        }
+      }
+    }
   }
 
   // Return original if no processing was needed and format is PNG
-  if (!processed && outputFormat === 'png') {
+  if (!processed && outputFormat === 'png' && resultBuffer.length <= maxFileSize) {
     return {
       buffer: screenshotBuffer,
       mimeType: 'image/png',
@@ -614,9 +668,12 @@ async function processScreenshot(screenshotBuffer, options = {}) {
       originalSize,
       finalSize: resultBuffer.length,
       format: outputFormat,
-      compressed: outputFormat === 'jpeg',
+      compressed: outputFormat === 'jpeg' || compressionAttempts > 0,
       scaled: processed,
-      compressionRatio: Math.round((1 - resultBuffer.length / originalSize) * 100)
+      compressionRatio: Math.round((1 - resultBuffer.length / originalSize) * 100),
+      quality: outputFormat === 'jpeg' ? currentQuality : undefined,
+      compressionAttempts: compressionAttempts > 0 ? compressionAttempts : undefined,
+      autoCompressed: compressionAttempts > 0 || (outputFormat === 'jpeg' && format === 'png')
     }
   };
 }
@@ -696,6 +753,140 @@ const server = new Server(
   }
 );
 
+// CSS property categorization
+const CSS_CATEGORIES = {
+  layout: [
+    'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+    'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+    'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+    'position', 'top', 'right', 'bottom', 'left', 'z-index',
+    'display', 'float', 'clear', 'overflow', 'overflow-x', 'overflow-y',
+    'flex', 'flex-direction', 'flex-wrap', 'flex-grow', 'flex-shrink', 'flex-basis',
+    'justify-content', 'align-items', 'align-content', 'align-self', 'order',
+    'grid', 'grid-template', 'grid-template-columns', 'grid-template-rows', 'grid-gap',
+    'gap', 'row-gap', 'column-gap',
+    'box-sizing', 'visibility', 'clip', 'clip-path'
+  ],
+  typography: [
+    'font', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant',
+    'line-height', 'letter-spacing', 'word-spacing', 'text-align', 'text-decoration',
+    'text-transform', 'text-indent', 'text-overflow', 'white-space', 'word-break',
+    'word-wrap', 'overflow-wrap', 'hyphens', 'direction', 'unicode-bidi',
+    'writing-mode', 'vertical-align'
+  ],
+  colors: [
+    'color', 'background', 'background-color', 'background-image', 'background-position',
+    'background-size', 'background-repeat', 'background-attachment', 'background-clip',
+    'background-origin', 'background-blend-mode',
+    'border-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
+    'outline-color', 'text-decoration-color', 'caret-color', 'column-rule-color'
+  ],
+  visual: [
+    'opacity', 'transform', 'transform-origin', 'transform-style', 'perspective',
+    'perspective-origin', 'backface-visibility',
+    'transition', 'transition-property', 'transition-duration', 'transition-timing-function', 'transition-delay',
+    'animation', 'animation-name', 'animation-duration', 'animation-timing-function', 'animation-delay',
+    'animation-iteration-count', 'animation-direction', 'animation-fill-mode', 'animation-play-state',
+    'filter', 'backdrop-filter', 'mix-blend-mode', 'isolation',
+    'box-shadow', 'text-shadow',
+    'border', 'border-width', 'border-style', 'border-radius',
+    'border-top', 'border-right', 'border-bottom', 'border-left',
+    'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
+    'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
+    'border-top-left-radius', 'border-top-right-radius', 'border-bottom-right-radius', 'border-bottom-left-radius',
+    'outline', 'outline-width', 'outline-style', 'outline-offset',
+    'cursor', 'pointer-events', 'user-select'
+  ]
+};
+
+// Common default CSS values to filter out
+const CSS_DEFAULTS = {
+  'display': 'inline',
+  'position': 'static',
+  'float': 'none',
+  'clear': 'none',
+  'visibility': 'visible',
+  'overflow': 'visible',
+  'overflow-x': 'visible',
+  'overflow-y': 'visible',
+  'z-index': 'auto',
+  'opacity': '1',
+  'transform': 'none',
+  'filter': 'none',
+  'backdrop-filter': 'none',
+  'box-shadow': 'none',
+  'text-shadow': 'none',
+  'border-style': 'none',
+  'border-width': '0px',
+  'outline-style': 'none',
+  'outline-width': '0px',
+  'margin': '0px',
+  'margin-top': '0px',
+  'margin-right': '0px',
+  'margin-bottom': '0px',
+  'margin-left': '0px',
+  'padding': '0px',
+  'padding-top': '0px',
+  'padding-right': '0px',
+  'padding-bottom': '0px',
+  'padding-left': '0px',
+  'background-image': 'none',
+  'transition': 'all 0s ease 0s',
+  'animation': 'none',
+  'pointer-events': 'auto',
+  'user-select': 'auto',
+  'cursor': 'auto',
+  'text-decoration': 'none',
+  'text-transform': 'none',
+  'font-weight': '400',
+  'font-style': 'normal',
+  'font-variant': 'normal',
+  'letter-spacing': 'normal',
+  'word-spacing': 'normal',
+  'text-align': 'start',
+  'white-space': 'normal',
+  'word-break': 'normal',
+  'overflow-wrap': 'normal',
+  'hyphens': 'manual'
+};
+
+// Filter computed CSS styles based on options
+function filterCssStyles(computedStyle, options = {}) {
+  const { category, properties, includeDefaults = false } = options;
+
+  let filtered = computedStyle;
+
+  // Filter by specific properties (highest priority)
+  if (properties && properties.length > 0) {
+    filtered = filtered.filter(prop =>
+      properties.some(p => prop.name.toLowerCase() === p.toLowerCase())
+    );
+  }
+  // Filter by category
+  else if (category && category !== 'all') {
+    const categoryProps = CSS_CATEGORIES[category] || [];
+    filtered = filtered.filter(prop =>
+      categoryProps.some(p => prop.name.toLowerCase().startsWith(p.toLowerCase()))
+    );
+  }
+
+  // Filter out default values if requested
+  if (!includeDefaults) {
+    filtered = filtered.filter(prop => {
+      const defaultValue = CSS_DEFAULTS[prop.name];
+      if (!defaultValue) return true;
+
+      // Normalize values for comparison
+      const normalizedValue = prop.value.replace(/\s+/g, ' ').trim();
+      const normalizedDefault = defaultValue.replace(/\s+/g, ' ').trim();
+
+      return normalizedValue !== normalizedDefault;
+    });
+  }
+
+  return filtered;
+}
+
 // Tool schemas
 const PingSchema = z.object({
   message: z.string().optional().describe("Optional message to send"),
@@ -725,6 +916,9 @@ const GetElementSchema = z.object({
 
 const GetComputedCssSchema = z.object({
   selector: z.string().optional().describe("CSS selector (optional, defaults to body)"),
+  category: z.enum(['all', 'layout', 'typography', 'colors', 'visual']).optional().describe("Filter by CSS category: 'layout' (sizing, positioning), 'typography' (fonts, text), 'colors' (color schemes), 'visual' (effects, transforms), 'all' (default)"),
+  properties: z.array(z.string()).optional().describe("Specific CSS properties to return (e.g., ['color', 'font-size']). Overrides category filter."),
+  includeDefaults: z.boolean().optional().describe("Include properties with default values (default: false)"),
 });
 
 const GetBoxModelSchema = z.object({
@@ -989,6 +1183,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             selector: { type: "string", description: "CSS selector (optional, defaults to body)" },
+            category: {
+              type: "string",
+              enum: ["all", "layout", "typography", "colors", "visual"],
+              description: "Filter by CSS category: 'layout' (sizing, positioning), 'typography' (fonts, text), 'colors' (color schemes), 'visual' (effects, transforms), 'all' (default)"
+            },
+            properties: {
+              type: "array",
+              items: { type: "string" },
+              description: "Specific CSS properties to return (e.g., ['color', 'font-size']). Overrides category filter."
+            },
+            includeDefaults: {
+              type: "boolean",
+              description: "Include properties with default values (default: false)"
+            },
           },
         },
       },
@@ -1704,8 +1912,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const { computedStyle } = await client.send('CSS.getComputedStyleForNode', { nodeId });
 
+      // Apply filtering based on options
+      const filtered = filterCssStyles(computedStyle, {
+        category: validatedArgs.category,
+        properties: validatedArgs.properties,
+        includeDefaults: validatedArgs.includeDefaults
+      });
+
+      // Add metadata about filtering
+      const result = {
+        selector: useSelector,
+        totalProperties: computedStyle.length,
+        filteredProperties: filtered.length,
+        filters: {
+          category: validatedArgs.category || 'all',
+          specificProperties: validatedArgs.properties || null,
+          includeDefaults: validatedArgs.includeDefaults || false
+        },
+        styles: filtered
+      };
+
       return {
-        content: [{ type: "text", text: JSON.stringify(computedStyle, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       };
     }
 
@@ -2392,6 +2620,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const nodesData = await fetchFigmaAPI(`files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(nodeId)}`, token);
       const frameInfo = nodesData.nodes?.[nodeId]?.document;
 
+      // Process image to ensure it doesn't exceed 3 MB
+      const processedImage = await processScreenshot(imageBuffer, {
+        maxWidth: null, // Keep original dimensions
+        maxHeight: null,
+        quality: 85,
+        format: format,
+        maxFileSize: 3 * 1024 * 1024 // 3 MB limit
+      });
+
       const result = {
         figmaInfo: {
           fileName: nodesData.name || 'Unknown',
@@ -2403,8 +2640,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           } : null,
           exportSettings: {
             scale,
-            format,
-            fileSize: imageBuffer.length
+            format: processedImage.metadata.format,
+            fileSize: processedImage.metadata.finalSize,
+            originalFileSize: imageBuffer.length,
+            compressed: processedImage.metadata.autoCompressed,
+            quality: processedImage.metadata.quality
           }
         }
       };
@@ -2414,8 +2654,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           { type: 'text', text: JSON.stringify(result, null, 2) },
           {
             type: 'image',
-            data: imageBuffer.toString('base64'),
-            mimeType: `image/${format}`
+            data: processedImage.buffer.toString('base64'),
+            mimeType: processedImage.mimeType
           }
         ]
       };
@@ -2504,20 +2744,48 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       };
 
+      // Process images to ensure they don't exceed 3 MB
+      const [processedFigma, processedPage] = await Promise.all([
+        processScreenshot(figmaBuffer, {
+          maxWidth: null,
+          maxHeight: null,
+          quality: 85,
+          format: 'auto',
+          maxFileSize: 3 * 1024 * 1024
+        }),
+        processScreenshot(pageBuffer, {
+          maxWidth: null,
+          maxHeight: null,
+          quality: 85,
+          format: 'auto',
+          maxFileSize: 3 * 1024 * 1024
+        })
+      ]);
+
       const content = [
         { type: 'text', text: JSON.stringify(analysis, null, 2) },
-        { type: 'image', data: figmaBuffer.toString('base64'), mimeType: 'image/png' },
-        { type: 'image', data: pageBuffer.toString('base64'), mimeType: 'image/png' }
+        { type: 'image', data: processedFigma.buffer.toString('base64'), mimeType: processedFigma.mimeType },
+        { type: 'image', data: processedPage.buffer.toString('base64'), mimeType: processedPage.mimeType }
       ];
 
       // Add difference map if there are differences
       if (diffPixels > 0) {
         const diffImg = new Jimp({ data: Buffer.from(diffData), width: targetWidth, height: targetHeight });
         const diffBuffer = await diffImg.getBufferAsync(Jimp.MIME_PNG);
+
+        // Process diff image as well
+        const processedDiff = await processScreenshot(diffBuffer, {
+          maxWidth: null,
+          maxHeight: null,
+          quality: 85,
+          format: 'auto',
+          maxFileSize: 3 * 1024 * 1024
+        });
+
         content.push({
           type: 'image',
-          data: diffBuffer.toString('base64'),
-          mimeType: 'image/png'
+          data: processedDiff.buffer.toString('base64'),
+          mimeType: processedDiff.mimeType
         });
       }
 

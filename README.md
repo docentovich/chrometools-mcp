@@ -230,10 +230,19 @@ Get HTML markup of element (defaults to body if no selector).
 - **Returns**: Complete outerHTML
 
 #### getComputedCss
-Get all computed CSS styles for an element.
-- **Parameters**: `selector` (optional)
-- **Use case**: Debugging layout, verifying styles
-- **Returns**: JSON object with CSS properties
+Get computed CSS styles for an element with intelligent filtering to reduce token usage.
+- **Parameters**:
+  - `selector` (optional): CSS selector (defaults to body)
+  - `category` (optional): Filter by category - 'layout', 'typography', 'colors', 'visual', or 'all' (default)
+  - `properties` (optional): Array of specific properties to return (e.g., `['color', 'font-size']`) - overrides category filter
+  - `includeDefaults` (optional): Include properties with default values (default: false)
+- **Use case**: Debugging layout, verifying styles, design comparison
+- **Returns**: JSON object with filtered CSS properties, metadata about filtering
+- **Performance**: Without filters returns ~300 properties (~14k tokens). With filtering returns 10-50 properties (~1-2k tokens)
+- **Example usage**:
+  - Layout only: `{ selector: ".header", category: "layout" }`
+  - Specific properties: `{ selector: ".title", properties: ["color", "font-size", "font-weight"] }`
+  - Typography without defaults: `{ selector: "h1", category: "typography", includeDefaults: false }`
 
 #### getBoxModel
 Get precise dimensions, positioning, margins, padding, and borders.
@@ -242,7 +251,7 @@ Get precise dimensions, positioning, margins, padding, and borders.
 - **Returns**: Box model data + metrics
 
 #### screenshot
-Capture optimized screenshot of specific element with smart compression.
+Capture optimized screenshot of specific element with smart compression and automatic 3 MB limit.
 - **Parameters**:
   - `selector` (required)
   - `padding` (optional): Padding in pixels (default: 0)
@@ -253,10 +262,11 @@ Capture optimized screenshot of specific element with smart compression.
 - **Use case**: Visual documentation, bug reports
 - **Returns**: Optimized image with metadata
 - **Default behavior**: Auto-scales to 1024px width and 8000px height (API limit) and uses smart compression to reduce AI token usage
-- **For original quality**: Set `maxWidth: null`, `maxHeight: null` and `format: 'png'`
+- **Automatic compression**: If image exceeds 3 MB, automatically reduces quality or scales down to fit within limit
+- **For original quality**: Set `maxWidth: null`, `maxHeight: null` and `format: 'png'` (still enforces 3 MB limit)
 
 #### saveScreenshot
-Save optimized screenshot to filesystem without returning in context.
+Save optimized screenshot to filesystem without returning in context, with automatic 3 MB limit.
 - **Parameters**:
   - `selector` (required)
   - `filePath` (required): Absolute path to save file
@@ -268,6 +278,7 @@ Save optimized screenshot to filesystem without returning in context.
 - **Use case**: Baseline screenshots, file storage
 - **Returns**: File path and metadata (not image data)
 - **Default behavior**: Auto-scales and compresses to save disk space
+- **Automatic compression**: If image exceeds 3 MB, automatically reduces quality or scales down to fit within limit
 
 ### 4. Advanced Tools
 
@@ -363,6 +374,44 @@ Navigate to different URL while keeping browser instance.
   - `waitUntil` (optional): load event type
 - **Use case**: Moving between pages in workflow
 - **Returns**: New page title
+
+### 5. Figma Tools
+
+Design-to-code validation and comparison tools with automatic 3 MB compression for all images.
+
+#### getFigmaFrame
+Export and download a Figma frame as PNG/JPG image with automatic compression.
+- **Parameters**:
+  - `figmaToken` (optional): Figma API token (can use FIGMA_TOKEN env var)
+  - `fileKey` (required): Figma file key from URL
+  - `nodeId` (required): Figma frame/component ID
+  - `scale` (optional): Export scale 0.1-4 (default: 2)
+  - `format` (optional): 'png', 'jpg', 'svg' (default: 'png')
+- **Use case**: Getting design references from Figma for comparison
+- **Returns**: Figma frame metadata and compressed image
+- **Automatic compression**: Images exceeding 3 MB are automatically compressed by reducing quality or scaling down
+
+#### compareFigmaToElement
+The GOLD STANDARD for design-to-code validation. Compares Figma design pixel-perfect with browser implementation.
+- **Parameters**:
+  - `figmaToken` (optional): Figma API token (can use FIGMA_TOKEN env var)
+  - `fileKey` (required): Figma file key
+  - `nodeId` (required): Figma frame ID
+  - `selector` (required): CSS selector for page element to compare
+  - `figmaScale` (optional): Figma export scale (default: 2)
+  - `threshold` (optional): Difference threshold 0-1 (default: 0.05)
+- **Use case**: Validating implementation matches design specifications
+- **Returns**: Comparison analysis with SSIM score, difference percentage, and three images (Figma, Page, Diff map)
+- **Automatic compression**: All three images are automatically compressed if they exceed 3 MB
+
+#### getFigmaSpecs
+Extract detailed design specifications from Figma (colors, fonts, dimensions, spacing).
+- **Parameters**:
+  - `figmaToken` (optional): Figma API token
+  - `fileKey` (required): Figma file key
+  - `nodeId` (required): Figma frame/component ID
+- **Use case**: Getting exact design specifications for implementation
+- **Returns**: Complete design specs (colors, typography, spacing, dimensions)
 
 ### 6. Angular Tools ⭐ NEW
 

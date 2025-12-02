@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.9] - 2025-12-02
+
+### Added
+- **getComputedCss filtering** - Intelligent CSS property filtering to reduce token usage from ~14k to ~1-2k tokens
+  - `category` parameter: Filter by 'layout', 'typography', 'colors', 'visual', or 'all' (default)
+  - `properties` parameter: Request specific CSS properties (e.g., `['color', 'font-size']`)
+  - `includeDefaults` parameter: Optionally include/exclude properties with default values (default: false)
+  - Returns metadata: total properties, filtered count, applied filters
+  - Example: `{ selector: ".header", category: "layout" }` returns only layout-related properties
+
+### Performance
+- **getComputedCss now 7-14x more efficient** - Filtering reduces output from ~300 properties to 10-50 properties
+- Default behavior (no filters) filters out default values, reducing typical response from ~14k to ~3-5k tokens
+
+## [1.3.8] - 2025-12-02
+
+### Added
+- **Automatic image compression to 3 MB limit** - All screenshots and Figma images are now automatically compressed if they exceed 3 MB
+- Images are first compressed by reducing JPEG quality (from 85 to 10 in steps of 10)
+- If quality reduction is insufficient, images are scaled down to fit within the size limit
+- PNG images that exceed 3 MB are automatically converted to JPEG and compressed
+- Compression metadata includes: final file size, quality level, compression ratio, number of compression attempts
+
+### Changed
+- `processScreenshot` function now includes `maxFileSize` parameter (default: 3 MB)
+- `getFigmaFrame` now applies automatic compression to exported Figma images
+- `compareFigmaToElement` now compresses all three images (Figma design, page screenshot, difference map)
+- All image processing preserves original dimensions by default, only scaling down if necessary to meet size limits
+
 ## [1.3.7] - 2025-12-01
 
 ### Added
