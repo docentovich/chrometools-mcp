@@ -47,6 +47,15 @@ import {
   deleteScenario
 } from './recorder/scenario-storage.js';
 
+// Import Angular tools
+import {
+  listAngularComponents,
+  getAngularComponent,
+  callAngularMethod,
+  getAngularForm,
+  submitAngularForm
+} from './angular-tools.js';
+
 // Import Figma tools
 import {
   parseFigmaUrl,
@@ -961,8 +970,6 @@ const ListNetworkRequestsSchema = z.object({
   status: z.enum(['pending', 'completed', 'failed', 'all'])
     .optional()
     .describe("Filter by status (default: all)"),
-  limit: z.number().min(1).max(500).optional().default(50).describe("Maximum number of requests to return (default: 50)"),
-  offset: z.number().min(0).optional().default(0).describe("Number of requests to skip before returning results (default: 0)"),
   clear: z.boolean().optional().describe("Clear requests after reading (default: false)"),
 });
 
@@ -1004,6 +1011,33 @@ const NavigateToSchema = z.object({
   waitUntil: z.enum(['load', 'domcontentloaded', 'networkidle0', 'networkidle2'])
     .optional()
     .describe("Wait until event (default: networkidle2)"),
+});
+
+// Angular tools schemas
+const ListAngularComponentsSchema = z.object({
+  includeHidden: z.boolean().optional().describe("Include components in hidden tabs/panels (default: false)"),
+});
+
+const GetAngularComponentSchema = z.object({
+  selector: z.string().describe("CSS selector for the Angular component element"),
+  includePrivate: z.boolean().optional().describe("Include private methods/properties (default: false)"),
+});
+
+const CallAngularMethodSchema = z.object({
+  selector: z.string().describe("CSS selector for the Angular component element"),
+  method: z.string().describe("Method name to call"),
+  args: z.array(z.any()).optional().describe("Method arguments (default: [])"),
+});
+
+const GetAngularFormSchema = z.object({
+  selector: z.string().describe("CSS selector for the component containing the form"),
+  formProperty: z.string().optional().describe("Form property name (auto-detects if omitted)"),
+});
+
+const SubmitAngularFormSchema = z.object({
+  selector: z.string().describe("CSS selector for the component containing the form"),
+  formProperty: z.string().optional().describe("Form property name (auto-detects if omitted)"),
+  waitForResponse: z.boolean().optional().describe("Wait for network request after submit (default: true)"),
 });
 
 // Figma tools schemas
@@ -1200,7 +1234,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "screenshot",
-        description: "Capture visual image of element (uses 15-25k tokens). USE FOR: visual comparison with design, documentation, checking layout/colors. DON'T USE FOR debugging form data (use analyzePage to see actual values), after button clicks (use analyzePage with refresh:true to see what changed), validation errors (use analyzePage). Screenshot shows visual appearance - for debugging DATA use analyzePage.",
+        description: "Capture visual image of element (uses 15-25k tokens). USE FOR: visual comparison with design, documentation, checking layout/colors. DON'T USE FOR debugging form data (use analyzePage to see actual values), after button clicks (use analyzePage with refresh:true to see what changed), validation errors (use analyzePage or getAngularForm). Screenshot shows visual appearance - for debugging DATA use analyzePage.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1258,7 +1292,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "executeScript",
-        description: "Execute JavaScript code. USE ONLY when specialized tools insufficient. DO NOT use for finding elements (use analyzePage or findElementsByText instead). Last resort only.",
+        description: "Execute JavaScript code. USE ONLY when specialized tools insufficient. DO NOT use for: Angular components (use getAngularComponent), Angular forms (use getAngularForm), calling Angular methods (use callAngularMethod), finding elements (use analyzePage or findElementsByText). Before using, check if Angular tools (listAngularComponents, getAngularComponent, getAngularForm, callAngularMethod) can solve your task. Last resort only.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1283,14 +1317,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "listNetworkRequests",
-        description: "Get compact list of network requests with method, URL, and status only. Perfect for overview of API calls. Use getNetworkRequest for full details of specific request. Requests captured automatically from page load. Supports pagination to handle large numbers of requests.",
+        description: "Get compact list of network requests with method, URL, and status only. Perfect for overview of API calls. Use getNetworkRequest for full details of specific request. Requests captured automatically from page load.",
         inputSchema: {
           type: "object",
           properties: {
             types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter by request types (default: Fetch, XHR)" },
             status: { type: "string", enum: ["pending", "completed", "failed", "all"], description: "Filter by status (default: all)" },
-            limit: { type: "number", description: "Maximum number of requests to return (default: 50)" },
-            offset: { type: "number", description: "Number of requests to skip before returning results (default: 0)" },
             clear: { type: "boolean", description: "Clear requests after reading (default: false)" },
           },
         },
@@ -1384,6 +1416,66 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle0", "networkidle2"], description: "Wait until event (default: networkidle2)" },
           },
           required: ["url"],
+        },
+      },
+      {
+        name: "listAngularComponents",
+        description: "List all Angular components on the page with their selectors, methods, and properties. Use this FIRST to discover what components are available before calling methods. Much better than blind executeScript attempts.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            includeHidden: { type: "boolean", description: "Include components in hidden tabs/panels (default: false)" },
+          },
+        },
+      },
+      {
+        name: "getAngularComponent",
+        description: "PREFERRED tool for inspecting Angular components (instead of executeScript with ng.getComponent). Get all methods, properties, and current state. Automatically extracts public methods and properties with type information. Use this BEFORE executeScript when working with Angular. Example: Instead of executeScript('ng.getComponent(el).someProperty'), use this tool.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for the Angular component element" },
+            includePrivate: { type: "boolean", description: "Include private methods/properties (default: false)" },
+          },
+          required: ["selector"],
+        },
+      },
+      {
+        name: "callAngularMethod",
+        description: "Call a public method on an Angular component. Much more reliable than executeScript. Automatically handles change detection and error reporting.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for the Angular component element" },
+            method: { type: "string", description: "Method name to call" },
+            args: { type: "array", description: "Method arguments (default: [])" },
+          },
+          required: ["selector", "method"],
+        },
+      },
+      {
+        name: "getAngularForm",
+        description: "PREFERRED tool for debugging Angular forms (instead of executeScript). Get form data, validation state, errors. Shows BOTH .value and .getRawValue() (includes disabled controls). Works with ReactiveFormsModule and Template-driven. Auto-detects form. Use when: debugging form submission, checking validation, inspecting disabled controls. Example: When form.value seems wrong, this shows both value and rawValue.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for the component containing the form" },
+            formProperty: { type: "string", description: "Form property name (auto-detects if omitted)" },
+          },
+          required: ["selector"],
+        },
+      },
+      {
+        name: "submitAngularForm",
+        description: "Submit Angular form programmatically. Tries multiple strategies automatically: component submit method, form.submit(), native submit event, clicking submit button. Most reliable way to submit Angular forms.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for the component containing the form" },
+            formProperty: { type: "string", description: "Form property name (auto-detects if omitted)" },
+            waitForResponse: { type: "boolean", description: "Wait for network request after submit (default: true)" },
+          },
+          required: ["selector"],
         },
       },
       {
@@ -2260,20 +2352,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         requests = requests.filter(req => req.status === validatedArgs.status);
       }
 
-      const totalCount = requests.length;
-      const offset = validatedArgs.offset || 0;
-      const limit = validatedArgs.limit || 50;
-
-      // Apply pagination
-      const paginatedRequests = requests.slice(offset, offset + limit);
-
       const result = {
-        totalCount,
-        returnedCount: paginatedRequests.length,
-        offset,
-        limit,
-        hasMore: offset + limit < totalCount,
-        requests: paginatedRequests.map(req => ({
+        count: requests.length,
+        requests: requests.map(req => ({
           requestId: req.requestId,
           method: req.method,
           url: req.url,
@@ -2519,6 +2600,77 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{
           type: "text",
           text: `Navigated to: ${validatedArgs.url}\nPage title: ${title}\n\n** AI HINTS **\nPage type: ${hints.pageType}\nAvailable actions: ${hints.availableActions.join(', ')}\nSuggested next: ${hints.suggestedNext.join('; ')}`
+        }],
+      };
+    }
+
+    // Angular tools
+    if (name === "listAngularComponents") {
+      const validatedArgs = ListAngularComponentsSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const components = await listAngularComponents(page, validatedArgs.includeHidden);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(components, null, 2)
+        }],
+      };
+    }
+
+    if (name === "getAngularComponent") {
+      const validatedArgs = GetAngularComponentSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const componentInfo = await getAngularComponent(page, validatedArgs.selector, validatedArgs.includePrivate);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(componentInfo, null, 2)
+        }],
+      };
+    }
+
+    if (name === "callAngularMethod") {
+      const validatedArgs = CallAngularMethodSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const result = await callAngularMethod(page, validatedArgs.selector, validatedArgs.method, validatedArgs.args);
+
+      return {
+        content: [{
+          type: "text",
+          text: `Method '${validatedArgs.method}' called successfully.\n${JSON.stringify(result, null, 2)}`
+        }],
+      };
+    }
+
+    if (name === "getAngularForm") {
+      const validatedArgs = GetAngularFormSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const formData = await getAngularForm(page, validatedArgs.selector, validatedArgs.formProperty);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(formData, null, 2)
+        }],
+      };
+    }
+
+    if (name === "submitAngularForm") {
+      const validatedArgs = SubmitAngularFormSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const result = await submitAngularForm(page, validatedArgs.selector, validatedArgs.formProperty, validatedArgs.waitForResponse);
+
+      return {
+        content: [{
+          type: "text",
+          text: `Form submitted successfully!\n${JSON.stringify(result, null, 2)}`
         }],
       };
     }

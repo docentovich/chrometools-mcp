@@ -2,6 +2,63 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.0] - 2025-12-14
+
+### Removed
+- **Removed Angular tools** - Removed all 5 Angular-specific tools to reduce context window usage
+  - Removed tools: `listAngularComponents`, `getAngularComponent`, `callAngularMethod`, `getAngularForm`, `submitAngularForm`
+  - Removed from: tool definitions, handlers, Zod schemas, README documentation
+  - Impact: Reduced token usage by ~2500-3000 tokens (~10 pages of context)
+  - Tool count: 45 → 40 tools
+
+### Changed
+- **Simplified tool descriptions** - Removed Angular references from `screenshot` and `executeScript` descriptions
+  - Cleaner, more focused descriptions for remaining tools
+
+## [1.6.2] - 2025-12-14
+
+### Fixed
+- **Fixed JSON Schema validation error for `callAngularMethod`** - Added missing `items` field to `args` array parameter
+  - Error: "array schema missing items" when using with OpenAI/OpenRouter providers
+  - Impact: Tool now works correctly with all LLM providers that validate JSON Schema strictly
+  - Note: This tool was subsequently removed in v1.7.0
+
+## [1.6.1] - 2025-12-03
+
+### Changed
+- **Optimized `listNetworkRequests` with pagination** - Added `limit` and `offset` parameters
+  - Default limit: 50 requests (max: 500)
+  - Returns: `{ totalCount, returnedCount, hasMore, offset, limit, requests: [...] }`
+  - Prevents excessive token usage when pages have hundreds of network requests
+  - Example: `listNetworkRequests({ limit: 20, offset: 20 })` returns requests 21-40
+
+### Performance
+- Reduced token usage for network request inspection on pages with many requests
+- AI receives pagination metadata (`hasMore`, `totalCount`) to request additional pages as needed
+
+## [1.6.0] - 2025-12-03
+
+### Changed
+- **Code organization improved** - Major refactoring to modular architecture
+  - Created `tools/` directory with `tool-schemas.js` (all Zod validation schemas)
+  - Created `utils/` directory with specialized utility modules:
+    - `css-helpers.js` - CSS categorization and filtering (~133 lines)
+    - `screenshot-processor.js` - Screenshot processing and image comparison (~210 lines)
+    - `element-actions.js` - Element interaction actions (~115 lines)
+  - Total **~712 lines moved to separate modules** for better maintainability
+  - Created REFACTORING.md documenting modular structure and future improvements
+
+### Benefits
+- **Better code organization** - Related functionality grouped logically
+- **Improved maintainability** - Easier to find and modify specific functionality
+- **Reusability** - Modules can be tested and used independently
+- **Cleaner main file** - index.js reduced by ~20% (712 lines)
+
+### Technical Details
+- Backup created (index.js.backup) before refactoring
+- Modules are independent with no circular dependencies
+- Additional utility modules prepared for future integration (browser-manager, network-monitor, recorder-helper)
+
 ## [1.5.0] - 2025-12-02
 
 ### Added
