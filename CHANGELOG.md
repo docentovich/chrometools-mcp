@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.1] - 2025-12-15
+
+### Performance
+- **Optimized tool descriptions** - Reduced token usage by 35-45% (~1,500-2,000 tokens)
+  - Shortened main tool descriptions from verbose to concise format
+  - Reduced parameter descriptions (e.g., "CSS selector for element to click" → "CSS selector")
+  - Standardized Figma tool parameters (7 tools optimized)
+  - Pattern-based reductions across all 41 tools
+  - Impact: Saves 1,500-2,000 tokens in every request to Claude
+  - Examples:
+    - `analyzePage`: 95 tokens → 30 tokens (68% reduction)
+    - `screenshot`: 75 tokens → 25 tokens (66% reduction)
+    - `listNetworkRequests`: 50 tokens → 20 tokens (60% reduction)
+
+### Changed
+- All tool descriptions now use imperative voice and remove redundancy
+- Figma tools: "Figma API token (optional if FIGMA_TOKEN env var is set)" → "API token (optional)"
+- Common patterns: "Milliseconds to wait" → "Wait ms", "Maximum" → "Max", etc.
+
 ## [1.7.0] - 2025-12-14
 
 ### Removed

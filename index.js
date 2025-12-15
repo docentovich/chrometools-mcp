@@ -1116,238 +1116,238 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "openBrowser",
-        description: "Opens a browser window and navigates to the specified URL. Browser window remains open for further interactions. Use this as the first step before other tools.",
+        description: "Open browser and navigate to URL. Window persists for further interactions.",
         inputSchema: {
           type: "object",
           properties: {
-            url: { type: "string", description: "URL to navigate to (e.g., https://example.com)" },
+            url: { type: "string", description: "URL to navigate to" },
           },
           required: ["url"],
         },
       },
       {
         name: "click",
-        description: "Click on an element to trigger interactions like opening modals, navigating, or submitting forms. Waits for animations. Screenshot is optional for better performance.",
+        description: "Click element. Waits for animations. Optional screenshot parameter.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector for element to click" },
-            waitAfter: { type: "number", description: "Milliseconds to wait after click (default: 1500)" },
-            screenshot: { type: "boolean", description: "Capture screenshot after click (default: false for performance)" },
-            timeout: { type: "number", description: "Maximum time to wait for operation in ms (default: 30000)" },
+            selector: { type: "string", description: "CSS selector" },
+            waitAfter: { type: "number", description: "Wait ms (default: 1500)" },
+            screenshot: { type: "boolean", description: "Screenshot (default: false)" },
+            timeout: { type: "number", description: "Max wait ms (default: 30000)" },
           },
           required: ["selector"],
         },
       },
       {
         name: "type",
-        description: "Type text into an input field, textarea, or contenteditable element. Can optionally clear the field first and control typing speed for realistic input simulation.",
+        description: "Type text into input field. Optional clear and typing delay.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector for input element" },
+            selector: { type: "string", description: "CSS selector" },
             text: { type: "string", description: "Text to type" },
-            delay: { type: "number", description: "Delay between keystrokes in ms (default: 0)" },
-            clearFirst: { type: "boolean", description: "Clear field before typing (default: true)" },
+            delay: { type: "number", description: "Keystroke delay ms (default: 0)" },
+            clearFirst: { type: "boolean", description: "Clear first (default: true)" },
           },
           required: ["selector", "text"],
         },
       },
       {
         name: "getElement",
-        description: "Get HTML markup of specific element. TIP: Use analyzePage instead to get structured data of ALL page elements at once - much more efficient than inspecting elements one by one.",
+        description: "Get HTML markup of element. Prefer analyzePage for better efficiency.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector (optional, defaults to body)" },
+            selector: { type: "string", description: "CSS selector (default: body)" },
           },
         },
       },
       {
         name: "getComputedCss",
-        description: "Get all computed CSS styles applied to an element. Essential for debugging layout issues, checking responsive design, and verifying CSS properties. Returns complete computed styles.",
+        description: "Get computed CSS styles for element. For layout debugging and responsive design.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector (optional, defaults to body)" },
+            selector: { type: "string", description: "CSS selector (default: body)" },
             category: {
               type: "string",
               enum: ["all", "layout", "typography", "colors", "visual"],
-              description: "Filter by CSS category: 'layout' (sizing, positioning), 'typography' (fonts, text), 'colors' (color schemes), 'visual' (effects, transforms), 'all' (default)"
+              description: "Filter: 'layout', 'typography', 'colors', 'visual', 'all' (default)"
             },
             properties: {
               type: "array",
               items: { type: "string" },
-              description: "Specific CSS properties to return (e.g., ['color', 'font-size']). Overrides category filter."
+              description: "Specific properties. Overrides category."
             },
             includeDefaults: {
               type: "boolean",
-              description: "Include properties with default values (default: false)"
+              description: "Include defaults (default: false)"
             },
           },
         },
       },
       {
         name: "getBoxModel",
-        description: "Get precise element dimensions, positioning, margins, padding, and borders. Returns complete box model data including content, padding, border, and margin dimensions.",
+        description: "Get element box model: dimensions, positioning, margins, padding, borders.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector for element" },
+            selector: { type: "string", description: "CSS selector" },
           },
           required: ["selector"],
         },
       },
       {
         name: "screenshot",
-        description: "Capture visual image of element (uses 15-25k tokens). USE FOR: visual comparison with design, documentation, checking layout/colors. DON'T USE FOR debugging form data (use analyzePage to see actual values), after button clicks (use analyzePage with refresh:true to see what changed), validation errors (use analyzePage). Screenshot shows visual appearance - for debugging DATA use analyzePage.",
+        description: "Capture element image (15-25k tokens). For visual comparison. Use analyzePage for form data/validation (2-5k tokens).",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector for element to screenshot" },
-            padding: { type: "number", description: "Padding around element in pixels (default: 0)" },
-            maxWidth: { type: "number", description: "Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)" },
-            maxHeight: { type: "number", description: "Maximum height in pixels, auto-scales if larger (default: 8000 for API limit, set to null for original size)" },
-            quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality 1-100 (default: 80, only applies to JPEG format)" },
-            format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Image format: 'png', 'jpeg', or 'auto' (default: 'auto' - chooses based on size)" },
+            selector: { type: "string", description: "CSS selector" },
+            padding: { type: "number", description: "Padding px (default: 0)" },
+            maxWidth: { type: "number", description: "Max width px (default: 1024, null=original)" },
+            maxHeight: { type: "number", description: "Max height px (default: 8000, null=original)" },
+            quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality (default: 80)" },
+            format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Format (default: auto)" },
           },
           required: ["selector"],
         },
       },
       {
         name: "saveScreenshot",
-        description: "Save optimized screenshot directly to filesystem without returning in context. By default, auto-scales to 1024px width and 8000px height (API limit) and uses smart compression. Perfect for baseline screenshots and reducing file sizes. Use maxWidth: null and format: 'png' for original quality.",
+        description: "Save screenshot to file without returning in context. Auto-scales and compresses. Use maxWidth: null and format: 'png' for original quality.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector for element to screenshot" },
-            filePath: { type: "string", description: "Absolute path where to save file (extension auto-adjusted based on format)" },
-            padding: { type: "number", description: "Padding around element in pixels (default: 0)" },
-            maxWidth: { type: "number", description: "Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)" },
-            maxHeight: { type: "number", description: "Maximum height in pixels, auto-scales if larger (default: 8000 for API limit, set to null for original size)" },
-            quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality 1-100 (default: 80, only applies to JPEG format)" },
-            format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Image format: 'png', 'jpeg', or 'auto' (default: 'auto' - chooses based on size)" },
+            selector: { type: "string", description: "CSS selector" },
+            filePath: { type: "string", description: "Save path (extension auto-adjusted)" },
+            padding: { type: "number", description: "Padding px (default: 0)" },
+            maxWidth: { type: "number", description: "Max width px (default: 1024, null=original)" },
+            maxHeight: { type: "number", description: "Max height px (default: 8000, null=original)" },
+            quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality (default: 80)" },
+            format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Format (default: auto)" },
           },
           required: ["selector", "filePath"],
         },
       },
       {
         name: "scrollTo",
-        description: "Scroll the page to bring an element into view. Useful for testing lazy loading, sticky elements, and ensuring elements are visible. Supports smooth or instant scrolling.",
+        description: "Scroll to element. For lazy loading and visibility testing.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector for element to scroll to" },
-            behavior: { type: "string", enum: ["auto", "smooth"], description: "Scroll behavior (default: auto)" },
+            selector: { type: "string", description: "CSS selector" },
+            behavior: { type: "string", enum: ["auto", "smooth"], description: "Behavior (default: auto)" },
           },
           required: ["selector"],
         },
       },
       {
         name: "waitForElement",
-        description: "Wait for an element to appear on the page. Essential for dynamic content, autocomplete dropdowns, lazy-loaded elements. Use this instead of executeScript with setTimeout when waiting for elements to load.",
+        description: "Wait for element to appear. For dynamic content and lazy-loaded elements.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector to wait for" },
-            timeout: { type: "number", description: "Maximum time to wait in milliseconds (default: 5000)" },
-            visible: { type: "boolean", description: "Wait for element to be visible (default: true)" },
+            selector: { type: "string", description: "CSS selector" },
+            timeout: { type: "number", description: "Max wait ms (default: 5000)" },
+            visible: { type: "boolean", description: "Wait for visible (default: true)" },
           },
           required: ["selector"],
         },
       },
       {
         name: "executeScript",
-        description: "Execute JavaScript code. USE ONLY when specialized tools insufficient. DO NOT use for finding elements (use analyzePage or findElementsByText instead). Last resort only.",
+        description: "Execute JavaScript. Use only when specialized tools insufficient. Prefer analyzePage or findElementsByText.",
         inputSchema: {
           type: "object",
           properties: {
-            script: { type: "string", description: "JavaScript code to execute" },
-            waitAfter: { type: "number", description: "Milliseconds to wait after execution (default: 500)" },
-            screenshot: { type: "boolean", description: "Capture screenshot after execution (default: false for performance)" },
-            timeout: { type: "number", description: "Maximum time to wait for operation in ms (default: 30000)" },
+            script: { type: "string", description: "JavaScript code" },
+            waitAfter: { type: "number", description: "Wait ms (default: 500)" },
+            screenshot: { type: "boolean", description: "Screenshot (default: false)" },
+            timeout: { type: "number", description: "Max wait ms (default: 30000)" },
           },
           required: ["script"],
         },
       },
       {
         name: "getConsoleLogs",
-        description: "Retrieve all console.log, console.warn, console.error messages from the browser. Essential for debugging JavaScript errors and tracking application behavior. Logs are captured automatically from page load.",
+        description: "Get browser console messages. For debugging JS errors and tracking behavior.",
         inputSchema: {
           type: "object",
           properties: {
-            types: { type: "array", items: { type: "string", enum: ["log", "warn", "error", "info", "debug", "verbose", "warning"] }, description: "Filter by log types (default: all)" },
-            clear: { type: "boolean", description: "Clear logs after reading (default: false)" },
+            types: { type: "array", items: { type: "string", enum: ["log", "warn", "error", "info", "debug", "verbose", "warning"] }, description: "Filter types (default: all)" },
+            clear: { type: "boolean", description: "Clear after read (default: false)" },
           },
         },
       },
       {
         name: "listNetworkRequests",
-        description: "Get compact list of network requests with method, URL, and status only. Perfect for overview of API calls. Use getNetworkRequest for full details of specific request. Requests captured automatically from page load. Supports pagination to handle large numbers of requests.",
+        description: "List network requests (method, URL, status). Use getNetworkRequest for details. Supports pagination.",
         inputSchema: {
           type: "object",
           properties: {
-            types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter by request types (default: Fetch, XHR)" },
-            status: { type: "string", enum: ["pending", "completed", "failed", "all"], description: "Filter by status (default: all)" },
-            limit: { type: "number", description: "Maximum number of requests to return (default: 50)" },
-            offset: { type: "number", description: "Number of requests to skip before returning results (default: 0)" },
-            clear: { type: "boolean", description: "Clear requests after reading (default: false)" },
+            types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter types (default: Fetch, XHR)" },
+            status: { type: "string", enum: ["pending", "completed", "failed", "all"], description: "Filter status (default: all)" },
+            limit: { type: "number", description: "Max requests (default: 50)" },
+            offset: { type: "number", description: "Skip requests (default: 0)" },
+            clear: { type: "boolean", description: "Clear after read (default: false)" },
           },
         },
       },
       {
         name: "getNetworkRequest",
-        description: "Get full details of a specific network request including headers, payload, and response. Use requestId from listNetworkRequests.",
+        description: "Get network request details (headers, payload, response). Use requestId from listNetworkRequests.",
         inputSchema: {
           type: "object",
           properties: {
-            requestId: { type: "string", description: "Request ID to get details for" },
+            requestId: { type: "string", description: "Request ID" },
           },
           required: ["requestId"],
         },
       },
       {
         name: "filterNetworkRequests",
-        description: "Filter network requests by URL pattern and get full details. Returns all matching requests with headers, payloads, and responses.",
+        description: "Filter network requests by URL pattern. Returns matching requests with full details.",
         inputSchema: {
           type: "object",
           properties: {
-            urlPattern: { type: "string", description: "URL pattern to filter by (regex or partial match)" },
-            types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter by request types (default: Fetch, XHR)" },
-            clear: { type: "boolean", description: "Clear requests after reading (default: false)" },
+            urlPattern: { type: "string", description: "URL pattern (regex or partial)" },
+            types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter types (default: Fetch, XHR)" },
+            clear: { type: "boolean", description: "Clear after read (default: false)" },
           },
           required: ["urlPattern"],
         },
       },
       {
         name: "hover",
-        description: "Simulate mouse hover over an element to test hover effects, tooltips, dropdown menus, and interactive states. Essential for testing CSS :hover pseudo-classes.",
+        description: "Hover over element. For testing hover effects, tooltips, and CSS :hover states.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector for element to hover" },
+            selector: { type: "string", description: "CSS selector" },
           },
           required: ["selector"],
         },
       },
       {
         name: "setStyles",
-        description: "Apply inline CSS styles to an element for live editing and prototyping. Perfect for testing design changes without modifying source code.",
+        description: "Apply inline CSS to element. For live editing and prototyping.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector for element to modify" },
+            selector: { type: "string", description: "CSS selector" },
             styles: {
               type: "array",
               items: {
                 type: "object",
                 properties: {
-                  name: { type: "string", description: "CSS property name" },
-                  value: { type: "string", description: "CSS property value" },
+                  name: { type: "string", description: "Property name" },
+                  value: { type: "string", description: "Property value" },
                 },
                 required: ["name", "value"],
               },
-              description: "Array of CSS property name-value pairs",
+              description: "CSS property name-value pairs",
             },
           },
           required: ["selector", "styles"],
@@ -1355,20 +1355,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "setViewport",
-        description: "Change viewport dimensions for responsive design testing. Test how your layout adapts to different screen sizes, mobile devices, tablets, and desktop resolutions.",
+        description: "Change viewport dimensions. Test responsive layouts across screen sizes.",
         inputSchema: {
           type: "object",
           properties: {
-            width: { type: "number", minimum: 320, maximum: 4000, description: "Viewport width in pixels" },
-            height: { type: "number", minimum: 200, maximum: 3000, description: "Viewport height in pixels" },
-            deviceScaleFactor: { type: "number", minimum: 0.5, maximum: 3, description: "Device pixel ratio (default: 1)" },
+            width: { type: "number", minimum: 320, maximum: 4000, description: "Width px" },
+            height: { type: "number", minimum: 200, maximum: 3000, description: "Height px" },
+            deviceScaleFactor: { type: "number", minimum: 0.5, maximum: 3, description: "Pixel ratio (default: 1)" },
           },
           required: ["width", "height"],
         },
       },
       {
         name: "getViewport",
-        description: "Get current viewport size and device pixel ratio. Essential for responsive design testing and understanding how content fits on different screen sizes.",
+        description: "Get viewport size and pixel ratio. For responsive design testing.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -1376,151 +1376,151 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "navigateTo",
-        description: "Navigate the current page to a new URL. Use this when you need to move to a different page while keeping the same browser instance. Page will be reused if already open.",
+        description: "Navigate to new URL. Reuses browser instance.",
         inputSchema: {
           type: "object",
           properties: {
             url: { type: "string", description: "URL to navigate to" },
-            waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle0", "networkidle2"], description: "Wait until event (default: networkidle2)" },
+            waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle0", "networkidle2"], description: "Wait event (default: networkidle2)" },
           },
           required: ["url"],
         },
       },
       {
         name: "getFigmaFrame",
-        description: "Export and download a Figma frame as PNG image for comparison. Requires Figma API token and file/node IDs from Figma URLs.",
+        description: "Export Figma frame as PNG. Requires API token and file/node IDs.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
-            fileKey: { type: "string", description: "Figma file key (from URL: figma.com/file/FILE_KEY/...)" },
-            nodeId: { type: "string", description: "Figma node ID (frame/component ID)" },
-            scale: { type: "number", minimum: 0.1, maximum: 4, description: "Export scale (0.1-4, default: 2)" },
-            format: { type: "string", enum: ["png", "jpg", "svg"], description: "Export format (default: png)" },
+            figmaToken: { type: "string", description: "API token (optional)" },
+            fileKey: { type: "string", description: "File key" },
+            nodeId: { type: "string", description: "Frame/component ID" },
+            scale: { type: "number", minimum: 0.1, maximum: 4, description: "Scale (default: 2)" },
+            format: { type: "string", enum: ["png", "jpg", "svg"], description: "Format (default: png)" },
           },
           required: ["fileKey", "nodeId"],
         },
       },
       {
         name: "compareFigmaToElement",
-        description: "Compare Figma design directly with browser implementation. The GOLD STANDARD for design-to-code validation. Fetches Figma frame, screenshots element, performs pixel-perfect comparison with difference analysis.",
+        description: "Compare Figma design with browser element. Pixel-perfect validation.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
-            fileKey: { type: "string", description: "Figma file key" },
-            nodeId: { type: "string", description: "Figma frame/component ID" },
-            selector: { type: "string", description: "CSS selector for page element" },
-            threshold: { type: "number", minimum: 0, maximum: 1, description: "Difference threshold (0-1, default: 0.05)" },
-            figmaScale: { type: "number", minimum: 0.1, maximum: 4, description: "Figma export scale (default: 2)" },
+            figmaToken: { type: "string", description: "API token (optional)" },
+            fileKey: { type: "string", description: "File key" },
+            nodeId: { type: "string", description: "Frame/component ID" },
+            selector: { type: "string", description: "CSS selector" },
+            threshold: { type: "number", minimum: 0, maximum: 1, description: "Diff threshold (default: 0.05)" },
+            figmaScale: { type: "number", minimum: 0.1, maximum: 4, description: "Scale (default: 2)" },
           },
           required: ["fileKey", "nodeId", "selector"],
         },
       },
       {
         name: "getFigmaSpecs",
-        description: "Extract detailed design specifications from Figma including colors, fonts, dimensions, and spacing. Perfect for design-to-code comparison.",
+        description: "Extract design specs from Figma: colors, fonts, dimensions, spacing.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
-            fileKey: { type: "string", description: "Figma file key" },
-            nodeId: { type: "string", description: "Figma frame/component ID" },
+            figmaToken: { type: "string", description: "API token (optional)" },
+            fileKey: { type: "string", description: "File key" },
+            nodeId: { type: "string", description: "Frame/component ID" },
           },
           required: ["fileKey", "nodeId"],
         },
       },
       {
         name: "parseFigmaUrl",
-        description: "Parse Figma URL to extract fileKey and nodeId. Accepts full Figma URLs (figma.com/file/..., figma.com/design/...) and automatically extracts parameters. Makes it easy to work with Figma links without manual parsing.",
+        description: "Parse Figma URL to extract fileKey and nodeId.",
         inputSchema: {
           type: "object",
           properties: {
-            url: { type: "string", description: "Full Figma URL (e.g., https://www.figma.com/file/ABC123/Design?node-id=1-2) or just fileKey" },
+            url: { type: "string", description: "Figma URL or fileKey" },
           },
           required: ["url"],
         },
       },
       {
         name: "listFigmaPages",
-        description: "Get file structure: all pages and frames from Figma file. Returns hierarchical list of pages with their frames, IDs, names, and dimensions. Use this FIRST to discover what's in the file before requesting specific nodes.",
+        description: "Get file structure: all pages and frames. Use first to discover file contents.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
-            fileKey: { type: "string", description: "Figma file key or full Figma URL" },
+            figmaToken: { type: "string", description: "API token (optional)" },
+            fileKey: { type: "string", description: "File key or URL" },
           },
           required: ["fileKey"],
         },
       },
       {
         name: "searchFigmaFrames",
-        description: "Search for frames/components by name in Figma file. Case-insensitive search across all pages. Returns matching nodes with IDs, types, pages, and dimensions.",
+        description: "Search frames/components by name. Case-insensitive across all pages.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
-            fileKey: { type: "string", description: "Figma file key or full Figma URL" },
-            searchQuery: { type: "string", description: "Search query (e.g., 'login', 'button', 'header')" },
+            figmaToken: { type: "string", description: "API token (optional)" },
+            fileKey: { type: "string", description: "File key or URL" },
+            searchQuery: { type: "string", description: "Search query" },
           },
           required: ["fileKey", "searchQuery"],
         },
       },
       {
         name: "getFigmaComponents",
-        description: "Get all components from Figma file (Design System). Returns all COMPONENT and COMPONENT_SET nodes with names, descriptions, and dimensions. Perfect for extracting design system components.",
+        description: "Get all components from file (Design System). For extracting design system.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
-            fileKey: { type: "string", description: "Figma file key or full Figma URL" },
+            figmaToken: { type: "string", description: "API token (optional)" },
+            fileKey: { type: "string", description: "File key or URL" },
           },
           required: ["fileKey"],
         },
       },
       {
         name: "getFigmaStyles",
-        description: "Get all styles from Figma file: color styles, text styles, effect styles, grid styles. Returns design system styles with names and descriptions. Use for extracting shared design tokens.",
+        description: "Get all styles: color, text, effect, grid. For extracting design tokens.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
-            fileKey: { type: "string", description: "Figma file key or full Figma URL" },
+            figmaToken: { type: "string", description: "API token (optional)" },
+            fileKey: { type: "string", description: "File key or URL" },
           },
           required: ["fileKey"],
         },
       },
       {
         name: "getFigmaColorPalette",
-        description: "Extract complete color palette from Figma file. Analyzes all fills and strokes, returns unique colors with hex values, rgba, usage count, and examples. Sorted by usage frequency.",
+        description: "Extract color palette. Returns unique colors with hex, rgba, usage count.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "Figma API token (optional if FIGMA_TOKEN env var is set)" },
-            fileKey: { type: "string", description: "Figma file key or full Figma URL" },
+            figmaToken: { type: "string", description: "API token (optional)" },
+            fileKey: { type: "string", description: "File key or URL" },
           },
           required: ["fileKey"],
         },
       },
       {
         name: "smartFindElement",
-        description: "AI-powered element finder using natural language. TIP: Use analyzePage first to get complete page structure with all selectors - it's faster and more reliable. This tool is best for ambiguous searches when exact selector is unknown. Returns multiple candidates ranked by relevance.",
+        description: "Find elements with natural language. Returns ranked candidates. Prefer analyzePage for better performance.",
         inputSchema: {
           type: "object",
           properties: {
-            description: { type: "string", description: "Natural language description (e.g., 'login button', 'email input', 'submit form')" },
-            maxResults: { type: "number", minimum: 1, maximum: 20, description: "Max candidates to return (default: 5)" },
+            description: { type: "string", description: "Natural language description" },
+            maxResults: { type: "number", minimum: 1, maximum: 20, description: "Max candidates (default: 5)" },
             action: {
               type: "object",
               properties: {
-                type: { type: "string", enum: ["click", "type", "scrollTo", "screenshot", "hover", "setStyles"], description: "Action to perform on best match" },
-                text: { type: "string", description: "Text to type (for 'type' action)" },
-                styles: { type: "array", items: { type: "object", properties: { name: { type: "string" }, value: { type: "string" } } }, description: "Styles to apply (for 'setStyles' action)" },
-                screenshot: { type: "boolean", description: "Capture screenshot after action (default: false)" },
-                waitAfter: { type: "number", description: "Wait time in ms after action" },
+                type: { type: "string", enum: ["click", "type", "scrollTo", "screenshot", "hover", "setStyles"], description: "Action type" },
+                text: { type: "string", description: "Text for 'type'" },
+                styles: { type: "array", items: { type: "object", properties: { name: { type: "string" }, value: { type: "string" } } }, description: "Styles for 'setStyles'" },
+                screenshot: { type: "boolean", description: "Screenshot (default: false)" },
+                waitAfter: { type: "number", description: "Wait ms" },
               },
               required: ["type"],
-              description: "Optional action to perform on the best matching element",
+              description: "Optional action on element",
             },
           },
           required: ["description"],
@@ -1528,44 +1528,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "analyzePage",
-        description: "Get current page state and structure: forms (with values), inputs, buttons, links, selectors. USE AFTER: page load, button clicks, form submissions, AJAX updates, ANY page changes. Use refresh:true to get latest state after interactions. BETTER than screenshot for debugging: shows actual data (form values, errors, validation states) not just visual. 2-5k tokens vs screenshot 15-25k. Cached per URL, use refresh:true after page changes.",
+        description: "Get page state: forms, inputs, buttons, links with values. Use refresh:true after interactions. Cached per URL. 2-5k tokens vs screenshot 15-25k.",
         inputSchema: {
           type: "object",
           properties: {
-            refresh: { type: "boolean", description: "Force refresh cached analysis (default: false)" },
+            refresh: { type: "boolean", description: "Refresh cache (default: false)" },
           },
         },
       },
       {
         name: "getAllInteractiveElements",
-        description: "Get all clickable and interactive elements on the page with their selectors and descriptions. Perfect for understanding what actions are available.",
+        description: "Get all interactive elements with selectors. For understanding available actions.",
         inputSchema: {
           type: "object",
           properties: {
-            includeHidden: { type: "boolean", description: "Include hidden elements (default: false)" },
+            includeHidden: { type: "boolean", description: "Include hidden (default: false)" },
           },
         },
       },
       {
         name: "findElementsByText",
-        description: "Find all elements containing specific text. Returns elements with their selectors. Can optionally perform actions (click, type, etc.) on the first match immediately.",
+        description: "Find elements by text. Returns elements with selectors. Optional actions on first match.",
         inputSchema: {
           type: "object",
           properties: {
-            text: { type: "string", description: "Text to search for" },
-            exact: { type: "boolean", description: "Exact match only (default: false)" },
+            text: { type: "string", description: "Search text" },
+            exact: { type: "boolean", description: "Exact match (default: false)" },
             caseSensitive: { type: "boolean", description: "Case sensitive (default: false)" },
             action: {
               type: "object",
               properties: {
-                type: { type: "string", enum: ["click", "type", "scrollTo", "screenshot", "hover", "setStyles"], description: "Action to perform on first match" },
-                text: { type: "string", description: "Text to type (for 'type' action)" },
-                styles: { type: "array", items: { type: "object", properties: { name: { type: "string" }, value: { type: "string" } } }, description: "Styles to apply (for 'setStyles' action)" },
-                screenshot: { type: "boolean", description: "Capture screenshot after action (default: false)" },
-                waitAfter: { type: "number", description: "Wait time in ms after action" },
+                type: { type: "string", enum: ["click", "type", "scrollTo", "screenshot", "hover", "setStyles"], description: "Action type" },
+                text: { type: "string", description: "Text for 'type'" },
+                styles: { type: "array", items: { type: "object", properties: { name: { type: "string" }, value: { type: "string" } } }, description: "Styles for 'setStyles'" },
+                screenshot: { type: "boolean", description: "Screenshot (default: false)" },
+                waitAfter: { type: "number", description: "Wait ms" },
               },
               required: ["type"],
-              description: "Optional action to perform on the first matching element",
+              description: "Optional action on first match",
             },
           },
           required: ["text"],
@@ -1573,7 +1573,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "enableRecorder",
-        description: "Inject recorder UI widget into the current page. Enables visual recording of user interactions with start/stop/save controls.",
+        description: "Inject recorder UI widget. Visual recording with start/stop/save controls.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -1581,20 +1581,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "executeScenario",
-        description: "Execute a recorded scenario by name with optional parameters. Runs all actions in the scenario chain with dependency resolution.",
+        description: "Execute recorded scenario by name. Runs actions with dependency resolution.",
         inputSchema: {
           type: "object",
           properties: {
-            name: { type: "string", description: "Scenario name to execute" },
-            parameters: { type: "object", description: "Parameters for scenario execution (e.g., { email: 'user@test.com', password: 'secret' })" },
-            executeDependencies: { type: "boolean", description: "Execute dependencies before running scenario (default: true)" },
+            name: { type: "string", description: "Scenario name" },
+            parameters: { type: "object", description: "Execution parameters" },
+            executeDependencies: { type: "boolean", description: "Execute dependencies (default: true)" },
           },
           required: ["name"],
         },
       },
       {
         name: "listScenarios",
-        description: "Get list of all available scenarios with metadata (name, description, tags, dependencies, timestamps).",
+        description: "List all scenarios with metadata.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -1602,34 +1602,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "searchScenarios",
-        description: "Search scenarios by text query or tags. Returns matching scenarios with metadata.",
+        description: "Search scenarios by text or tags.",
         inputSchema: {
           type: "object",
           properties: {
-            text: { type: "string", description: "Text to search in name/description" },
-            tags: { type: "array", items: { type: "string" }, description: "Tags to filter by" },
+            text: { type: "string", description: "Search text" },
+            tags: { type: "array", items: { type: "string" }, description: "Filter tags" },
           },
         },
       },
       {
         name: "getScenarioInfo",
-        description: "Get detailed information about a specific scenario including actions, parameters, and dependencies.",
+        description: "Get scenario details: actions, parameters, dependencies.",
         inputSchema: {
           type: "object",
           properties: {
             name: { type: "string", description: "Scenario name" },
-            includeSecrets: { type: "boolean", description: "Include secrets in response (default: false)" },
+            includeSecrets: { type: "boolean", description: "Include secrets (default: false)" },
           },
           required: ["name"],
         },
       },
       {
         name: "deleteScenario",
-        description: "Delete a scenario and its associated secrets from storage.",
+        description: "Delete scenario and secrets.",
         inputSchema: {
           type: "object",
           properties: {
-            name: { type: "string", description: "Scenario name to delete" },
+            name: { type: "string", description: "Scenario name" },
           },
           required: ["name"],
         },
