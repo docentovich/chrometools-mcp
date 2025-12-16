@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.2] - 2025-12-16
+
+### Added
+- **Figma API Token Setup documentation** - Added comprehensive guide on how to obtain and configure Figma Personal Access Token
+  - Step-by-step instructions for getting token from Figma account settings
+  - Configuration examples for both Claude Desktop and Claude Code
+  - Environment variable setup (`FIGMA_TOKEN`)
+  - Note about alternative parameter-based token passing
+
 ## [1.7.1] - 2025-12-15
 
 ### Performance

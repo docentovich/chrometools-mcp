@@ -667,6 +667,54 @@ If you don't need to see the browser window, you can use xvfb (virtual X server)
 
 This runs Chrome in GUI mode but on a virtual display (window is not visible).
 
+### Figma API Token Setup
+
+To use Figma tools, you need to configure your Figma Personal Access Token.
+
+**How to get your Figma token:**
+1. Go to your Figma account settings: https://www.figma.com/settings
+2. Scroll down to "Personal access tokens"
+3. Click "Create a new personal access token"
+4. Give it a name (e.g., "chrometools-mcp")
+5. Copy the generated token
+
+**Add token to MCP configuration:**
+
+**Claude Desktop** (`~/.claude/mcp_config.json` or `~/AppData/Roaming/Claude/mcp_config.json` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "chrometools": {
+      "command": "npx",
+      "args": ["-y", "chrometools-mcp"],
+      "env": {
+        "FIGMA_TOKEN": "your-figma-token-here"
+      }
+    }
+  }
+}
+```
+
+**Claude Code** (`~/.claude.json`):
+
+```json
+{
+  "mcpServers": {
+    "chrometools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "chrometools-mcp"],
+      "env": {
+        "FIGMA_TOKEN": "your-figma-token-here"
+      }
+    }
+  }
+}
+```
+
+**Note:** Alternatively, you can pass the token directly in each Figma tool call using the `figmaToken` parameter, but using the environment variable is more convenient.
+
 ---
 
 ## WSL Setup Guide
