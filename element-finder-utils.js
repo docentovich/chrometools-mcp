@@ -296,6 +296,16 @@ function scoreInputField(element, context, description) {
 }
 
 /**
+ * Check if attribute value is safe to use in CSS selector
+ * Returns false if value contains characters that could break selector syntax
+ */
+function isSafeSelectorValue(value) {
+  if (!value || typeof value !== 'string') return false;
+  // Check for problematic characters: quotes, brackets, backslashes
+  return !/["'\\[\]{}()]/.test(value);
+}
+
+/**
  * Generate unique CSS selector for an element
  */
 function getUniqueSelectorInPage(element) {
@@ -320,23 +330,32 @@ function getUniqueSelectorInPage(element) {
     }
   }
 
-  // Try name attribute
-  if (element.name) {
+  // Try name attribute (only if value is safe)
+  if (element.name && isSafeSelectorValue(element.name)) {
     const selector = `${element.tagName.toLowerCase()}[name="${element.name}"]`;
-    if (document.querySelectorAll(selector).length === 1) {
-      return selector;
+    try {
+      if (document.querySelectorAll(selector).length === 1) {
+        return selector;
+      }
+    } catch (e) {
+      // Invalid selector, skip
     }
   }
 
-  // Try data attributes
+  // Try data attributes (only if values are safe)
   const dataAttrs = Array.from(element.attributes)
-    .filter(attr => attr.name.startsWith('data-'))
+    .filter(attr => attr.name.startsWith('data-') && isSafeSelectorValue(attr.value))
     .slice(0, 2);
 
   for (const attr of dataAttrs) {
     const selector = `${element.tagName.toLowerCase()}[${attr.name}="${attr.value}"]`;
-    if (document.querySelectorAll(selector).length === 1) {
-      return selector;
+    try {
+      if (document.querySelectorAll(selector).length === 1) {
+        return selector;
+      }
+    } catch (e) {
+      // Invalid selector, skip
+      continue;
     }
   }
 

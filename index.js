@@ -3415,7 +3415,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "executeScenario") {
-      const page = await getLastOpenPage();
+      // Try to get existing page, or auto-open browser using scenario's entryUrl
+      let page;
+      try {
+        page = await getLastOpenPage();
+      } catch (error) {
+        // No page is open - load scenario and open browser at entryUrl
+        const scenario = await loadScenario(args.name);
+        if (!scenario) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: `Scenario "${args.name}" not found`
+              }, null, 2)
+            }]
+          };
+        }
+
+        const entryUrl = scenario.metadata?.entryUrl;
+        if (!entryUrl) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: `Scenario "${args.name}" has no entryUrl. Cannot auto-open browser.`
+              }, null, 2)
+            }]
+          };
+        }
+
+        // Auto-open browser at scenario's entry URL
+        page = await getOrCreatePage(entryUrl);
+      }
+
       const options = {};
 
       // Pass executeDependencies option if provided

@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.4] - 2025-12-19
+
+### Changed
+- **executeScenario auto-opens browser** - No longer throws error when no page is open
+  - Automatically opens browser at scenario's `entryUrl` if no page is currently open
+  - Eliminates need to manually call `openBrowser` before executing scenarios
+  - Improves user experience by treating browser opening as a side effect
+  - Falls back gracefully: shows error only if scenario has no `entryUrl`
+  - Location: `index.js:3417-3469`
+
+## [1.7.3] - 2025-12-19
+
+### Fixed
+- **Fixed CSS selector generation crash** - `analyzePage` now handles attribute values with special characters
+  - Added `isSafeSelectorValue()` function to validate attribute values before using in selectors
+  - Filters out attributes containing problematic characters: `["'\\[]{}()]`
+  - Added try-catch blocks to prevent selector syntax errors
+  - Example: `button[data-counter="["b"]"]` (invalid) is now skipped
+  - Location: `element-finder-utils.js:302-360`
+
+### Improved
+- **Recorder now skips hidden elements** - Prevents recording actions on invisible elements
+  - Added `isElementVisible()` function to check element visibility before recording
+  - Checks: offsetWidth/Height, display, visibility, opacity
+  - Applies to all event types: click, type, select, upload, hover, drag
+  - Prevents scenarios with duplicate/invisible element actions (e.g., Yandex search with hidden input)
+  - Console logs when skipping hidden elements for debugging
+  - Location: `recorder/recorder-script.js:1173-1188`
+
 ## [1.7.2] - 2025-12-16
 
 ### Added

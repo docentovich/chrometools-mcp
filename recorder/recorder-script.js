@@ -793,6 +793,13 @@ export function generateRecorderScript() {
 
     // Find the actual clickable element (element with click listener or interactive role)
     const actualTarget = findActualClickTarget(e.target);
+
+    // Skip recording if element is not visible
+    if (!isElementVisible(actualTarget)) {
+      console.log('Skipping click recording for hidden element:', actualTarget);
+      return;
+    }
+
     const selectorInfo = selectorGenerator.generateSelectorForElement(actualTarget);
     const form = actualTarget.closest('form');
 
@@ -945,6 +952,13 @@ export function generateRecorderScript() {
 
       // Only record if value changed
       if (value !== previousValue) {
+        // Skip recording if element is not visible
+        if (!isElementVisible(element)) {
+          console.log('Skipping input recording for hidden element:', element);
+          lastInputValue.set(element, value);
+          return;
+        }
+
         const selectorInfo = selectorGenerator.generateSelectorForElement(element);
 
         // Detect if secret
@@ -985,6 +999,12 @@ export function generateRecorderScript() {
     const element = e.target;
 
     if (element.tagName === 'SELECT') {
+      // Skip recording if element is not visible
+      if (!isElementVisible(element)) {
+        console.log('Skipping select recording for hidden element:', element);
+        return;
+      }
+
       const selectorInfo = selectorGenerator.generateSelectorForElement(element);
 
       recordAction({
@@ -1000,6 +1020,12 @@ export function generateRecorderScript() {
 
       highlightElement(element);
     } else if (element.type === 'file') {
+      // Skip recording if element is not visible
+      if (!isElementVisible(element)) {
+        console.log('Skipping file upload recording for hidden element:', element);
+        return;
+      }
+
       // File upload
       const selectorInfo = selectorGenerator.generateSelectorForElement(element);
 
@@ -1057,6 +1083,13 @@ export function generateRecorderScript() {
       const hasHoverEffect = hasHoverStyle(e.target);
 
       if (hasHoverEffect) {
+        // Skip recording if element is not visible
+        if (!isElementVisible(e.target)) {
+          console.log('Skipping hover recording for hidden element:', e.target);
+          lastHoverTarget = e.target;
+          return;
+        }
+
         const selectorInfo = selectorGenerator.generateSelectorForElement(e.target);
 
         // Record hover action
@@ -1131,6 +1164,12 @@ export function generateRecorderScript() {
   function handleDragStart(e) {
     if (!shouldRecordEvent(e)) return;
 
+    // Skip if element is not visible
+    if (!isElementVisible(e.target)) {
+      console.log('Skipping drag start recording for hidden element:', e.target);
+      return;
+    }
+
     dragStartInfo = {
       element: e.target,
       selector: selectorGenerator.generateSelectorForElement(e.target),
@@ -1142,6 +1181,13 @@ export function generateRecorderScript() {
   function handleDragEnd(e) {
     if (!shouldRecordEvent(e)) return;
     if (!dragStartInfo) return;
+
+    // Skip if element is not visible
+    if (!isElementVisible(dragStartInfo.element)) {
+      console.log('Skipping drag end recording for hidden element:', dragStartInfo.element);
+      dragStartInfo = null;
+      return;
+    }
 
     recordAction({
       type: 'drag',
@@ -1164,6 +1210,27 @@ export function generateRecorderScript() {
 
   function shouldRecordEvent(e) {
     return state.isRecording && !state.isPaused;
+  }
+
+  /**
+   * Check if element is visible to the user
+   * Returns false for hidden elements that shouldn't be recorded
+   */
+  function isElementVisible(element) {
+    if (!element) return false;
+
+    // Check offsetWidth/offsetHeight (most reliable)
+    if (element.offsetWidth === 0 || element.offsetHeight === 0) {
+      return false;
+    }
+
+    // Check computed style
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+      return false;
+    }
+
+    return true;
   }
 
   function recordAction(action) {
