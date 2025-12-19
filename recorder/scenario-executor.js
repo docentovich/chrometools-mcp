@@ -12,6 +12,10 @@
 import { resolveDependencies, checkDependencyCondition } from './dependency-resolver.js';
 import { loadScenario, loadSecrets, loadIndex } from './scenario-storage.js';
 
+// Debug mode - avoid polluting STDIO with logs (breaks MCP JSON-RPC)
+const DEBUG_MODE = process.env.CHROMETOOLS_DEBUG === 'true';
+const debugLog = DEBUG_MODE ? console.error : () => {};
+
 /**
  * Execute scenario with dependencies
  * @param {string} scenarioName - Scenario to execute
@@ -76,7 +80,7 @@ export async function executeScenario(scenarioName, page, params = {}, options =
             const shouldExecute = await checkDependencyCondition(dep.condition, context);
 
             if (!shouldExecute) {
-              console.log(`Skipping scenario "${name}" due to condition`);
+              debugLog(`Skipping scenario "${name}" due to condition`);
               continue;
             }
           }
@@ -258,7 +262,7 @@ async function executeActionWithRetry(action, page, maxRetries, timeout) {
         try {
           result.errorDetails.context = await capturePageContext(page, action);
         } catch (contextError) {
-          console.error('Failed to capture page context:', contextError);
+          debugLog('Failed to capture page context:', contextError);
         }
       }
 
@@ -268,7 +272,7 @@ async function executeActionWithRetry(action, page, maxRetries, timeout) {
       // If this is a selector error and we have fallbacks, try them
       if (action.selector?.fallbacks && action.selector.fallbacks.length > 0) {
         const fallback = action.selector.fallbacks[0];
-        console.log(`[Retry ${attempt}] Trying fallback selector: ${fallback}`);
+        debugLog(`[Retry ${attempt}] Trying fallback selector: ${fallback}`);
 
         action.selector.value = fallback;
         action.selector.fallbacks = action.selector.fallbacks.slice(1);
@@ -277,7 +281,7 @@ async function executeActionWithRetry(action, page, maxRetries, timeout) {
 
       // If we have element description, try smartFindElement
       if (action.selector?.elementInfo?.text && attempt < maxRetries) {
-        console.log(`[Retry ${attempt}] Selector failed, trying smartFindElement with description: ${action.selector.elementInfo.text}`);
+        debugLog(`[Retry ${attempt}] Selector failed, trying smartFindElement with description: ${action.selector.elementInfo.text}`);
 
         try {
           // Inject element finder utilities if not already done
@@ -290,11 +294,11 @@ async function executeActionWithRetry(action, page, maxRetries, timeout) {
           if (smartResult.candidates && smartResult.candidates.length > 0) {
             action.selector.value = smartResult.candidates[0].selector;
             action.selector.fallbacks = smartResult.candidates.slice(1).map(c => c.selector);
-            console.log(`[Retry ${attempt}] Found alternative selector: ${action.selector.value}`);
+            debugLog(`[Retry ${attempt}] Found alternative selector: ${action.selector.value}`);
             continue;
           }
         } catch (smartError) {
-          console.error('[Retry] smartFindElement failed:', smartError.message);
+          debugLog('[Retry] smartFindElement failed:', smartError.message);
         }
       }
 
@@ -562,12 +566,12 @@ async function smartWaitAfterClick(page, action, timeout) {
 
     if (!hasActivity) {
       // No activity detected - we're done, fast exit
-      console.log('[Smart Wait] No activity detected, skipping extended wait');
+      debugLog('[Smart Wait] No activity detected, skipping extended wait');
       return;
     }
 
     // Activity detected - wait minimum 2 seconds
-    console.log('[Smart Wait] Activity detected, waiting for completion');
+    debugLog('[Smart Wait] Activity detected, waiting for completion');
     const remainingMinWait = 2000 - 500; // Already waited 500ms
     if (remainingMinWait > 0) {
       await new Promise(resolve => setTimeout(resolve, remainingMinWait));
@@ -648,13 +652,13 @@ async function smartWaitAfterClick(page, action, timeout) {
 
   } catch (error) {
     // If smart wait fails, just log and continue
-    console.error('[Smart Wait] Error during smart wait:', error.message);
+    debugLog('[Smart Wait] Error during smart wait:', error.message);
   }
 
   // Ensure we don't exceed max wait time
   const elapsed = Date.now() - startTime;
   if (elapsed > maxWaitTime) {
-    console.warn(`[Smart Wait] Exceeded max wait time (${maxWaitTime}ms)`);
+    debugLog(`[Smart Wait] Exceeded max wait time (${maxWaitTime}ms)`);
   }
 }
 
@@ -695,7 +699,7 @@ async function checkPageActivity(page) {
     });
 
     if (activity.hasActivity) {
-      console.log(`[Smart Wait] Activity detected: ${activity.reason}`);
+      debugLog(`[Smart Wait] Activity detected: ${activity.reason}`);
       return true;
     }
 
@@ -724,18 +728,18 @@ async function checkPageActivity(page) {
       });
 
       if (hasNetworkActivity) {
-        console.log('[Smart Wait] Network activity detected');
+        debugLog('[Smart Wait] Network activity detected');
         return true;
       }
     } catch (netError) {
       // Network check failed, assume no activity
-      console.log('[Smart Wait] Network check failed, assuming no activity');
+      debugLog('[Smart Wait] Network check failed, assuming no activity');
     }
 
     return false;
   } catch (error) {
     // If check fails, assume there's activity to be safe
-    console.error('[Smart Wait] Activity check failed, assuming activity exists:', error.message);
+    debugLog('[Smart Wait] Activity check failed, assuming activity exists:', error.message);
     return true;
   }
 }

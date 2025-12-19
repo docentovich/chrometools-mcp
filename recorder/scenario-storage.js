@@ -194,6 +194,8 @@ async function updateIndex(scenarioName, metadata, scenariosDir) {
     dependencies: metadata.dependencies || [],
     parameters: metadata.parameters || {},
     outputs: metadata.outputs || [],
+    entryUrl: metadata.entryUrl || null,
+    exitUrl: metadata.exitUrl || null,
     createdAt: index[scenarioName]?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };

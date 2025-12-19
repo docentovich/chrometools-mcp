@@ -91,9 +91,28 @@ export function generateRecorderScript() {
         hoverDeletionCandidates: Array.from(state.hoverDeletionCandidates),
         timestamp: Date.now()
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistentState));
+
+      // Validate state before stringifying
+      let jsonString;
+      try {
+        jsonString = JSON.stringify(persistentState);
+      } catch (stringifyError) {
+        console.error('[Recorder] Failed to stringify state:', stringifyError.message);
+        console.error('[Recorder] Problematic state:', persistentState);
+        return;
+      }
+
+      // Validate JSON string
+      if (!jsonString || typeof jsonString !== 'string' || jsonString.length === 0) {
+        console.error('[Recorder] Invalid JSON string generated');
+        return;
+      }
+
+      // Save to localStorage
+      localStorage.setItem(STORAGE_KEY, jsonString);
     } catch (error) {
       console.error('[Recorder] Failed to save state:', error);
+      // Don't let save errors crash the recorder
     }
   }
 
@@ -108,11 +127,37 @@ export function generateRecorderScript() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (!saved) return null;
 
-      const persistentState = JSON.parse(saved);
+      // Validate JSON before parsing
+      if (typeof saved !== 'string' || saved.trim().length === 0) {
+        console.warn('[Recorder] Invalid state data in localStorage, clearing...');
+        clearStateFromLocalStorage();
+        resetClearingFlag();
+        return null;
+      }
+
+      let persistentState;
+      try {
+        persistentState = JSON.parse(saved);
+      } catch (parseError) {
+        console.error('[Recorder] Corrupted state data in localStorage:', parseError.message);
+        console.error('[Recorder] Data preview:', saved.substring(0, 100));
+        clearStateFromLocalStorage();
+        resetClearingFlag();
+        return null;
+      }
+
+      // Validate parsed state structure
+      if (!persistentState || typeof persistentState !== 'object') {
+        console.warn('[Recorder] Invalid state structure, clearing...');
+        clearStateFromLocalStorage();
+        resetClearingFlag();
+        return null;
+      }
 
       // Check if state is not too old (max 24 hours)
       const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-      if (Date.now() - persistentState.timestamp > maxAge) {
+      if (Date.now() - (persistentState.timestamp || 0) > maxAge) {
+        console.log('[Recorder] State too old, clearing...');
         clearStateFromLocalStorage();
         resetClearingFlag();
         return null;
@@ -121,6 +166,13 @@ export function generateRecorderScript() {
       return persistentState;
     } catch (error) {
       console.error('[Recorder] Failed to load state:', error);
+      // Clear potentially corrupted state
+      try {
+        clearStateFromLocalStorage();
+        resetClearingFlag();
+      } catch (clearError) {
+        console.error('[Recorder] Failed to clear corrupted state:', clearError);
+      }
       return null;
     }
   }

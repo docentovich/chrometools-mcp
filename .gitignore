@@ -9,6 +9,10 @@ build/
 conversation-*.txt
 test-*.js
 *.sh
+*.bak
+*.backup
+*~
+*.tmp
 
 # NPM package archives
 *.tgz

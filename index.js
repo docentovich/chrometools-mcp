@@ -18,6 +18,11 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import { homedir } from 'os';
 
+// Debug mode - only use stderr for actual errors, not debug info
+// MCP uses STDIO for JSON-RPC, so console.log/error breaks the protocol
+const DEBUG_MODE = process.env.CHROMETOOLS_DEBUG === 'true';
+const debugLog = DEBUG_MODE ? console.error : () => {};
+
 // Figma token from environment variable (can be set in MCP config)
 const FIGMA_TOKEN = process.env.FIGMA_TOKEN || null;
 
@@ -102,19 +107,19 @@ function getScenariosBaseDir(explicitDir = null) {
   // 1. If explicitly provided - remember and return
   if (explicitDir) {
     currentScenariosDirectory = path.resolve(explicitDir);
-    console.log('[chrometools-mcp] Using explicit directory:', currentScenariosDirectory);
+    debugLog('[chrometools-mcp] Using explicit directory:', currentScenariosDirectory);
     return currentScenariosDirectory;
   }
 
   // 2. If already remembered - return
   if (currentScenariosDirectory) {
-    console.log('[chrometools-mcp] Using remembered directory:', currentScenariosDirectory);
+    debugLog('[chrometools-mcp] Using remembered directory:', currentScenariosDirectory);
     return currentScenariosDirectory;
   }
 
   // 3. Use default directory in user's home folder
   currentScenariosDirectory = DEFAULT_STORAGE_DIR;
-  console.log('[chrometools-mcp] Using default directory:', currentScenariosDirectory);
+  debugLog('[chrometools-mcp] Using default directory:', currentScenariosDirectory);
   return currentScenariosDirectory;
 }
 
@@ -200,10 +205,10 @@ async function getBrowser() {
         return cachedBrowser;
       }
       // Browser disconnected, reset the promise
-      console.error("[chrometools-mcp] Browser disconnected, will reconnect...");
+      debugLog("[chrometools-mcp] Browser disconnected, will reconnect...");
       browserPromise = null;
     } catch (error) {
-      console.error("[chrometools-mcp] Error checking cached browser:", error.message);
+      debugLog("[chrometools-mcp] Error checking cached browser:", error.message);
       browserPromise = null;
     }
   }
@@ -221,26 +226,26 @@ async function getBrowser() {
             browserWSEndpoint: endpoint,
             defaultViewport: null,
           });
-          console.error("[chrometools-mcp] Connected to existing Chrome instance");
-          console.error("[chrometools-mcp] WebSocket endpoint:", endpoint);
+          debugLog("[chrometools-mcp] Connected to existing Chrome instance");
+          debugLog("[chrometools-mcp] WebSocket endpoint:", endpoint);
 
           // Set up disconnect handler to reset browserPromise
           browser.on('disconnected', () => {
-            console.error("[chrometools-mcp] Browser disconnected");
+            debugLog("[chrometools-mcp] Browser disconnected");
             browserPromise = null;
           });
 
           return browser;
         } catch (connectError) {
-          console.error("[chrometools-mcp] No existing Chrome found, launching new instance...");
+          debugLog("[chrometools-mcp] No existing Chrome found, launching new instance...");
         }
 
         // Launch new Chrome with remote debugging enabled
         const chromePath = getChromePath();
         const userDataDir = `${getTempDir()}/chrome-mcp-profile`;
 
-        console.error("[chrometools-mcp] Chrome path:", chromePath);
-        console.error("[chrometools-mcp] User data dir:", userDataDir);
+        debugLog("[chrometools-mcp] Chrome path:", chromePath);
+        debugLog("[chrometools-mcp] User data dir:", userDataDir);
 
         chromeProcess = spawn(chromePath, [
           `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
@@ -254,7 +259,7 @@ async function getBrowser() {
 
         chromeProcess.unref(); // Allow Node to exit even if Chrome is running
 
-        console.error("[chrometools-mcp] Chrome launched with remote debugging on port", CHROME_DEBUG_PORT);
+        debugLog("[chrometools-mcp] Chrome launched with remote debugging on port", CHROME_DEBUG_PORT);
 
         // Wait for Chrome to start and get the endpoint
         endpoint = await getChromeWebSocketEndpoint(CHROME_DEBUG_PORT, 20);
@@ -265,12 +270,12 @@ async function getBrowser() {
           defaultViewport: null,
         });
 
-        console.error("[chrometools-mcp] Connected to Chrome instance");
-        console.error("[chrometools-mcp] WebSocket endpoint:", endpoint);
+        debugLog("[chrometools-mcp] Connected to Chrome instance");
+        debugLog("[chrometools-mcp] WebSocket endpoint:", endpoint);
 
         // Set up disconnect handler to reset browserPromise
         browser.on('disconnected', () => {
-          console.error("[chrometools-mcp] Browser disconnected");
+          debugLog("[chrometools-mcp] Browser disconnected");
           browserPromise = null;
         });
 
@@ -406,7 +411,7 @@ async function setupNetworkMonitoring(page) {
       try {
         await setupNetworkMonitoring(page);
       } catch (error) {
-        console.error('[chrometools-mcp] Failed to reinitialize network monitoring:', error.message);
+        debugLog('[chrometools-mcp] Failed to reinitialize network monitoring:', error.message);
       }
     }, 100);
   });
@@ -443,7 +448,7 @@ async function setupRecorderAutoReinjection(page) {
           const baseDir = getScenariosBaseDir();
           await injectRecorder(page, baseDir);
         } catch (error) {
-          console.error('[chrometools-mcp] Failed to re-inject recorder:', error.message);
+          debugLog('[chrometools-mcp] Failed to re-inject recorder:', error.message);
         }
       }
     }, 100);
@@ -457,7 +462,7 @@ async function setupRecorderAutoReinjection(page) {
         const baseDir = getScenariosBaseDir();
         await injectRecorder(page, baseDir);
       } catch (error) {
-        console.error('[chrometools-mcp] Failed to re-inject recorder after reload:', error.message);
+        debugLog('[chrometools-mcp] Failed to re-inject recorder after reload:', error.message);
       }
     }
   });

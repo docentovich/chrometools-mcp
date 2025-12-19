@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.1] - 2025-12-19
+
+### Fixed
+- **MCP Protocol Errors** - Fixed "Unexpected token" JSON parsing errors caused by console output
+  - Added debug mode (`CHROMETOOLS_DEBUG=true`) to control logging
+  - Replaced all `console.log/error` with `debugLog` to prevent STDIO pollution
+  - MCP uses STDIO for JSON-RPC, debug logs were breaking the protocol
+  - Fixed errors: `"Unexpected token 'c', "[chrometool"... is not valid JSON"`
+  - Fixed errors: `"Unexpected token 'S', "[Smart Wait"... is not valid JSON"`
+  - Location: `index.js:21-24`, `recorder/scenario-executor.js:15-17`
+
+- **Recorder localStorage Corruption** - Added robust error handling for corrupted state data
+  - Validates JSON before parsing from localStorage
+  - Validates state structure after parsing
+  - Automatic cleanup of corrupted data with error logging
+  - Location: `recorder/recorder-script.js:64-159`
+
+### Added
+- **Scenario Index Enhancement** - Added `entryUrl` and `exitUrl` to scenario index
+  - `listScenarios` now returns entry and exit URLs for each scenario
+  - Helps identify scenario flow and dependencies
+  - Location: `recorder/scenario-storage.js:197-198`
+
+### Changed
+- **Code Cleanup** - Removed backup files and improved .gitignore
+  - Added `*.bak`, `*.backup`, `*~`, `*.tmp` to .gitignore
+  - Removed leftover `index.js.backup` file
+
 ## [1.9.0] - 2025-12-19
 
 ### Changed
