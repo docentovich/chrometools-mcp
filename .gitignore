@@ -15,3 +15,7 @@ test-*.js
 
 # Local settings (may contain sensitive data)
 .claude/settings.local.json
+
+# User scenarios and secrets (not part of MCP server)
+scenarios/
+secrets/

@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.2] - 2025-12-19
+
+### Fixed
+- **Code Generator Bugs** - Fixed multiple issues in test code generators
+  - **Python generators**: Fixed comment syntax - now use `#` instead of `//`
+  - **Python generators**: Moved `import re` to top of file instead of inline
+  - **Java generator**: Fixed variable name conflicts - now uses unique names (`typeElement`, `hoverElement`, etc.) instead of reusing `element`
+  - **Java generator**: Added missing imports (`JavascriptExecutor`, `Select`)
+  - **All generators**: Implemented language-specific comment generation via `generateComment()` method
+  - Location: `utils/code-generators/code-generator-base.js`, `playwright-python.js`, `selenium-python.js`, `selenium-java.js`
+
+## [1.8.1] - 2025-12-19
+
+### Added
+- **Smart Project Directory Detection** - Scenarios now automatically save to the correct project directory
+  - Auto-detection cascade: `CLAUDE_PROJECT_DIR` env var → `PROJECT_DIR` env var → Git root → current working directory
+  - Optional `directory` parameter on all recorder tools (`enableRecorder`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`)
+  - Session memory: once directory is set (explicitly or auto-detected), it's remembered for the entire MCP server session
+  - Solves issue where scenarios were saved to unpredictable locations based on where MCP process was launched
+  - Location: `utils/project-detector.js`, `index.js:97-115`
+
+### Changed
+- **All recorder storage functions now accept `baseDir` parameter** - Breaking change for direct API usage
+  - Updated: `saveScenario()`, `loadScenario()`, `listScenarios()`, `searchScenarios()`, `deleteScenario()`, `loadIndex()`, and all other storage functions
+  - MCP tool users: no breaking changes, just new optional `directory` parameter
+  - Location: `recorder/scenario-storage.js`, `recorder/scenario-executor.js`, `recorder/recorder-script.js`
+
+## [1.8.0] - 2025-12-19
+
+### Added
+- **Test Code Generation** - New MCP tool `exportScenarioAsCode` for generating executable test code from recorded scenarios
+  - Supports 4 test frameworks: Playwright (TypeScript/Python), Selenium (Python/Java)
+  - Automatic selector cleaning - removes unstable CSS classes (CSS Modules, styled-components, Emotion, hashed classes)
+  - Generates clean, readable test code with comments
+  - Smart selector stability analysis with pattern-based detection
+  - Fallback selector selection - chooses most stable selector from fallbacks
+  - Location: `utils/code-generators/`, `utils/selector-cleaner.js`
+
+  **Unstable patterns detected:**
+  - CSS Modules: `Button_primary__2x3yZ`
+  - Styled-components: `sc-AbCdEf-0`
+  - Emotion: `css-1a2b3c4d`
+  - Hash suffixes: `component_a1b2c3d`
+  - Random hashes: `_1a2b3c4d`
+
+  **Usage:**
+  ```javascript
+  exportScenarioAsCode('checkout', {
+    language: 'playwright-typescript',
+    cleanSelectors: true,
+    includeComments: true
+  })
+  ```
+
 ## [1.7.4] - 2025-12-19
 
 ### Changed

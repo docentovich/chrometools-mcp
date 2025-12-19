@@ -14,7 +14,7 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
-  - [Recorder Tools](#6-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario
+  - [Recorder Tools](#6-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
@@ -506,9 +506,32 @@ Extract detailed design specifications from Figma including text content, colors
 
 ### 6. Recorder Tools ⭐ NEW
 
+**Directory Management**: All recorder tools support an optional `directory` parameter to specify where scenarios are stored. If not provided, the directory is auto-detected using this cascade:
+1. `CLAUDE_PROJECT_DIR` environment variable (set by Claude Code)
+2. `PROJECT_DIR` environment variable (custom)
+3. Git repository root (detected via `git rev-parse --show-toplevel`)
+4. Current working directory (fallback)
+
+Once a directory is set (explicitly or auto-detected), it's remembered for the entire MCP server session.
+
+**Example**:
+```javascript
+// Let it auto-detect (recommended)
+enableRecorder()
+
+// Or specify explicitly
+enableRecorder({ directory: "/path/to/project" })
+
+// Later calls reuse the same directory automatically
+executeScenario({ name: "test" })  // Uses remembered directory
+```
+
+---
+
 #### enableRecorder
 Inject visual recorder UI widget into the current page.
-- **Parameters**: None
+- **Parameters**:
+  - `directory` (optional): Directory to save scenarios (auto-detected if not provided)
 - **Use case**: Start recording user interactions visually
 - **Returns**: Success status
 - **Features**:
@@ -524,6 +547,7 @@ Execute a previously recorded scenario by name.
   - `name` (required): Scenario name
   - `parameters` (optional): Runtime parameters (e.g., { email: "user@test.com" })
   - `executeDependencies` (optional): Execute dependencies before running scenario (default: true)
+  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
 - **Use case**: Run automated test scenarios
 - **Returns**: Execution result with success/failure status
 - **Features**:
@@ -541,7 +565,8 @@ Execute a previously recorded scenario by name.
 
 #### listScenarios
 Get all available scenarios with metadata.
-- **Parameters**: None
+- **Parameters**:
+  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
 - **Use case**: Browse recorded scenarios
 - **Returns**: Array of scenarios with names, descriptions, tags, timestamps
 
@@ -550,6 +575,7 @@ Search scenarios by text or tags.
 - **Parameters**:
   - `text` (optional): Search in name/description
   - `tags` (optional): Array of tags to filter
+  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
 - **Use case**: Find specific scenarios
 - **Returns**: Matching scenarios
 
@@ -558,14 +584,58 @@ Get detailed information about a scenario.
 - **Parameters**:
   - `name` (required): Scenario name
   - `includeSecrets` (optional): Include secret values (default: false)
+  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
 - **Use case**: Inspect scenario actions and dependencies
 - **Returns**: Full scenario details (actions, metadata, dependencies)
 
 #### deleteScenario
 Delete a scenario and its associated secrets.
-- **Parameters**: `name` (required)
+- **Parameters**:
+  - `name` (required): Scenario name
+  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
 - **Use case**: Clean up unused scenarios
 - **Returns**: Success confirmation
+
+#### exportScenarioAsCode ⭐ **NEW**
+Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion).
+
+- **Parameters**:
+  - `scenarioName` (required): Name of scenario to export
+  - `language` (required): Target framework - `"playwright-typescript"`, `"playwright-python"`, `"selenium-python"`, `"selenium-java"`
+  - `cleanSelectors` (optional): Remove unstable CSS classes (default: true)
+  - `includeComments` (optional): Include descriptive comments (default: true)
+  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
+
+- **Use case**: Convert recorded scenarios into maintainable test code
+
+- **Returns**: Generated test code as string
+
+- **Example**:
+  ```javascript
+  // Export scenario as Playwright TypeScript
+  exportScenarioAsCode({
+    scenarioName: "checkout_flow",
+    language: "playwright-typescript",
+    cleanSelectors: true,
+    includeComments: true
+  })
+
+  // Returns clean test code:
+  // import { test, expect } from '@playwright/test';
+  //
+  // test('checkout_flow', async ({ page }) => {
+  //   await page.goto('https://example.com');
+  //   await page.locator('button[data-testid="add-to-cart"]').click();
+  //   await expect(page).toHaveURL(/checkout/);
+  // });
+  ```
+
+- **Selector Cleaning**: Automatically removes unstable patterns:
+  - CSS Modules: `Button_primary__2x3yZ` → removed
+  - Styled-components: `sc-AbCdEf-0` → removed
+  - Emotion: `css-1a2b3c4d` → removed
+  - Hash suffixes: `component_a1b2c3d` → removed
+  - Prefers stable selectors: `data-testid`, `role`, `aria-label`, semantic attributes
 
 ---
 

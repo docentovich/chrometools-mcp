@@ -17,7 +17,7 @@ import { loadScenario, loadSecrets, loadIndex } from './scenario-storage.js';
  * @param {string} scenarioName - Scenario to execute
  * @param {Object} page - Puppeteer page instance
  * @param {Object} params - Parameters for scenario
- * @param {Object} options - Execution options { executeDependencies, skipConditions, maxRetries, timeout }
+ * @param {Object} options - Execution options { executeDependencies, skipConditions, maxRetries, timeout, baseDir }
  * @returns {Object} - Execution result
  */
 export async function executeScenario(scenarioName, page, params = {}, options = {}) {
@@ -25,7 +25,8 @@ export async function executeScenario(scenarioName, page, params = {}, options =
     executeDependencies = true,  // NEW: Execute dependencies by default
     skipConditions = false,
     maxRetries = 3,
-    timeout = 30000
+    timeout = 30000,
+    baseDir  // Base directory for scenarios
   } = options;
 
   const result = {
@@ -41,7 +42,9 @@ export async function executeScenario(scenarioName, page, params = {}, options =
 
   try {
     // Load scenario index
-    const scenarioIndex = await loadIndex();
+    const path = await import('path');
+    const scenariosDir = path.join(baseDir, 'scenarios');
+    const scenarioIndex = await loadIndex(scenariosDir);
 
     let chain = [scenarioName]; // Default: execute only the requested scenario
 
@@ -59,7 +62,7 @@ export async function executeScenario(scenarioName, page, params = {}, options =
 
     // Execute chain in order
     for (const name of chain) {
-      const scenario = await loadScenario(name);
+      const scenario = await loadScenario(name, false, baseDir);
       if (!scenario) {
         result.errors.push(`Scenario "${name}" not found`);
         return result;
@@ -81,7 +84,8 @@ export async function executeScenario(scenarioName, page, params = {}, options =
       }
 
       // Load secrets
-      const secrets = await loadSecrets(name);
+      const secretsDir = path.join(baseDir, 'secrets');
+      const secrets = await loadSecrets(name, secretsDir);
 
       // Merge secrets with params
       const executionParams = { ...params, ...secrets };

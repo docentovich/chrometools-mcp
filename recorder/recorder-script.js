@@ -1601,7 +1601,7 @@ export function generateRecorderScript() {
  * Inject recorder into page
  * @param {Object} page - Puppeteer page instance
  */
-export async function injectRecorder(page) {
+export async function injectRecorder(page, baseDir) {
   try {
     // Check if recorder is already injected
     const alreadyInjected = await page.evaluate(() => {
@@ -1631,13 +1631,15 @@ export async function injectRecorder(page) {
     if (!functionExists) {
       await page.exposeFunction('saveScenarioToMCP', async (scenarioData) => {
         const { saveScenario } = await import('./scenario-storage.js');
-        return await saveScenario(scenarioData);
+        return await saveScenario(scenarioData, baseDir);
       });
 
       await page.exposeFunction('listScenariosFromMCP', async () => {
         const { loadIndex } = await import('./scenario-storage.js');
+        const path = await import('path');
         try {
-          const index = await loadIndex();
+          const scenariosDir = path.join(baseDir, 'scenarios');
+          const index = await loadIndex(scenariosDir);
           return {
             success: true,
             scenarios: Object.values(index)

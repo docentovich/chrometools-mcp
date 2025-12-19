@@ -10,45 +10,44 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Default storage directories (relative to project root)
-const DEFAULT_SCENARIOS_DIR = path.join(process.cwd(), 'scenarios');
-const DEFAULT_SECRETS_DIR = path.join(process.cwd(), 'secrets');
+// Constants
 const INDEX_FILE = 'index.json';
 const GITIGNORE_FILE = '.gitignore';
 
 /**
  * Initialize storage directories
  * Creates directories and ensures .gitignore exists
+ * @param {string} baseDir - Base directory for scenarios and secrets
  */
-export async function initializeStorage() {
+export async function initializeStorage(baseDir) {
+  const scenariosDir = path.join(baseDir, 'scenarios');
+  const secretsDir = path.join(baseDir, 'secrets');
+
   // Create scenarios directory
-  await fs.mkdir(DEFAULT_SCENARIOS_DIR, { recursive: true });
+  await fs.mkdir(scenariosDir, { recursive: true });
 
   // Create secrets directory
-  await fs.mkdir(DEFAULT_SECRETS_DIR, { recursive: true });
+  await fs.mkdir(secretsDir, { recursive: true });
 
   // Ensure .gitignore in secrets directory
-  await ensureSecretsGitignore();
+  await ensureSecretsGitignore(secretsDir);
 
   // Create empty index if doesn't exist
-  const indexPath = path.join(DEFAULT_SCENARIOS_DIR, INDEX_FILE);
+  const indexPath = path.join(scenariosDir, INDEX_FILE);
   try {
     await fs.access(indexPath);
   } catch {
-    await saveIndex({});
+    await saveIndex({}, scenariosDir);
   }
 }
 
 /**
  * Ensure .gitignore exists in secrets directory
+ * @param {string} secretsDir - Path to secrets directory
  */
-async function ensureSecretsGitignore() {
-  const gitignorePath = path.join(DEFAULT_SECRETS_DIR, GITIGNORE_FILE);
+async function ensureSecretsGitignore(secretsDir) {
+  const gitignorePath = path.join(secretsDir, GITIGNORE_FILE);
 
   const content = `# Ignore all secret files
 *
@@ -65,11 +64,12 @@ async function ensureSecretsGitignore() {
 /**
  * Save scenario to file
  * @param {Object} scenario - Scenario data
+ * @param {string} baseDir - Base directory for storage
  * @returns {Object} - { success: boolean, path: string, error?: string }
  */
-export async function saveScenario(scenario) {
+export async function saveScenario(scenario, baseDir) {
   try {
-    await initializeStorage();
+    await initializeStorage(baseDir);
 
     const { name, metadata, chain, secrets } = scenario;
 
@@ -81,6 +81,9 @@ export async function saveScenario(scenario) {
       };
     }
 
+    const scenariosDir = path.join(baseDir, 'scenarios');
+    const secretsDir = path.join(baseDir, 'secrets');
+
     // Save main scenario file (without secrets)
     const scenarioData = {
       name,
@@ -90,16 +93,16 @@ export async function saveScenario(scenario) {
       createdAt: new Date().toISOString()
     };
 
-    const scenarioPath = path.join(DEFAULT_SCENARIOS_DIR, `${name}.json`);
+    const scenarioPath = path.join(scenariosDir, `${name}.json`);
     await fs.writeFile(scenarioPath, JSON.stringify(scenarioData, null, 2), 'utf-8');
 
     // Save secrets separately if exist
     if (secrets && Object.keys(secrets).length > 0) {
-      await saveSecrets(name, secrets);
+      await saveSecrets(name, secrets, secretsDir);
     }
 
     // Update index
-    await updateIndex(name, metadata);
+    await updateIndex(name, metadata, scenariosDir);
 
     return {
       success: true,
@@ -117,17 +120,20 @@ export async function saveScenario(scenario) {
  * Load scenario from file
  * @param {string} name - Scenario name
  * @param {boolean} includeSecrets - Whether to load secrets
+ * @param {string} baseDir - Base directory for storage
  * @returns {Object} - Scenario data or null
  */
-export async function loadScenario(name, includeSecrets = false) {
+export async function loadScenario(name, includeSecrets = false, baseDir) {
   try {
-    const scenarioPath = path.join(DEFAULT_SCENARIOS_DIR, `${name}.json`);
+    const scenariosDir = path.join(baseDir, 'scenarios');
+    const scenarioPath = path.join(scenariosDir, `${name}.json`);
     const content = await fs.readFile(scenarioPath, 'utf-8');
     const scenario = JSON.parse(content);
 
     // Load secrets if requested
     if (includeSecrets) {
-      const secrets = await loadSecrets(name);
+      const secretsDir = path.join(baseDir, 'secrets');
+      const secrets = await loadSecrets(name, secretsDir);
       if (secrets) {
         scenario.secrets = secrets;
       }
@@ -144,10 +150,11 @@ export async function loadScenario(name, includeSecrets = false) {
  * Save secrets for a scenario
  * @param {string} scenarioName - Scenario name
  * @param {Object} secrets - Secrets object { paramName: value }
+ * @param {string} secretsDir - Secrets directory path
  */
-async function saveSecrets(scenarioName, secrets) {
+async function saveSecrets(scenarioName, secrets, secretsDir) {
   try {
-    const secretsPath = path.join(DEFAULT_SECRETS_DIR, `${scenarioName}.json`);
+    const secretsPath = path.join(secretsDir, `${scenarioName}.json`);
     await fs.writeFile(secretsPath, JSON.stringify(secrets, null, 2), 'utf-8');
   } catch (error) {
     console.error(`Error saving secrets for "${scenarioName}":`, error.message);
@@ -157,11 +164,12 @@ async function saveSecrets(scenarioName, secrets) {
 /**
  * Load secrets for a scenario
  * @param {string} scenarioName - Scenario name
+ * @param {string} secretsDir - Secrets directory path
  * @returns {Object|null} - Secrets object or null
  */
-export async function loadSecrets(scenarioName) {
+export async function loadSecrets(scenarioName, secretsDir) {
   try {
-    const secretsPath = path.join(DEFAULT_SECRETS_DIR, `${scenarioName}.json`);
+    const secretsPath = path.join(secretsDir, `${scenarioName}.json`);
     const content = await fs.readFile(secretsPath, 'utf-8');
     return JSON.parse(content);
   } catch (error) {
@@ -174,9 +182,10 @@ export async function loadSecrets(scenarioName) {
  * Update scenario index
  * @param {string} scenarioName - Scenario name
  * @param {Object} metadata - Scenario metadata
+ * @param {string} scenariosDir - Scenarios directory path
  */
-async function updateIndex(scenarioName, metadata) {
-  const index = await loadIndex();
+async function updateIndex(scenarioName, metadata, scenariosDir) {
+  const index = await loadIndex(scenariosDir);
 
   index[scenarioName] = {
     name: scenarioName,
@@ -189,16 +198,17 @@ async function updateIndex(scenarioName, metadata) {
     updatedAt: new Date().toISOString()
   };
 
-  await saveIndex(index);
+  await saveIndex(index, scenariosDir);
 }
 
 /**
  * Load scenario index
+ * @param {string} scenariosDir - Scenarios directory path
  * @returns {Object} - Index object
  */
-export async function loadIndex() {
+export async function loadIndex(scenariosDir) {
   try {
-    const indexPath = path.join(DEFAULT_SCENARIOS_DIR, INDEX_FILE);
+    const indexPath = path.join(scenariosDir, INDEX_FILE);
     const content = await fs.readFile(indexPath, 'utf-8');
     return JSON.parse(content);
   } catch (error) {
@@ -210,10 +220,11 @@ export async function loadIndex() {
 /**
  * Save scenario index
  * @param {Object} index - Index object
+ * @param {string} scenariosDir - Scenarios directory path
  */
-async function saveIndex(index) {
+async function saveIndex(index, scenariosDir) {
   try {
-    const indexPath = path.join(DEFAULT_SCENARIOS_DIR, INDEX_FILE);
+    const indexPath = path.join(scenariosDir, INDEX_FILE);
     await fs.writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8');
   } catch (error) {
     console.error('Error saving index:', error.message);
@@ -222,20 +233,24 @@ async function saveIndex(index) {
 
 /**
  * List all available scenarios
+ * @param {string} baseDir - Base directory for storage
  * @returns {Array} - Array of scenario metadata
  */
-export async function listScenarios() {
-  const index = await loadIndex();
+export async function listScenarios(baseDir) {
+  const scenariosDir = path.join(baseDir, 'scenarios');
+  const index = await loadIndex(scenariosDir);
   return Object.values(index);
 }
 
 /**
  * Search scenarios by query
  * @param {Object} query - Search query { tags?, text?, dependencies? }
+ * @param {string} baseDir - Base directory for storage
  * @returns {Array} - Matching scenarios
  */
-export async function searchScenarios(query) {
-  const index = await loadIndex();
+export async function searchScenarios(query, baseDir) {
+  const scenariosDir = path.join(baseDir, 'scenarios');
+  const index = await loadIndex(scenariosDir);
   const scenarios = Object.values(index);
 
   let results = scenarios;
@@ -269,16 +284,20 @@ export async function searchScenarios(query) {
 /**
  * Delete scenario
  * @param {string} name - Scenario name
+ * @param {string} baseDir - Base directory for storage
  * @returns {boolean} - Success
  */
-export async function deleteScenario(name) {
+export async function deleteScenario(name, baseDir) {
   try {
+    const scenariosDir = path.join(baseDir, 'scenarios');
+    const secretsDir = path.join(baseDir, 'secrets');
+
     // Delete scenario file
-    const scenarioPath = path.join(DEFAULT_SCENARIOS_DIR, `${name}.json`);
+    const scenarioPath = path.join(scenariosDir, `${name}.json`);
     await fs.unlink(scenarioPath);
 
     // Delete secrets file if exists
-    const secretsPath = path.join(DEFAULT_SECRETS_DIR, `${name}.json`);
+    const secretsPath = path.join(secretsDir, `${name}.json`);
     try {
       await fs.unlink(secretsPath);
     } catch {
@@ -286,9 +305,9 @@ export async function deleteScenario(name) {
     }
 
     // Remove from index
-    const index = await loadIndex();
+    const index = await loadIndex(scenariosDir);
     delete index[name];
-    await saveIndex(index);
+    await saveIndex(index, scenariosDir);
 
     return true;
   } catch (error) {
@@ -301,12 +320,13 @@ export async function deleteScenario(name) {
  * Rename scenario
  * @param {string} oldName - Current name
  * @param {string} newName - New name
+ * @param {string} baseDir - Base directory for storage
  * @returns {boolean} - Success
  */
-export async function renameScenario(oldName, newName) {
+export async function renameScenario(oldName, newName, baseDir) {
   try {
     // Load scenario
-    const scenario = await loadScenario(oldName, true);
+    const scenario = await loadScenario(oldName, true, baseDir);
     if (!scenario) {
       return false;
     }
@@ -315,10 +335,10 @@ export async function renameScenario(oldName, newName) {
     scenario.name = newName;
 
     // Save with new name
-    await saveScenario(scenario);
+    await saveScenario(scenario, baseDir);
 
     // Delete old scenario
-    await deleteScenario(oldName);
+    await deleteScenario(oldName, baseDir);
 
     return true;
   } catch (error) {
@@ -332,10 +352,11 @@ export async function renameScenario(oldName, newName) {
  * Returns JSON string for sharing
  * @param {string} name - Scenario name
  * @param {boolean} includeSecrets - Whether to include secrets
+ * @param {string} baseDir - Base directory for storage
  * @returns {string} - JSON string
  */
-export async function exportScenario(name, includeSecrets = false) {
-  const scenario = await loadScenario(name, includeSecrets);
+export async function exportScenario(name, includeSecrets = false, baseDir) {
+  const scenario = await loadScenario(name, includeSecrets, baseDir);
 
   if (!scenario) {
     throw new Error(`Scenario "${name}" not found`);
@@ -348,9 +369,10 @@ export async function exportScenario(name, includeSecrets = false) {
  * Import scenario from JSON string
  * @param {string} jsonString - Scenario JSON
  * @param {boolean} overwrite - Overwrite if exists
+ * @param {string} baseDir - Base directory for storage
  * @returns {Object} - { success: boolean, name: string, error?: string }
  */
-export async function importScenario(jsonString, overwrite = false) {
+export async function importScenario(jsonString, overwrite = false, baseDir) {
   try {
     const scenario = JSON.parse(jsonString);
 
@@ -364,7 +386,7 @@ export async function importScenario(jsonString, overwrite = false) {
 
     // Check if exists
     if (!overwrite) {
-      const existing = await loadScenario(scenario.name);
+      const existing = await loadScenario(scenario.name, false, baseDir);
       if (existing) {
         return {
           success: false,
@@ -374,7 +396,7 @@ export async function importScenario(jsonString, overwrite = false) {
     }
 
     // Save scenario
-    const result = await saveScenario(scenario);
+    const result = await saveScenario(scenario, baseDir);
 
     return {
       success: result.success,
@@ -391,16 +413,19 @@ export async function importScenario(jsonString, overwrite = false) {
 
 /**
  * Get storage statistics
+ * @param {string} baseDir - Base directory for storage
  * @returns {Object} - Statistics
  */
-export async function getStorageStats() {
-  const index = await loadIndex();
+export async function getStorageStats(baseDir) {
+  const scenariosDir = path.join(baseDir, 'scenarios');
+  const secretsDir = path.join(baseDir, 'secrets');
+  const index = await loadIndex(scenariosDir);
   const scenarios = Object.values(index);
 
   // Count scenarios with secrets
   let scenariosWithSecrets = 0;
   for (const scenario of scenarios) {
-    const secrets = await loadSecrets(scenario.name);
+    const secrets = await loadSecrets(scenario.name, secretsDir);
     if (secrets && Object.keys(secrets).length > 0) {
       scenariosWithSecrets++;
     }
@@ -424,20 +449,22 @@ export async function getStorageStats() {
 /**
  * Validate storage integrity
  * Checks for orphaned files, broken dependencies, etc.
+ * @param {string} baseDir - Base directory for storage
  * @returns {Object} - { valid: boolean, errors: string[], warnings: string[] }
  */
-export async function validateStorage() {
+export async function validateStorage(baseDir) {
   const result = {
     valid: true,
     errors: [],
     warnings: []
   };
 
-  const index = await loadIndex();
+  const scenariosDir = path.join(baseDir, 'scenarios');
+  const index = await loadIndex(scenariosDir);
 
   // Check for scenario files without index entry
   try {
-    const files = await fs.readdir(DEFAULT_SCENARIOS_DIR);
+    const files = await fs.readdir(scenariosDir);
     const scenarioFiles = files.filter(f => f.endsWith('.json') && f !== INDEX_FILE);
 
     for (const file of scenarioFiles) {

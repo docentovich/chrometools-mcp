@@ -47,6 +47,18 @@ import {
   deleteScenario
 } from './recorder/scenario-storage.js';
 
+// Import Project Detection
+import { detectProjectRoot } from './utils/project-detector.js';
+
+// Import Code Generators
+import { PlaywrightTypeScriptGenerator } from './utils/code-generators/playwright-typescript.js';
+import { PlaywrightPythonGenerator } from './utils/code-generators/playwright-python.js';
+import { SeleniumPythonGenerator } from './utils/code-generators/selenium-python.js';
+import { SeleniumJavaGenerator } from './utils/code-generators/selenium-java.js';
+
+// Global state for scenarios directory
+let currentScenariosDirectory = null;
+
 // Import Figma tools
 import {
   parseFigmaUrl,
@@ -75,6 +87,32 @@ const isWSL = (() => {
 
 // Detect Windows environment (including WSL)
 const isWindows = process.platform === 'win32' || isWSL;
+
+/**
+ * Get base directory for scenarios storage
+ * Uses cascade strategy: explicit param → remembered → auto-detect
+ * @param {string|null} explicitDir - Optional explicit directory path
+ * @returns {string} - Base directory path
+ */
+function getScenariosBaseDir(explicitDir = null) {
+  // 1. If explicitly provided - remember and return
+  if (explicitDir) {
+    currentScenariosDirectory = path.resolve(explicitDir);
+    console.log('[chrometools-mcp] Using explicit directory:', currentScenariosDirectory);
+    return currentScenariosDirectory;
+  }
+
+  // 2. If already remembered - return
+  if (currentScenariosDirectory) {
+    console.log('[chrometools-mcp] Using remembered directory:', currentScenariosDirectory);
+    return currentScenariosDirectory;
+  }
+
+  // 3. Auto-detect from environment
+  const detected = detectProjectRoot();
+  currentScenariosDirectory = detected;
+  return detected;
+}
 
 // Get Chrome executable path based on platform
 function getChromePath() {
@@ -398,7 +436,8 @@ async function setupRecorderAutoReinjection(page) {
       // Check if this page had recorder before
       if (pagesWithRecorder.has(page)) {
         try {
-          await injectRecorder(page);
+          const baseDir = getScenariosBaseDir();
+          await injectRecorder(page, baseDir);
         } catch (error) {
           console.error('[chrometools-mcp] Failed to re-inject recorder:', error.message);
         }
@@ -411,7 +450,8 @@ async function setupRecorderAutoReinjection(page) {
     // Check if this page had recorder before
     if (pagesWithRecorder.has(page)) {
       try {
-        await injectRecorder(page);
+        const baseDir = getScenariosBaseDir();
+        await injectRecorder(page, baseDir);
       } catch (error) {
         console.error('[chrometools-mcp] Failed to re-inject recorder after reload:', error.message);
       }
@@ -1576,7 +1616,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         description: "Inject recorder UI widget. Visual recording with start/stop/save controls.",
         inputSchema: {
           type: "object",
-          properties: {},
+          properties: {
+            directory: { type: "string", description: "Directory to save scenarios (optional, defaults to auto-detected project root)" },
+          },
         },
       },
       {
@@ -1588,6 +1630,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             name: { type: "string", description: "Scenario name" },
             parameters: { type: "object", description: "Execution parameters" },
             executeDependencies: { type: "boolean", description: "Execute dependencies (default: true)" },
+            directory: { type: "string", description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)" },
           },
           required: ["name"],
         },
@@ -1597,7 +1640,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         description: "List all scenarios with metadata.",
         inputSchema: {
           type: "object",
-          properties: {},
+          properties: {
+            directory: { type: "string", description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)" },
+          },
         },
       },
       {
@@ -1608,6 +1653,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             text: { type: "string", description: "Search text" },
             tags: { type: "array", items: { type: "string" }, description: "Filter tags" },
+            directory: { type: "string", description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)" },
           },
         },
       },
@@ -1619,6 +1665,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             name: { type: "string", description: "Scenario name" },
             includeSecrets: { type: "boolean", description: "Include secrets (default: false)" },
+            directory: { type: "string", description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)" },
           },
           required: ["name"],
         },
@@ -1630,8 +1677,40 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             name: { type: "string", description: "Scenario name" },
+            directory: { type: "string", description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)" },
           },
           required: ["name"],
+        },
+      },
+      {
+        name: "exportScenarioAsCode",
+        description: "Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS modules, styled-components).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            scenarioName: {
+              type: "string",
+              description: "Name of scenario to export"
+            },
+            language: {
+              type: "string",
+              enum: ["playwright-typescript", "playwright-python", "selenium-python", "selenium-java"],
+              description: "Target test framework and language"
+            },
+            cleanSelectors: {
+              type: "boolean",
+              description: "Remove unstable CSS classes (default: true)"
+            },
+            includeComments: {
+              type: "boolean",
+              description: "Include descriptive comments (default: true)"
+            },
+            directory: {
+              type: "string",
+              description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)"
+            },
+          },
+          required: ["scenarioName", "language"],
         },
       },
     ],
@@ -3392,8 +3471,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "enableRecorder") {
+      const baseDir = getScenariosBaseDir(args.directory);
       const page = await getLastOpenPage();
-      const result = await injectRecorder(page);
+      const result = await injectRecorder(page, baseDir);
 
       // Track this page as having recorder enabled
       if (result.success) {
@@ -3415,13 +3495,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "executeScenario") {
+      // Get base directory for scenarios
+      const baseDir = getScenariosBaseDir(args.directory);
+
       // Try to get existing page, or auto-open browser using scenario's entryUrl
       let page;
       try {
         page = await getLastOpenPage();
       } catch (error) {
         // No page is open - load scenario and open browser at entryUrl
-        const scenario = await loadScenario(args.name);
+        const scenario = await loadScenario(args.name, false, baseDir);
         if (!scenario) {
           return {
             content: [{
@@ -3451,7 +3534,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         page = await getOrCreatePage(entryUrl);
       }
 
-      const options = {};
+      const options = {
+        baseDir: baseDir
+      };
 
       // Pass executeDependencies option if provided
       if (args.executeDependencies !== undefined) {
@@ -3469,7 +3554,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "listScenarios") {
-      const scenarios = await listScenarios();
+      const baseDir = getScenariosBaseDir(args.directory);
+      const scenarios = await listScenarios(baseDir);
 
       return {
         content: [{
@@ -3480,7 +3566,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "searchScenarios") {
-      const results = await searchScenarios(args);
+      const baseDir = getScenariosBaseDir(args.directory);
+      const results = await searchScenarios(args, baseDir);
 
       return {
         content: [{
@@ -3491,7 +3578,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getScenarioInfo") {
-      const scenario = await loadScenario(args.name, args.includeSecrets || false);
+      const baseDir = getScenariosBaseDir(args.directory);
+      const scenario = await loadScenario(args.name, args.includeSecrets || false, baseDir);
 
       return {
         content: [{
@@ -3502,12 +3590,72 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "deleteScenario") {
-      const result = await deleteScenario(args.name);
+      const baseDir = getScenariosBaseDir(args.directory);
+      const result = await deleteScenario(args.name, baseDir);
 
       return {
         content: [{
           type: 'text',
           text: JSON.stringify(result, null, 2)
+        }]
+      };
+    }
+
+    if (name === "exportScenarioAsCode") {
+      const baseDir = getScenariosBaseDir(args.directory);
+      const scenario = await loadScenario(args.scenarioName, false, baseDir);
+
+      if (!scenario) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: `Scenario "${args.scenarioName}" not found`
+            }, null, 2)
+          }],
+          isError: true
+        };
+      }
+
+      // Select generator based on language
+      let generator;
+      const options = {
+        cleanSelectors: args.cleanSelectors !== false, // default true
+        includeComments: args.includeComments !== false, // default true
+      };
+
+      switch (args.language) {
+        case 'playwright-typescript':
+          generator = new PlaywrightTypeScriptGenerator(options);
+          break;
+        case 'playwright-python':
+          generator = new PlaywrightPythonGenerator(options);
+          break;
+        case 'selenium-python':
+          generator = new SeleniumPythonGenerator(options);
+          break;
+        case 'selenium-java':
+          generator = new SeleniumJavaGenerator(options);
+          break;
+        default:
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: `Unknown language: ${args.language}. Supported: playwright-typescript, playwright-python, selenium-python, selenium-java`
+              }, null, 2)
+            }],
+            isError: true
+          };
+      }
+
+      // Generate code
+      const code = generator.generate(scenario, options);
+
+      return {
+        content: [{
+          type: 'text',
+          text: code
         }]
       };
     }
