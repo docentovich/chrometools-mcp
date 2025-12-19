@@ -16,6 +16,7 @@ import { spawn } from 'child_process';
 import http from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { homedir } from 'os';
 
 // Figma token from environment variable (can be set in MCP config)
 const FIGMA_TOKEN = process.env.FIGMA_TOKEN || null;
@@ -59,6 +60,9 @@ import { SeleniumJavaGenerator } from './utils/code-generators/selenium-java.js'
 // Global state for scenarios directory
 let currentScenariosDirectory = null;
 
+// Default storage directory in user's home folder
+const DEFAULT_STORAGE_DIR = path.join(homedir(), '.config', 'chrometools-mcp');
+
 // Import Figma tools
 import {
   parseFigmaUrl,
@@ -90,7 +94,7 @@ const isWindows = process.platform === 'win32' || isWSL;
 
 /**
  * Get base directory for scenarios storage
- * Uses cascade strategy: explicit param → remembered → auto-detect
+ * Uses cascade strategy: explicit param → remembered → default (~/.config/chrometools-mcp)
  * @param {string|null} explicitDir - Optional explicit directory path
  * @returns {string} - Base directory path
  */
@@ -108,10 +112,10 @@ function getScenariosBaseDir(explicitDir = null) {
     return currentScenariosDirectory;
   }
 
-  // 3. Auto-detect from environment
-  const detected = detectProjectRoot();
-  currentScenariosDirectory = detected;
-  return detected;
+  // 3. Use default directory in user's home folder
+  currentScenariosDirectory = DEFAULT_STORAGE_DIR;
+  console.log('[chrometools-mcp] Using default directory:', currentScenariosDirectory);
+  return currentScenariosDirectory;
 }
 
 // Get Chrome executable path based on platform

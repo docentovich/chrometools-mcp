@@ -506,18 +506,20 @@ Extract detailed design specifications from Figma including text content, colors
 
 ### 6. Recorder Tools ⭐ NEW
 
-**Directory Management**: All recorder tools support an optional `directory` parameter to specify where scenarios are stored. If not provided, the directory is auto-detected using this cascade:
-1. `CLAUDE_PROJECT_DIR` environment variable (set by Claude Code)
-2. `PROJECT_DIR` environment variable (custom)
-3. Git repository root (detected via `git rev-parse --show-toplevel`)
-4. Current working directory (fallback)
+**Directory Management**: All recorder tools support an optional `directory` parameter to specify where scenarios are stored.
 
-Once a directory is set (explicitly or auto-detected), it's remembered for the entire MCP server session.
+**Default Location**: `~/.config/chrometools-mcp` (consistent, predictable location in user's home folder)
+
+You can override the default by:
+- Passing explicit `directory` parameter to any recorder tool
+- Setting environment variable: `CLAUDE_PROJECT_DIR` or `PROJECT_DIR`
+
+Once a directory is set (explicitly or via environment), it's remembered for the entire MCP server session.
 
 **Example**:
 ```javascript
-// Let it auto-detect (recommended)
-enableRecorder()
+// Use default location (recommended)
+enableRecorder()  // Saves to ~/.config/chrometools-mcp
 
 // Or specify explicitly
 enableRecorder({ directory: "/path/to/project" })
@@ -531,7 +533,7 @@ executeScenario({ name: "test" })  // Uses remembered directory
 #### enableRecorder
 Inject visual recorder UI widget into the current page.
 - **Parameters**:
-  - `directory` (optional): Directory to save scenarios (auto-detected if not provided)
+  - `directory` (optional): Directory to save scenarios (defaults to `~/.config/chrometools-mcp`)
 - **Use case**: Start recording user interactions visually
 - **Returns**: Success status
 - **Features**:
@@ -547,7 +549,7 @@ Execute a previously recorded scenario by name.
   - `name` (required): Scenario name
   - `parameters` (optional): Runtime parameters (e.g., { email: "user@test.com" })
   - `executeDependencies` (optional): Execute dependencies before running scenario (default: true)
-  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
+  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
 - **Use case**: Run automated test scenarios
 - **Returns**: Execution result with success/failure status
 - **Features**:
@@ -566,7 +568,7 @@ Execute a previously recorded scenario by name.
 #### listScenarios
 Get all available scenarios with metadata.
 - **Parameters**:
-  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
+  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
 - **Use case**: Browse recorded scenarios
 - **Returns**: Array of scenarios with names, descriptions, tags, timestamps
 
@@ -575,7 +577,7 @@ Search scenarios by text or tags.
 - **Parameters**:
   - `text` (optional): Search in name/description
   - `tags` (optional): Array of tags to filter
-  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
+  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
 - **Use case**: Find specific scenarios
 - **Returns**: Matching scenarios
 
@@ -584,7 +586,7 @@ Get detailed information about a scenario.
 - **Parameters**:
   - `name` (required): Scenario name
   - `includeSecrets` (optional): Include secret values (default: false)
-  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
+  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
 - **Use case**: Inspect scenario actions and dependencies
 - **Returns**: Full scenario details (actions, metadata, dependencies)
 
@@ -592,7 +594,7 @@ Get detailed information about a scenario.
 Delete a scenario and its associated secrets.
 - **Parameters**:
   - `name` (required): Scenario name
-  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
+  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
 - **Use case**: Clean up unused scenarios
 - **Returns**: Success confirmation
 
@@ -604,7 +606,7 @@ Export recorded scenario as executable test code for various frameworks. Automat
   - `language` (required): Target framework - `"playwright-typescript"`, `"playwright-python"`, `"selenium-python"`, `"selenium-java"`
   - `cleanSelectors` (optional): Remove unstable CSS classes (default: true)
   - `includeComments` (optional): Include descriptive comments (default: true)
-  - `directory` (optional): Directory where scenarios are stored (auto-detected if not provided)
+  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
 
 - **Use case**: Convert recorded scenarios into maintainable test code
 

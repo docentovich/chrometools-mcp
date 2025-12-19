@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.0] - 2025-12-19
+
+### Changed
+- **Default Scenarios Storage Location** - Scenarios now save to `~/.config/chrometools-mcp` by default
+  - Previous behavior: auto-detected project root (Git root or cwd) which could be unpredictable
+  - New behavior: consistent location in user's home folder (`~/.config/chrometools-mcp`)
+  - Can still override with explicit `directory` parameter on recorder tools
+  - Improves reliability for AI agents and users without Git repositories
+  - Location: `index.js:64`, `index.js:101-119`
+
 ## [1.8.2] - 2025-12-19
 
 ### Fixed
