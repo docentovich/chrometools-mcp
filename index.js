@@ -50,6 +50,7 @@ import {PlaywrightTypeScriptGenerator} from './utils/code-generators/playwright-
 import {PlaywrightPythonGenerator} from './utils/code-generators/playwright-python.js';
 import {SeleniumPythonGenerator} from './utils/code-generators/selenium-python.js';
 import {SeleniumJavaGenerator} from './utils/code-generators/selenium-java.js';
+import {FileAppender} from './utils/code-generators/file-appender.js';
 // Import Figma tools
 import {
     collectAllText,
@@ -2084,7 +2085,81 @@ async function executeToolInternal(name, args) {
           };
       }
 
-      // Generate test code
+      // Check if append mode is requested
+      if (args.appendToFile) {
+        try {
+          // Validate file path and extension
+          FileAppender.validateFile(args.appendToFile, args.language);
+
+          // Read existing file content
+          const existingContent = FileAppender.readFile(args.appendToFile);
+
+          // Check if file is empty - if so, generate full test with imports
+          if (FileAppender.isEmpty(existingContent)) {
+            const fullCode = generator.generate(scenario, options);
+            FileAppender.writeFile(args.appendToFile, fullCode);
+
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  mode: 'append',
+                  file: args.appendToFile,
+                  testName: args.testName || scenario.metadata?.name,
+                  message: `Test written to empty file: ${args.appendToFile}`
+                }, null, 2)
+              }]
+            };
+          }
+
+          // Generate only test function (without imports)
+          const testOnly = generator.generateTestOnly(scenario, {
+            ...options,
+            testName: args.testName
+          });
+
+          // Append test to existing content
+          const appendOptions = {
+            insertPosition: args.insertPosition || 'end',
+            referenceTestName: args.referenceTestName
+          };
+
+          const updatedContent = generator.appendTest(existingContent, testOnly, appendOptions);
+
+          // Write updated content to file
+          FileAppender.writeFile(args.appendToFile, updatedContent);
+
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                mode: 'append',
+                file: args.appendToFile,
+                testName: args.testName || scenario.metadata?.name,
+                insertPosition: appendOptions.insertPosition,
+                message: `Test '${args.testName || scenario.metadata?.name}' successfully appended to ${args.appendToFile}`
+              }, null, 2)
+            }]
+          };
+        } catch (error) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                mode: 'append',
+                file: args.appendToFile,
+                error: error.message
+              }, null, 2)
+            }],
+            isError: true
+          };
+        }
+      }
+
+      // Non-append mode: Generate test code
       const testCode = generator.generate(scenario, options);
 
       // If generatePageObject is requested, also generate Page Object class

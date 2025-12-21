@@ -650,21 +650,25 @@ Delete a scenario and its associated secrets. Searches all projects to find the 
 - **Returns**: Success confirmation
 
 #### exportScenarioAsCode ⭐ **NEW**
-Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Optionally generates Page Object class for the page. Searches all projects to find the scenario.
+Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Optionally generates Page Object class for the page. Can append tests to existing files. Searches all projects to find the scenario.
 
 - **Parameters**:
   - `scenarioName` (required): Name of scenario to export
   - `language` (required): Target framework - `"playwright-typescript"`, `"playwright-python"`, `"selenium-python"`, `"selenium-java"`
   - `cleanSelectors` (optional): Remove unstable CSS classes (default: true)
   - `includeComments` (optional): Include descriptive comments (default: true)
-  - `generatePageObject` (optional): Also generate Page Object class for the page (default: false) ⭐ **NEW**
+  - `generatePageObject` (optional): Also generate Page Object class for the page (default: false)
   - `pageObjectClassName` (optional): Custom Page Object class name (auto-generated if not provided)
+  - `appendToFile` (optional): Path to existing test file to append to (enables **append mode**) ⭐ **NEW**
+  - `testName` (optional): Override test name (default: from scenario name) ⭐ **NEW**
+  - `insertPosition` (optional): Where to insert: `'end'` (default), `'before'`, `'after'` ⭐ **NEW**
+  - `referenceTestName` (optional): Reference test name for before/after insertion ⭐ **NEW**
 
-- **Use case**: Convert recorded scenarios into maintainable test code with optional Page Objects
+- **Use case**: Convert recorded scenarios into maintainable test code with optional Page Objects, or append to existing test suites
 
 - **Returns**:
-  - Without `generatePageObject`: Test code as string
-  - With `generatePageObject`: JSON with `testCode` and `pageObjectCode`
+  - **Without `appendToFile`**: Test code as string (or JSON with Page Object)
+  - **With `appendToFile`**: JSON with `{success, mode: "append", file, testName, message}`
 
 - **Example 1 - Test only** (default behavior):
   ```javascript
@@ -705,6 +709,48 @@ Export recorded scenario as executable test code for various frameworks. Automat
     "framework": "playwright-typescript",
     "elementCount": 12
   }
+  ```
+
+- **Example 3 - Append Mode** ⭐ **NEW**:
+  ```javascript
+  // Append test to end of existing file
+  exportScenarioAsCode({
+    scenarioName: "new_feature_test",
+    language: "playwright-typescript",
+    appendToFile: "./tests/features.spec.ts"
+  })
+
+  // Returns:
+  {
+    "success": true,
+    "mode": "append",
+    "file": "./tests/features.spec.ts",
+    "testName": "new_feature_test",
+    "insertPosition": "end",
+    "message": "Test 'new_feature_test' successfully appended to ./tests/features.spec.ts"
+  }
+  ```
+
+- **Example 4 - Append with Position Control** ⭐ **NEW**:
+  ```javascript
+  // Insert test before specific test
+  exportScenarioAsCode({
+    scenarioName: "setup_test",
+    language: "selenium-python",
+    appendToFile: "./tests/test_suite.py",
+    insertPosition: "before",
+    referenceTestName: "main_test",
+    testName: "test_setup_data"  // Override name
+  })
+
+  // Or insert after specific test
+  exportScenarioAsCode({
+    scenarioName: "cleanup",
+    language: "playwright-python",
+    appendToFile: "./tests/test_flow.py",
+    insertPosition: "after",
+    referenceTestName: "test_main_flow"
+  })
   ```
 
 - **Selector Cleaning**: Automatically removes unstable patterns:

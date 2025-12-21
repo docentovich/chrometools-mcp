@@ -234,4 +234,65 @@ export class CodeGeneratorBase {
   generateUrlAssertion(expectedUrl) {
     throw new Error('generateUrlAssertion() must be implemented by subclass');
   }
+
+  /**
+   * Generate only test function/method (without imports)
+   * Used for appending tests to existing files
+   * @param {Object} scenario - Scenario object
+   * @param {Object} options - Generation options
+   * @returns {string} - Generated test code (no imports)
+   */
+  generateTestOnly(scenario, options = {}) {
+    this.options = { ...this.options, ...options };
+
+    const testName = options.testName || scenario.metadata?.name || 'test';
+    const description = scenario.metadata?.description || '';
+    const entryUrl = scenario.metadata?.entryUrl || '';
+    const exitUrl = scenario.metadata?.exitUrl || '';
+
+    const lines = [];
+
+    // Generate test function/method header
+    lines.push(...this.generateTestHeader(testName, description));
+    lines.push('');
+
+    // Generate navigation to entry URL
+    if (entryUrl) {
+      lines.push(...this.generateNavigate(entryUrl));
+    }
+
+    // Generate actions
+    for (const action of scenario.chain) {
+      const actionCode = this.generateAction(action);
+      if (actionCode && actionCode.length > 0) {
+        lines.push(...actionCode);
+      }
+    }
+
+    // Generate exit URL validation
+    if (exitUrl) {
+      lines.push('');
+      if (this.options.includeComments) {
+        lines.push(this.indent(this.generateComment('Validate final URL'), 1));
+      }
+      lines.push(...this.generateUrlAssertion(exitUrl));
+    }
+
+    // Generate test footer
+    lines.push(...this.generateTestFooter());
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Append test to existing file content
+   * Must be implemented by subclass for language-specific file parsing
+   * @param {string} existingContent - Current file content
+   * @param {string} newTestCode - New test code to insert
+   * @param {Object} options - Insertion options {insertPosition, referenceTestName}
+   * @returns {string} - Updated file content
+   */
+  appendTest(existingContent, newTestCode, options = {}) {
+    throw new Error('appendTest() must be implemented by subclass');
+  }
 }

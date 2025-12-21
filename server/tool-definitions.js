@@ -541,7 +541,7 @@ export const toolDefinitions = [
       },
       {
         name: "exportScenarioAsCode",
-        description: "Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS modules, styled-components). Optionally generates Page Object class for the page. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        description: "Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS modules, styled-components). Optionally generates Page Object class for the page. Can append to existing test files. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
         inputSchema: {
           type: "object",
           properties: {
@@ -569,6 +569,23 @@ export const toolDefinitions = [
             pageObjectClassName: {
               type: "string",
               description: "Page Object class name (optional, auto-generated if not provided)"
+            },
+            appendToFile: {
+              type: "string",
+              description: "Path to existing test file to append to (enables append mode)"
+            },
+            testName: {
+              type: "string",
+              description: "Override test name (default: from scenario name)"
+            },
+            insertPosition: {
+              type: "string",
+              enum: ["end", "before", "after"],
+              description: "Where to insert test: 'end' (default), 'before', or 'after' a reference test"
+            },
+            referenceTestName: {
+              type: "string",
+              description: "Reference test name for 'before'/'after' insertion"
             },
           },
           required: ["scenarioName", "language"],

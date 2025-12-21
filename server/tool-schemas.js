@@ -280,7 +280,11 @@ export const ExportScenarioAsCodeSchema = z.object({
   includeComments: z.boolean().optional().describe("Include descriptive comments (default: true)"),
   generatePageObject: z.boolean().optional().describe("Also generate Page Object class for the page (default: false)"),
   pageObjectClassName: z.string().optional().describe("Page Object class name (optional, auto-generated if not provided)"),
-  directory: z.string().optional().describe("Directory where scenarios are stored (optional)")
+  directory: z.string().optional().describe("Directory where scenarios are stored (optional)"),
+  appendToFile: z.string().optional().describe("Path to existing test file to append to (enables append mode)"),
+  testName: z.string().optional().describe("Override test name (default: from scenario name)"),
+  insertPosition: z.enum(['end', 'before', 'after']).optional().describe("Where to insert test: 'end' (default), 'before', or 'after' a reference test"),
+  referenceTestName: z.string().optional().describe("Reference test name for 'before'/'after' insertion")
 });
 
 export const GeneratePageObjectSchema = z.object({

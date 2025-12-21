@@ -227,4 +227,99 @@ export class PlaywrightTypeScriptGenerator extends CodeGeneratorBase {
       return [this.indent(`await expect(page).toHaveURL('${this.escapeString(expectedUrl)}');`)];
     }
   }
+
+  /**
+   * Append test to existing TypeScript file
+   */
+  appendTest(existingContent, newTestCode, options = {}) {
+    const lines = existingContent.split('\n');
+    const insertPosition = options.insertPosition || 'end';
+    const referenceTestName = options.referenceTestName;
+
+    let insertIndex;
+
+    if (insertPosition === 'end') {
+      // Insert at end of file (or before last closing brace if exists)
+      insertIndex = this.findLastTestEnd(lines);
+    } else if (insertPosition === 'before' || insertPosition === 'after') {
+      if (!referenceTestName) {
+        throw new Error(`referenceTestName is required for insertPosition '${insertPosition}'`);
+      }
+
+      insertIndex = this.findTestByName(lines, referenceTestName);
+      if (insertIndex === -1) {
+        throw new Error(`Reference test '${referenceTestName}' not found in file`);
+      }
+
+      if (insertPosition === 'after') {
+        insertIndex = this.findTestEnd(lines, insertIndex);
+      }
+    }
+
+    // Insert new test with proper spacing
+    lines.splice(insertIndex, 0, '', newTestCode, '');
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Find test function by name
+   */
+  findTestByName(lines, testName) {
+    const testRegex = new RegExp(`test\\(['"\`]${testName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`]`);
+    return lines.findIndex(line => testRegex.test(line));
+  }
+
+  /**
+   * Find end of test function
+   */
+  findTestEnd(lines, startIndex) {
+    let braceCount = 0;
+    let started = false;
+
+    for (let i = startIndex; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Count braces
+      for (const char of line) {
+        if (char === '{') {
+          braceCount++;
+          started = true;
+        } else if (char === '}') {
+          braceCount--;
+        }
+      }
+
+      // When braces balance out after starting, we found the end
+      if (started && braceCount === 0) {
+        return i + 1;
+      }
+    }
+
+    return lines.length;
+  }
+
+  /**
+   * Find last test end (for 'end' insertion)
+   */
+  findLastTestEnd(lines) {
+    // Find last test() call
+    let lastTestIndex = -1;
+    const testRegex = /test\(['"`]/;
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (testRegex.test(lines[i])) {
+        lastTestIndex = i;
+        break;
+      }
+    }
+
+    if (lastTestIndex === -1) {
+      // No tests found, insert at end
+      return lines.length;
+    }
+
+    // Find end of last test
+    return this.findTestEnd(lines, lastTestIndex);
+  }
 }

@@ -325,4 +325,86 @@ export class SeleniumPythonGenerator extends CodeGeneratorBase {
 
     return lines;
   }
+
+  /**
+   * Append test to existing Python file
+   * Reuses Python parsing logic similar to Playwright Python
+   */
+  appendTest(existingContent, newTestCode, options = {}) {
+    const lines = existingContent.split('\n');
+    const insertPosition = options.insertPosition || 'end';
+    const referenceTestName = options.referenceTestName;
+
+    let insertIndex;
+
+    if (insertPosition === 'end') {
+      // Insert at end of file
+      insertIndex = lines.length;
+    } else if (insertPosition === 'before' || insertPosition === 'after') {
+      if (!referenceTestName) {
+        throw new Error(`referenceTestName is required for insertPosition '${insertPosition}'`);
+      }
+
+      const pythonTestName = this.pythonTestName(referenceTestName);
+      insertIndex = this.findPythonTestByName(lines, pythonTestName);
+
+      if (insertIndex === -1) {
+        throw new Error(`Reference test '${referenceTestName}' not found in file`);
+      }
+
+      if (insertPosition === 'after') {
+        insertIndex = this.findPythonTestEnd(lines, insertIndex);
+      }
+    }
+
+    // Insert new test with proper spacing (2 blank lines before test - PEP 8)
+    lines.splice(insertIndex, 0, '', '', newTestCode);
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Convert test name to Python convention
+   */
+  pythonTestName(name) {
+    return name
+      .replace(/([A-Z])/g, '_$1')
+      .replace(/-/g, '_')
+      .replace(/ /g, '_')
+      .toLowerCase()
+      .replace(/^_/, '')
+      .replace(/__+/g, '_');
+  }
+
+  /**
+   * Find Python test function by name
+   */
+  findPythonTestByName(lines, testName) {
+    const testRegex = new RegExp(`^def test_${testName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`);
+    return lines.findIndex(line => testRegex.test(line.trim()));
+  }
+
+  /**
+   * Find end of Python function (next def/class or end of file)
+   */
+  findPythonTestEnd(lines, startIndex) {
+    const startLine = lines[startIndex];
+    const startIndent = startLine.match(/^\s*/)[0].length;
+
+    for (let i = startIndex + 1; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+
+      if (trimmed === '' || trimmed.startsWith('#')) {
+        continue;
+      }
+
+      const currentIndent = lines[i].match(/^\s*/)[0].length;
+
+      if (currentIndent <= startIndent && (trimmed.startsWith('def ') || trimmed.startsWith('class '))) {
+        return i;
+      }
+    }
+
+    return lines.length;
+  }
 }

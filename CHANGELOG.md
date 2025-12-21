@@ -23,6 +23,20 @@ All notable changes to this project will be documented in this file.
   - Example: `exportScenarioAsCode({ scenarioName: "login", language: "playwright-typescript", generatePageObject: true })`
   - Location: `index.js:2090-2186`, `server/tool-schemas.js:281-282`, `server/tool-definitions.js:565-572`
 
+- **Append Mode for exportScenarioAsCode** - Ability to append generated tests to existing test files
+  - New parameter `appendToFile`: Path to existing test file to append to (enables append mode)
+  - New parameter `testName`: Override test name (default: from scenario name)
+  - New parameter `insertPosition`: Where to insert test - 'end' (default), 'before', or 'after' a reference test
+  - New parameter `referenceTestName`: Reference test name for 'before'/'after' insertion
+  - Supports all 4 frameworks: Playwright TypeScript/Python, Selenium Python/Java
+  - Automatic file validation (extension must match language)
+  - Automatic backup before file modification (.backup extension)
+  - Smart test name conversion (camelCase for Java, snake_case for Python, kebab-case for TypeScript)
+  - Framework-specific parsing: brace counting for TypeScript/Java, indentation-based for Python
+  - PEP 8 compliance: 2 blank lines between Python functions
+  - Example: `exportScenarioAsCode({ scenarioName: "new_test", language: "playwright-typescript", appendToFile: "./tests/suite.spec.ts" })`
+  - Location: `utils/code-generators/file-appender.js` (new 177 lines), `index.js:2044-2116`, `server/tool-schemas.js:283-286`, `utils/code-generators/*.js`
+
 ### Fixed
 - **Dependency Resolution with projectId** - Fixed collision errors when executing scenarios with dependencies
   - Dependencies now correctly inherit parent scenario's projectId when not explicitly specified

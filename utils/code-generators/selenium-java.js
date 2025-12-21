@@ -306,4 +306,127 @@ export class SeleniumJavaGenerator extends CodeGeneratorBase {
 
     return lines;
   }
+
+  /**
+   * Append test to existing Java file
+   */
+  appendTest(existingContent, newTestCode, options = {}) {
+    const lines = existingContent.split('\n');
+    const insertPosition = options.insertPosition || 'end';
+    const referenceTestName = options.referenceTestName;
+
+    let insertIndex;
+
+    if (insertPosition === 'end') {
+      // Insert before closing class brace
+      insertIndex = this.findLastJavaMethodEnd(lines);
+    } else if (insertPosition === 'before' || insertPosition === 'after') {
+      if (!referenceTestName) {
+        throw new Error(`referenceTestName is required for insertPosition '${insertPosition}'`);
+      }
+
+      const javaTestName = this.javaTestName(referenceTestName);
+      insertIndex = this.findJavaTestByName(lines, javaTestName);
+
+      if (insertIndex === -1) {
+        throw new Error(`Reference test '${referenceTestName}' not found in file`);
+      }
+
+      if (insertPosition === 'after') {
+        insertIndex = this.findJavaMethodEnd(lines, insertIndex);
+      }
+    }
+
+    // Insert new test with proper spacing
+    lines.splice(insertIndex, 0, '', this.indentBlock(newTestCode, 1), '');
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Convert test name to Java camelCase convention
+   */
+  javaTestName(name) {
+    return name
+      .replace(/[_-](.)/g, (_, char) => char.toUpperCase())
+      .replace(/[_-]/g, '')
+      .replace(/ (.)/g, (_, char) => char.toUpperCase())
+      .replace(/ /g, '')
+      .replace(/^./, char => char.toLowerCase());
+  }
+
+  /**
+   * Find Java test method by name
+   */
+  findJavaTestByName(lines, testName) {
+    const testRegex = new RegExp(`public\\s+void\\s+${testName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`);
+    return lines.findIndex(line => testRegex.test(line.trim()));
+  }
+
+  /**
+   * Find end of Java method
+   */
+  findJavaMethodEnd(lines, startIndex) {
+    let braceCount = 0;
+    let started = false;
+
+    for (let i = startIndex; i < lines.length; i++) {
+      const line = lines[i];
+
+      for (const char of line) {
+        if (char === '{') {
+          braceCount++;
+          started = true;
+        } else if (char === '}') {
+          braceCount--;
+        }
+      }
+
+      if (started && braceCount === 0) {
+        return i + 1;
+      }
+    }
+
+    return lines.length;
+  }
+
+  /**
+   * Find last method end (for 'end' insertion - before closing class brace)
+   */
+  findLastJavaMethodEnd(lines) {
+    // Find last @Test annotation or public method
+    let lastMethodIndex = -1;
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const trimmed = lines[i].trim();
+      if (trimmed.startsWith('@Test') || trimmed.startsWith('public void test')) {
+        lastMethodIndex = i;
+        break;
+      }
+    }
+
+    if (lastMethodIndex === -1) {
+      // No methods found, insert before last closing brace
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].trim() === '}') {
+          return i;
+        }
+      }
+      return lines.length;
+    }
+
+    // Find end of last method
+    return this.findJavaMethodEnd(lines, lastMethodIndex);
+  }
+
+  /**
+   * Indent entire code block by specified level
+   */
+  indentBlock(code, level = 1) {
+    const lines = code.split('\n');
+    return lines.map(line => {
+      if (line.trim() === '') return line;
+      return ' '.repeat(this.options.indentSize * level) + line;
+    }).join('\n');
+  }
 }
