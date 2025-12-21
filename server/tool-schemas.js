@@ -278,6 +278,8 @@ export const ExportScenarioAsCodeSchema = z.object({
   language: z.enum(['playwright-typescript', 'playwright-python', 'selenium-python', 'selenium-java']).describe("Target test framework and language"),
   cleanSelectors: z.boolean().optional().describe("Remove unstable CSS classes (default: true)"),
   includeComments: z.boolean().optional().describe("Include descriptive comments (default: true)"),
+  generatePageObject: z.boolean().optional().describe("Also generate Page Object class for the page (default: false)"),
+  pageObjectClassName: z.string().optional().describe("Page Object class name (optional, auto-generated if not provided)"),
   directory: z.string().optional().describe("Directory where scenarios are stored (optional)")
 });
 

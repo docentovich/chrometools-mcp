@@ -2084,13 +2084,103 @@ async function executeToolInternal(name, args) {
           };
       }
 
-      // Generate code
-      const code = generator.generate(scenario, options);
+      // Generate test code
+      const testCode = generator.generate(scenario, options);
 
+      // If generatePageObject is requested, also generate Page Object class
+      if (args.generatePageObject) {
+        try {
+          // Get page - need to open at scenario's entry URL
+          let page;
+          const entryUrl = scenario.metadata?.entryUrl;
+
+          if (!entryUrl) {
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  error: 'Cannot generate Page Object: scenario has no entryUrl in metadata'
+                }, null, 2)
+              }],
+              isError: true
+            };
+          }
+
+          // Try to get existing page or open new one
+          try {
+            page = await getLastOpenPage();
+            // Navigate to entry URL if current page is different
+            const currentUrl = page.url();
+            if (currentUrl !== entryUrl) {
+              await page.goto(entryUrl, { waitUntil: 'networkidle2' });
+            }
+          } catch (error) {
+            // No page open, create new one
+            page = await getOrCreatePage(entryUrl);
+          }
+
+          // Generate Page Object
+          const pageObjectOptions = {
+            className: args.pageObjectClassName || null,
+            framework: args.language, // Use same framework as test
+            includeComments: args.includeComments !== false,
+            groupElements: true
+          };
+
+          const pageObjectResult = await generatePageObject(page, pageObjectOptions);
+
+          if (pageObjectResult.success) {
+            // Return both test code and Page Object code
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  testCode: testCode,
+                  pageObjectCode: pageObjectResult.code,
+                  pageObjectClassName: pageObjectResult.className,
+                  framework: args.language,
+                  scenarioName: args.scenarioName,
+                  url: pageObjectResult.url,
+                  elementCount: pageObjectResult.elementCount
+                }, null, 2)
+              }]
+            };
+          } else {
+            // Page Object generation failed, return test code only with warning
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  testCode: testCode,
+                  pageObjectCode: null,
+                  warning: 'Page Object generation failed: ' + (pageObjectResult.error || 'Unknown error')
+                }, null, 2)
+              }]
+            };
+          }
+        } catch (error) {
+          // Page Object generation failed, return test code only with error
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                testCode: testCode,
+                pageObjectCode: null,
+                warning: 'Page Object generation error: ' + error.message
+              }, null, 2)
+            }]
+          };
+        }
+      }
+
+      // Default: return test code only
       return {
         content: [{
           type: 'text',
-          text: code
+          text: testCode
         }]
       };
     }

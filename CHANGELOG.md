@@ -15,6 +15,14 @@ All notable changes to this project will be documented in this file.
   - Example: `generatePageObject({ framework: 'playwright-typescript' })`
   - Location: `recorder/page-object-generator.js`, `index.js:46,2098-2136`
 
+- **Page Object Integration in exportScenarioAsCode** - Optional Page Object generation when exporting scenarios
+  - New parameter `generatePageObject` (default: false) to generate both test code and Page Object class
+  - New parameter `pageObjectClassName` for custom Page Object class names
+  - Opens scenario's entry URL and analyzes page structure automatically
+  - Returns JSON with both `testCode` and `pageObjectCode` when enabled
+  - Example: `exportScenarioAsCode({ scenarioName: "login", language: "playwright-typescript", generatePageObject: true })`
+  - Location: `index.js:2090-2186`, `server/tool-schemas.js:281-282`, `server/tool-definitions.js:565-572`
+
 ### Fixed
 - **Dependency Resolution with projectId** - Fixed collision errors when executing scenarios with dependencies
   - Dependencies now correctly inherit parent scenario's projectId when not explicitly specified

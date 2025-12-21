@@ -541,7 +541,7 @@ export const toolDefinitions = [
       },
       {
         name: "exportScenarioAsCode",
-        description: "Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS modules, styled-components). Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        description: "Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS modules, styled-components). Optionally generates Page Object class for the page. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
         inputSchema: {
           type: "object",
           properties: {
@@ -561,6 +561,14 @@ export const toolDefinitions = [
             includeComments: {
               type: "boolean",
               description: "Include descriptive comments (default: true)"
+            },
+            generatePageObject: {
+              type: "boolean",
+              description: "Also generate Page Object class for the page (default: false)"
+            },
+            pageObjectClassName: {
+              type: "string",
+              description: "Page Object class name (optional, auto-generated if not provided)"
             },
           },
           required: ["scenarioName", "language"],

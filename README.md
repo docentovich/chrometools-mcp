@@ -650,19 +650,23 @@ Delete a scenario and its associated secrets. Searches all projects to find the 
 - **Returns**: Success confirmation
 
 #### exportScenarioAsCode ⭐ **NEW**
-Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Searches all projects to find the scenario.
+Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Optionally generates Page Object class for the page. Searches all projects to find the scenario.
 
 - **Parameters**:
   - `scenarioName` (required): Name of scenario to export
   - `language` (required): Target framework - `"playwright-typescript"`, `"playwright-python"`, `"selenium-python"`, `"selenium-java"`
   - `cleanSelectors` (optional): Remove unstable CSS classes (default: true)
   - `includeComments` (optional): Include descriptive comments (default: true)
+  - `generatePageObject` (optional): Also generate Page Object class for the page (default: false) ⭐ **NEW**
+  - `pageObjectClassName` (optional): Custom Page Object class name (auto-generated if not provided)
 
-- **Use case**: Convert recorded scenarios into maintainable test code
+- **Use case**: Convert recorded scenarios into maintainable test code with optional Page Objects
 
-- **Returns**: Generated test code as string
+- **Returns**:
+  - Without `generatePageObject`: Test code as string
+  - With `generatePageObject`: JSON with `testCode` and `pageObjectCode`
 
-- **Example**:
+- **Example 1 - Test only** (default behavior):
   ```javascript
   // Export scenario as Playwright TypeScript
   exportScenarioAsCode({
@@ -680,6 +684,27 @@ Export recorded scenario as executable test code for various frameworks. Automat
   //   await page.locator('button[data-testid="add-to-cart"]').click();
   //   await expect(page).toHaveURL(/checkout/);
   // });
+  ```
+
+- **Example 2 - Test + Page Object** ⭐ **NEW**:
+  ```javascript
+  // Export with Page Object class
+  exportScenarioAsCode({
+    scenarioName: "login_test",
+    language: "playwright-typescript",
+    generatePageObject: true,
+    pageObjectClassName: "LoginPage"
+  })
+
+  // Returns JSON with both files:
+  {
+    "success": true,
+    "testCode": "import { test } from '@playwright/test';\nimport { LoginPage } from './LoginPage';\n\ntest('login_test', async ({ page }) => {\n  const loginPage = new LoginPage(page);\n  await loginPage.goto();\n  await loginPage.fillEmailInput('user@test.com');\n  await loginPage.clickLoginButton();\n});",
+    "pageObjectCode": "import { Page, Locator } from '@playwright/test';\n\nexport class LoginPage {\n  readonly page: Page;\n  readonly emailInput: Locator;\n  readonly loginButton: Locator;\n  \n  constructor(page: Page) {\n    this.page = page;\n    this.emailInput = page.locator('#email');\n    this.loginButton = page.locator('button[type=\"submit\"]');\n  }\n  \n  async goto() {\n    await this.page.goto('https://example.com/login');\n  }\n  \n  async fillEmailInput(text: string) {\n    await this.emailInput.fill(text);\n  }\n  \n  async clickLoginButton() {\n    await this.loginButton.click();\n  }\n}",
+    "pageObjectClassName": "LoginPage",
+    "framework": "playwright-typescript",
+    "elementCount": 12
+  }
   ```
 
 - **Selector Cleaning**: Automatically removes unstable patterns:
