@@ -21,16 +21,16 @@ const debugLog = DEBUG_MODE ? console.error : () => {};
  * @param {string} scenarioName - Scenario to execute
  * @param {Object} page - Puppeteer page instance
  * @param {Object} params - Parameters for scenario
- * @param {Object} options - Execution options { executeDependencies, skipConditions, maxRetries, timeout, baseDir }
+ * @param {Object} options - Execution options { executeDependencies, skipConditions, maxRetries, timeout }
  * @returns {Object} - Execution result
  */
 export async function executeScenario(scenarioName, page, params = {}, options = {}) {
   const {
-    executeDependencies = true,  // NEW: Execute dependencies by default
+    executeDependencies = true,  // Execute dependencies by default
     skipConditions = false,
     maxRetries = 3,
     timeout = 30000,
-    baseDir  // Base directory for scenarios
+    projectId = null  // Optional projectId for disambiguation
   } = options;
 
   const result = {
@@ -45,30 +45,47 @@ export async function executeScenario(scenarioName, page, params = {}, options =
   const startTime = Date.now();
 
   try {
-    // Load scenario index
-    const path = await import('path');
-    const scenariosDir = path.join(baseDir, 'scenarios');
-    const scenarioIndex = await loadIndex(scenariosDir);
+    // Load scenario to get its metadata (needed for dependency resolution)
+    const initialScenario = await loadScenario(scenarioName, false, projectId);
+
+    if (!initialScenario) {
+      result.errors.push(`Scenario "${scenarioName}" not found`);
+      return result;
+    }
+
+    // Check for name collision
+    if (initialScenario.collision) {
+      result.errors.push(initialScenario.message);
+      result.availableProjectIds = initialScenario.availableProjectIds;
+      return result;
+    }
 
     let chain = [scenarioName]; // Default: execute only the requested scenario
 
     // Resolve and execute dependencies if enabled
-    if (executeDependencies) {
-      const resolution = resolveDependencies(scenarioName, scenarioIndex, { skipConditions });
-
-      if (resolution.errors.length > 0) {
-        result.errors.push(...resolution.errors);
-        return result;
-      }
-
-      chain = resolution.chain; // Use full dependency chain
+    if (executeDependencies && initialScenario.metadata?.dependencies) {
+      // Build a simplified index from metadata for dependency resolution
+      // In the new system, we need to resolve cross-project dependencies
+      // For now, execute dependencies in order as specified
+      chain = [
+        ...initialScenario.metadata.dependencies.map(dep => dep.scenario),
+        scenarioName
+      ];
     }
 
     // Execute chain in order
     for (const name of chain) {
-      const scenario = await loadScenario(name, false, baseDir);
+      const scenario = await loadScenario(name, true, null); // Load with secrets (dependencies may be in different projects)
+
       if (!scenario) {
         result.errors.push(`Scenario "${name}" not found`);
+        return result;
+      }
+
+      // Check for name collision in dependencies
+      if (scenario.collision) {
+        result.errors.push(`Dependency "${name}": ${scenario.message}`);
+        result.availableProjectIds = scenario.availableProjectIds;
         return result;
       }
 
@@ -87,12 +104,8 @@ export async function executeScenario(scenarioName, page, params = {}, options =
         }
       }
 
-      // Load secrets
-      const secretsDir = path.join(baseDir, 'secrets');
-      const secrets = await loadSecrets(name, secretsDir);
-
       // Merge secrets with params
-      const executionParams = { ...params, ...secrets };
+      const executionParams = { ...params, ...(scenario.secrets || {}) };
 
       // Execute scenario
       const scenarioResult = await executeSingleScenario(scenario, page, executionParams, {

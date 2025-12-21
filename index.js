@@ -53,20 +53,16 @@ import {
   deleteScenario
 } from './recorder/scenario-storage.js';
 
-// Import Project Detection
-import { detectProjectRoot } from './utils/project-detector.js';
-
 // Import Code Generators
 import { PlaywrightTypeScriptGenerator } from './utils/code-generators/playwright-typescript.js';
 import { PlaywrightPythonGenerator } from './utils/code-generators/playwright-python.js';
 import { SeleniumPythonGenerator } from './utils/code-generators/selenium-python.js';
 import { SeleniumJavaGenerator } from './utils/code-generators/selenium-java.js';
 
-// Global state for scenarios directory
-let currentScenariosDirectory = null;
-
-// Default storage directory in user's home folder
-const DEFAULT_STORAGE_DIR = path.join(homedir(), '.config', 'chrometools-mcp');
+// Base storage directory in user's home folder
+const BASE_STORAGE_DIR = path.join(homedir(), '.config', 'chrometools-mcp');
+const GLOBAL_INDEX_PATH = path.join(BASE_STORAGE_DIR, 'index.json');
+const PROJECTS_DIR = path.join(BASE_STORAGE_DIR, 'projects');
 
 // Import Figma tools
 import {
@@ -98,29 +94,39 @@ const isWSL = (() => {
 const isWindows = process.platform === 'win32' || isWSL;
 
 /**
- * Get base directory for scenarios storage
- * Uses cascade strategy: explicit param → remembered → default (~/.config/chrometools-mcp)
- * @param {string|null} explicitDir - Optional explicit directory path
- * @returns {string} - Base directory path
+ * Load global index from ~/.config/chrometools-mcp/index.json
+ * @returns {object} - Global index object
  */
-function getScenariosBaseDir(explicitDir = null) {
-  // 1. If explicitly provided - remember and return
-  if (explicitDir) {
-    currentScenariosDirectory = path.resolve(explicitDir);
-    debugLog('[chrometools-mcp] Using explicit directory:', currentScenariosDirectory);
-    return currentScenariosDirectory;
+function loadGlobalIndex() {
+  try {
+    const data = readFileSync(GLOBAL_INDEX_PATH, 'utf-8');
+    return JSON.parse(data);
+  } catch (err) {
+    // Index doesn't exist yet, return empty structure
+    return {
+      version: '2.0',
+      projects: {}
+    };
   }
+}
 
-  // 2. If already remembered - return
-  if (currentScenariosDirectory) {
-    debugLog('[chrometools-mcp] Using remembered directory:', currentScenariosDirectory);
-    return currentScenariosDirectory;
-  }
+/**
+ * Save global index to ~/.config/chrometools-mcp/index.json
+ * @param {object} index - Global index object
+ */
+function saveGlobalIndex(index) {
+  mkdirSync(BASE_STORAGE_DIR, { recursive: true });
+  writeFileSync(GLOBAL_INDEX_PATH, JSON.stringify(index, null, 2), 'utf-8');
+  debugLog('[chrometools-mcp] Global index saved');
+}
 
-  // 3. Use default directory in user's home folder
-  currentScenariosDirectory = DEFAULT_STORAGE_DIR;
-  debugLog('[chrometools-mcp] Using default directory:', currentScenariosDirectory);
-  return currentScenariosDirectory;
+/**
+ * Get all project IDs from global index
+ * @returns {string[]} - Array of project IDs
+ */
+function getAllProjectIds() {
+  const index = loadGlobalIndex();
+  return Object.keys(index.projects || {});
 }
 
 // Get Chrome executable path based on platform
@@ -445,8 +451,8 @@ async function setupRecorderAutoReinjection(page) {
       // Check if this page had recorder before
       if (pagesWithRecorder.has(page)) {
         try {
-          const baseDir = getScenariosBaseDir();
-          await injectRecorder(page, baseDir);
+          // Project ID will be determined from URL in browser context
+          await injectRecorder(page);
         } catch (error) {
           debugLog('[chrometools-mcp] Failed to re-inject recorder:', error.message);
         }
@@ -459,8 +465,8 @@ async function setupRecorderAutoReinjection(page) {
     // Check if this page had recorder before
     if (pagesWithRecorder.has(page)) {
       try {
-        const baseDir = getScenariosBaseDir();
-        await injectRecorder(page, baseDir);
+        // Project ID will be determined from URL in browser context
+        await injectRecorder(page);
       } catch (error) {
         debugLog('[chrometools-mcp] Failed to re-inject recorder after reload:', error.message);
       }
@@ -771,11 +777,44 @@ process.on("SIGINT", async () => {
   process.exit(0);
 });
 
+// Migration: Remove old project-based scenarios (v2.0) on first run with v2.1.0
+// This migration runs once to clean up old scenarios and start fresh with URL-based organization
+try {
+  const migrationFlagPath = path.join(BASE_STORAGE_DIR, '.migration-v2.1.0-done');
+
+  if (!existsSync(migrationFlagPath)) {
+    // Check if old projects directory exists
+    if (existsSync(PROJECTS_DIR)) {
+      console.error('[chrometools-mcp] Migration v2.1.0: Removing old project-based scenarios...');
+
+      // Remove all old scenarios
+      const { rmSync } = await import('fs');
+      rmSync(PROJECTS_DIR, { recursive: true, force: true });
+
+      console.error('[chrometools-mcp] Migration v2.1.0: Old scenarios removed. Starting fresh with URL-based organization.');
+    }
+
+    // Remove old global index
+    if (existsSync(GLOBAL_INDEX_PATH)) {
+      const { unlinkSync } = await import('fs');
+      unlinkSync(GLOBAL_INDEX_PATH);
+    }
+
+    // Create migration flag
+    mkdirSync(BASE_STORAGE_DIR, { recursive: true });
+    writeFileSync(migrationFlagPath, new Date().toISOString(), 'utf-8');
+    console.error('[chrometools-mcp] Migration v2.1.0: Complete. New scenarios will be organized by website domain.');
+  }
+} catch (migrationError) {
+  console.error('[chrometools-mcp] Migration v2.1.0 failed:', migrationError.message);
+  // Continue anyway - migration is optional
+}
+
 // Create MCP server
 const server = new Server(
   {
     name: "chrometools-mcp",
-    version: "1.0.2",
+    version: "2.1.0",
   },
   {
     capabilities: {
@@ -1622,78 +1661,74 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "enableRecorder",
-        description: "Inject recorder UI widget. Visual recording with start/stop/save controls.",
+        description: "Inject recorder UI widget. Visual recording with start/stop/save controls. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
         inputSchema: {
           type: "object",
-          properties: {
-            directory: { type: "string", description: "Directory to save scenarios (optional, defaults to auto-detected project root)" },
-          },
+          properties: {},
         },
       },
       {
         name: "executeScenario",
-        description: "Execute recorded scenario by name. Runs actions with dependency resolution.",
+        description: "Execute recorded scenario by name. Runs actions with dependency resolution. Scenarios are organized by domain in ~/.config/chrometools-mcp/projects/{domain}/scenarios/. If multiple scenarios have the same name across different domains, specify projectId to disambiguate.",
         inputSchema: {
           type: "object",
           properties: {
             name: { type: "string", description: "Scenario name" },
+            projectId: { type: "string", description: "Optional: Project ID (domain) to disambiguate scenarios with same name. Examples: 'google', 'localhost-3000'" },
             parameters: { type: "object", description: "Execution parameters" },
             executeDependencies: { type: "boolean", description: "Execute dependencies (default: true)" },
-            directory: { type: "string", description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)" },
           },
           required: ["name"],
         },
       },
       {
         name: "listScenarios",
-        description: "List all scenarios with metadata.",
+        description: "List all scenarios with metadata. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
         inputSchema: {
           type: "object",
           properties: {
-            directory: { type: "string", description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)" },
+            allProjects: { type: "boolean", description: "List scenarios from all projects (default: false, shows only current project)" },
           },
         },
       },
       {
         name: "searchScenarios",
-        description: "Search scenarios by text or tags.",
+        description: "Search scenarios by text or tags. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
         inputSchema: {
           type: "object",
           properties: {
             text: { type: "string", description: "Search text" },
             tags: { type: "array", items: { type: "string" }, description: "Filter tags" },
-            directory: { type: "string", description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)" },
+            allProjects: { type: "boolean", description: "Search in all projects (default: false, searches only current project)" },
           },
         },
       },
       {
         name: "getScenarioInfo",
-        description: "Get scenario details: actions, parameters, dependencies.",
+        description: "Get scenario details: actions, parameters, dependencies. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
         inputSchema: {
           type: "object",
           properties: {
             name: { type: "string", description: "Scenario name" },
             includeSecrets: { type: "boolean", description: "Include secrets (default: false)" },
-            directory: { type: "string", description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)" },
           },
           required: ["name"],
         },
       },
       {
         name: "deleteScenario",
-        description: "Delete scenario and secrets.",
+        description: "Delete scenario and secrets. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
         inputSchema: {
           type: "object",
           properties: {
             name: { type: "string", description: "Scenario name" },
-            directory: { type: "string", description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)" },
           },
           required: ["name"],
         },
       },
       {
         name: "exportScenarioAsCode",
-        description: "Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS modules, styled-components).",
+        description: "Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS modules, styled-components). Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1713,10 +1748,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             includeComments: {
               type: "boolean",
               description: "Include descriptive comments (default: true)"
-            },
-            directory: {
-              type: "string",
-              description: "Directory where scenarios are stored (optional, defaults to auto-detected project root)"
             },
           },
           required: ["scenarioName", "language"],
@@ -3480,9 +3511,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "enableRecorder") {
-      const baseDir = getScenariosBaseDir(args.directory);
+      // Project ID will be determined from URL in browser context
       const page = await getLastOpenPage();
-      const result = await injectRecorder(page, baseDir);
+      const result = await injectRecorder(page);
 
       // Track this page as having recorder enabled
       if (result.success) {
@@ -3494,7 +3525,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           type: 'text',
           text: JSON.stringify(result.success ? {
             success: true,
-            message: "Recorder UI injected into page. Click 'Start' to begin recording. Recorder will auto-reinject on page navigation/reload."
+            message: 'Recorder UI injected into page. Click \'Start\' to begin recording. Scenarios will be organized by website domain in: ~/.config/chrometools-mcp/projects/'
           } : {
             success: false,
             error: result.error
@@ -3504,28 +3535,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "executeScenario") {
-      // Get base directory for scenarios
-      const baseDir = getScenariosBaseDir(args.directory);
+      // Load and validate scenario first (check for collisions)
+      const scenario = await loadScenario(args.name, false, args.projectId || null);
+
+      if (!scenario) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: `Scenario "${args.name}" not found`
+            }, null, 2)
+          }]
+        };
+      }
+
+      // Check for name collision
+      if (scenario.collision) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: scenario.message,
+              availableProjectIds: scenario.availableProjectIds,
+              hint: `Use: executeScenario({ name: "${args.name}", projectId: "one-of-the-above" })`
+            }, null, 2)
+          }]
+        };
+      }
 
       // Try to get existing page, or auto-open browser using scenario's entryUrl
       let page;
       try {
         page = await getLastOpenPage();
       } catch (error) {
-        // No page is open - load scenario and open browser at entryUrl
-        const scenario = await loadScenario(args.name, false, baseDir);
-        if (!scenario) {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: false,
-                error: `Scenario "${args.name}" not found`
-              }, null, 2)
-            }]
-          };
-        }
-
+        // No page is open - open browser at scenario's entry URL
         const entryUrl = scenario.metadata?.entryUrl;
         if (!entryUrl) {
           return {
@@ -3543,13 +3588,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         page = await getOrCreatePage(entryUrl);
       }
 
-      const options = {
-        baseDir: baseDir
-      };
+      const options = {};
 
       // Pass executeDependencies option if provided
       if (args.executeDependencies !== undefined) {
         options.executeDependencies = args.executeDependencies;
+      }
+
+      // Pass projectId option if provided
+      if (args.projectId) {
+        options.projectId = args.projectId;
       }
 
       const result = await executeScenario(args.name, page, args.parameters || {}, options);
@@ -3563,8 +3611,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "listScenarios") {
-      const baseDir = getScenariosBaseDir(args.directory);
-      const scenarios = await listScenarios(baseDir);
+      // Return ALL scenarios from all projects (URL-based organization)
+      // Agent can filter by projectId, entryUrl, exitUrl as needed
+      const scenarios = await listScenarios(null, true);
 
       return {
         content: [{
@@ -3575,8 +3624,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "searchScenarios") {
-      const baseDir = getScenariosBaseDir(args.directory);
-      const results = await searchScenarios(args, baseDir);
+      // Return ALL matching scenarios from all projects
+      // Agent can filter by projectId, entryUrl, exitUrl as needed
+      const results = await searchScenarios(args, null, true);
 
       return {
         content: [{
@@ -3587,8 +3637,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getScenarioInfo") {
-      const baseDir = getScenariosBaseDir(args.directory);
-      const scenario = await loadScenario(args.name, args.includeSecrets || false, baseDir);
+      const scenario = await loadScenario(args.name, args.includeSecrets || false, null);
 
       return {
         content: [{
@@ -3599,20 +3648,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "deleteScenario") {
-      const baseDir = getScenariosBaseDir(args.directory);
-      const result = await deleteScenario(args.name, baseDir);
+      const result = await deleteScenario(args.name, null);
 
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(result, null, 2)
+          text: JSON.stringify({ success: result }, null, 2)
         }]
       };
     }
 
     if (name === "exportScenarioAsCode") {
-      const baseDir = getScenariosBaseDir(args.directory);
-      const scenario = await loadScenario(args.scenarioName, false, baseDir);
+      const scenario = await loadScenario(args.scenarioName, false, null);
 
       if (!scenario) {
         return {

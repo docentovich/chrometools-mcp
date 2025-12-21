@@ -506,56 +506,74 @@ Extract detailed design specifications from Figma including text content, colors
 
 ### 6. Recorder Tools ⭐ NEW
 
-**Directory Management**: All recorder tools support an optional `directory` parameter to specify where scenarios are stored.
+**URL-Based Storage (v2.1+)**: Scenarios are automatically organized by website domain in `~/.config/chrometools-mcp/projects/{domain}/scenarios/`.
 
-**Default Location**: `~/.config/chrometools-mcp` (consistent, predictable location in user's home folder)
+**Automatic Domain Detection**: Project ID is extracted from the URL where recording starts:
+- `https://www.google.com` → `google`
+- `https://dev.example.com:8080` → `example-8080`
+- `http://localhost:3000` → `localhost-3000`
+- `file:///test.html` → `local`
 
-You can override the default by:
-- Passing explicit `directory` parameter to any recorder tool
-- Setting environment variable: `CLAUDE_PROJECT_DIR` or `PROJECT_DIR`
+**Domain Organization Rules**:
+1. Main domain only (subdomains stripped): `mail.google.com` → `google`
+2. Ports included for ALL domains: `example.com:8080` → `example-8080`
+3. Protocol ignored: `http` and `https` both → same project
 
-Once a directory is set (explicitly or via environment), it's remembered for the entire MCP server session.
+**Global Scenario Access**: All tools (`listScenarios`, `searchScenarios`) return scenarios from **all projects**. Agent can filter by:
+- `projectId`: Domain-based identifier (e.g., "google", "localhost-3000")
+- `entryUrl`: URL where recording started
+- `exitUrl`: URL where recording ended
 
 **Example**:
 ```javascript
-// Use default location (recommended)
-enableRecorder()  // Saves to ~/.config/chrometools-mcp
+// Record scenario on google.com
+enableRecorder()  // Saves to ~/.config/chrometools-mcp/projects/google/scenarios/
 
-// Or specify explicitly
-enableRecorder({ directory: "/path/to/project" })
+// List ALL scenarios from all websites
+listScenarios()
+// Returns: [
+//   { name: "search", projectId: "google", entryUrl: "https://google.com" },
+//   { name: "login", projectId: "localhost-3000", entryUrl: "http://localhost:3000" }
+// ]
 
-// Later calls reuse the same directory automatically
-executeScenario({ name: "test" })  // Uses remembered directory
+// Agent filters by projectId or URL
+scenarios.filter(s => s.projectId === "google")
+scenarios.filter(s => s.entryUrl.includes("localhost"))
+
+// Execute scenario (searches all projects automatically)
+executeScenario({ name: "login" })  // Finds scenario in any project
 ```
 
 ---
 
 #### enableRecorder
-Inject visual recorder UI widget into the current page.
-- **Parameters**:
-  - `directory` (optional): Directory to save scenarios (defaults to `~/.config/chrometools-mcp`)
+Inject visual recorder UI widget into the current page. Scenarios are automatically saved to `~/.config/chrometools-mcp/projects/{domain}/scenarios/` based on the website URL.
+- **Parameters**: None
 - **Use case**: Start recording user interactions visually
-- **Returns**: Success status
+- **Returns**: Success status with storage location
 - **Features**:
   - Floating widget with compact mode (minimize to 50x50px)
   - Visual recording indicator (red pulsing border)
   - Start/Pause/Stop/Stop & Save/Clear controls
   - Real-time action list display
   - Metadata fields (name, description, tags)
+  - Automatic domain-based project detection from URL
 
 #### executeScenario
-Execute a previously recorded scenario by name.
+Execute a previously recorded scenario by name. Searches all projects automatically via global index.
 - **Parameters**:
   - `name` (required): Scenario name
+  - `projectId` (optional): Project ID (domain) to disambiguate when multiple scenarios have the same name. Examples: `"google"`, `"localhost-3000"`
   - `parameters` (optional): Runtime parameters (e.g., { email: "user@test.com" })
   - `executeDependencies` (optional): Execute dependencies before running scenario (default: true)
-  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
-- **Use case**: Run automated test scenarios
+- **Use case**: Run automated test scenarios across projects
 - **Returns**: Execution result with success/failure status
 - **Features**:
   - Automatic dependency resolution (enabled by default)
+  - Cross-project dependency support
   - Secret parameter injection
   - Fallback selector retry logic
+  - Name collision detection with helpful error messages
 - **Example**:
   ```javascript
   // Execute with dependencies (default)
@@ -563,50 +581,82 @@ Execute a previously recorded scenario by name.
 
   // Execute without dependencies
   executeScenario({ name: "create_post", executeDependencies: false })
+
+  // Disambiguate when multiple scenarios have same name
+  executeScenario({ name: "login", projectId: "google" })
+  executeScenario({ name: "login", projectId: "localhost-3000" })
+  ```
+
+- **Name Collision Handling**:
+  If multiple scenarios with the same name exist across different projects, you'll get an error:
+  ```json
+  {
+    "success": false,
+    "error": "Multiple scenarios named 'login' found. Please specify projectId.",
+    "availableProjectIds": ["google", "localhost-3000"],
+    "hint": "Use: executeScenario({ name: \"login\", projectId: \"one-of-the-above\" })"
+  }
   ```
 
 #### listScenarios
-Get all available scenarios with metadata.
-- **Parameters**:
-  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
-- **Use case**: Browse recorded scenarios
-- **Returns**: Array of scenarios with names, descriptions, tags, timestamps
+Get all available scenarios with metadata from **all websites**. Agent can filter by `projectId`, `entryUrl`, or `exitUrl`.
+- **Parameters**: None
+- **Use case**: Browse recorded scenarios across all websites
+- **Returns**: Array of scenarios with names, descriptions, tags, timestamps, `projectId`, `entryUrl`, `exitUrl`
+- **Example**:
+  ```javascript
+  // List all scenarios from all websites
+  const scenarios = await listScenarios()
+
+  // Agent filters by projectId
+  const googleScenarios = scenarios.filter(s => s.projectId === "google")
+
+  // Agent filters by URL
+  const localhostScenarios = scenarios.filter(s => s.entryUrl.includes("localhost"))
+  ```
 
 #### searchScenarios
-Search scenarios by text or tags.
+Search scenarios by text or tags across **all websites**. Agent can further filter results by `projectId` or URLs.
 - **Parameters**:
   - `text` (optional): Search in name/description
   - `tags` (optional): Array of tags to filter
-  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
-- **Use case**: Find specific scenarios
-- **Returns**: Matching scenarios
+- **Use case**: Find specific scenarios across all websites
+- **Returns**: Matching scenarios with `projectId`, `entryUrl`, `exitUrl` metadata
+- **Example**:
+  ```javascript
+  // Search across all websites
+  const results = await searchScenarios({ text: "login" })
+
+  // Search by tags
+  const authScenarios = await searchScenarios({ tags: ["auth"] })
+
+  // Agent filters results by domain
+  const googleLogins = results.filter(s => s.projectId === "google")
+  ```
 
 #### getScenarioInfo
-Get detailed information about a scenario.
+Get detailed information about a scenario. Searches all projects automatically.
 - **Parameters**:
   - `name` (required): Scenario name
   - `includeSecrets` (optional): Include secret values (default: false)
-  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
 - **Use case**: Inspect scenario actions and dependencies
-- **Returns**: Full scenario details (actions, metadata, dependencies)
+- **Returns**: Full scenario details (actions, metadata, dependencies, project info)
 
 #### deleteScenario
-Delete a scenario and its associated secrets.
+Delete a scenario and its associated secrets. Searches all projects to find the scenario.
 - **Parameters**:
   - `name` (required): Scenario name
-  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
 - **Use case**: Clean up unused scenarios
 - **Returns**: Success confirmation
 
 #### exportScenarioAsCode ⭐ **NEW**
-Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion).
+Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Searches all projects to find the scenario.
 
 - **Parameters**:
   - `scenarioName` (required): Name of scenario to export
   - `language` (required): Target framework - `"playwright-typescript"`, `"playwright-python"`, `"selenium-python"`, `"selenium-java"`
   - `cleanSelectors` (optional): Remove unstable CSS classes (default: true)
   - `includeComments` (optional): Include descriptive comments (default: true)
-  - `directory` (optional): Directory where scenarios are stored (defaults to `~/.config/chrometools-mcp`)
 
 - **Use case**: Convert recorded scenarios into maintainable test code
 

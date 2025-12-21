@@ -4,21 +4,168 @@
  * Manages scenario and secrets storage:
  * 1. Save/load scenarios to/from files
  * 2. Save/load secrets separately
- * 3. Maintain scenario index with metadata
+ * 3. Maintain project-specific and global indexes
  * 4. Ensure .gitignore for secrets directory
  */
 
 import fs from 'fs/promises';
+import fssync from 'fs';
 import path from 'path';
+import { homedir } from 'os';
 
 // Constants
 const INDEX_FILE = 'index.json';
 const GITIGNORE_FILE = '.gitignore';
+const BASE_STORAGE_DIR = path.join(homedir(), '.config', 'chrometools-mcp');
+const GLOBAL_INDEX_PATH = path.join(BASE_STORAGE_DIR, 'index.json');
+const PROJECTS_DIR = path.join(BASE_STORAGE_DIR, 'projects');
+
+/**
+ * Load global index from ~/.config/chrometools-mcp/index.json
+ * @returns {object} - Global index object
+ */
+function loadGlobalIndex() {
+  try {
+    const data = fssync.readFileSync(GLOBAL_INDEX_PATH, 'utf-8');
+    return JSON.parse(data);
+  } catch (err) {
+    // Index doesn't exist yet, return empty structure
+    return {
+      version: '2.0',
+      projects: {}
+    };
+  }
+}
+
+/**
+ * Save global index to ~/.config/chrometools-mcp/index.json
+ * @param {object} index - Global index object
+ */
+async function saveGlobalIndex(index) {
+  await fs.mkdir(BASE_STORAGE_DIR, { recursive: true });
+  await fs.writeFile(GLOBAL_INDEX_PATH, JSON.stringify(index, null, 2), 'utf-8');
+}
+
+/**
+ * Update global index with scenario metadata
+ * @param {string} projectId - Project identifier
+ * @param {string} projectPath - Full path to project root
+ * @param {string} scenarioName - Scenario name
+ * @param {object} metadata - Scenario metadata
+ */
+async function updateGlobalIndex(projectId, projectPath, scenarioName, metadata) {
+  const index = loadGlobalIndex();
+
+  if (!index.projects[projectId]) {
+    index.projects[projectId] = {
+      projectPath,
+      lastAccessed: new Date().toISOString(),
+      scenarios: {}
+    };
+  }
+
+  index.projects[projectId].scenarios[scenarioName] = {
+    name: scenarioName,
+    description: metadata.description || '',
+    tags: metadata.tags || [],
+    dependencies: metadata.dependencies || [],
+    parameters: metadata.parameters || {},
+    outputs: metadata.outputs || [],
+    entryUrl: metadata.entryUrl || null,
+    exitUrl: metadata.exitUrl || null,
+    createdAt: index.projects[projectId].scenarios[scenarioName]?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  index.projects[projectId].lastAccessed = new Date().toISOString();
+
+  await saveGlobalIndex(index);
+}
+
+/**
+ * Remove scenario from global index
+ * @param {string} projectId - Project identifier
+ * @param {string} scenarioName - Scenario name
+ */
+async function removeFromGlobalIndex(projectId, scenarioName) {
+  const index = loadGlobalIndex();
+
+  if (index.projects[projectId]?.scenarios[scenarioName]) {
+    delete index.projects[projectId].scenarios[scenarioName];
+
+    // Remove project if no scenarios left
+    if (Object.keys(index.projects[projectId].scenarios).length === 0) {
+      delete index.projects[projectId];
+    }
+
+    await saveGlobalIndex(index);
+  }
+}
+
+/**
+ * Find scenario in global index
+ * @param {string} scenarioName - Scenario name
+ * @param {string|null} projectId - Optional project filter
+ * @returns {object|null} - { projectId, metadata } or null
+ */
+/**
+ * Find all scenarios with the given name across all projects
+ * @param {string} scenarioName - Scenario name
+ * @returns {Array} - Array of { projectId, metadata } objects
+ */
+function findAllScenariosWithName(scenarioName) {
+  const index = loadGlobalIndex();
+  const results = [];
+
+  for (const [pid, project] of Object.entries(index.projects)) {
+    if (project.scenarios[scenarioName]) {
+      results.push({
+        projectId: pid,
+        metadata: project.scenarios[scenarioName]
+      });
+    }
+  }
+
+  return results;
+}
+
+function findScenarioInGlobalIndex(scenarioName, projectId = null) {
+  const index = loadGlobalIndex();
+
+  if (projectId) {
+    // Search in specific project
+    if (index.projects[projectId]?.scenarios[scenarioName]) {
+      return {
+        projectId,
+        metadata: index.projects[projectId].scenarios[scenarioName]
+      };
+    }
+    return null;
+  }
+
+  // Search in all projects - check for collisions
+  const allMatches = findAllScenariosWithName(scenarioName);
+
+  if (allMatches.length === 0) {
+    return null;
+  }
+
+  if (allMatches.length > 1) {
+    // Multiple scenarios with same name - return collision error
+    return {
+      collision: true,
+      matches: allMatches.map(m => m.projectId)
+    };
+  }
+
+  // Single match - return it
+  return allMatches[0];
+}
 
 /**
  * Initialize storage directories
  * Creates directories and ensures .gitignore exists
- * @param {string} baseDir - Base directory for scenarios and secrets
+ * @param {string} baseDir - Base directory for scenarios and secrets (project directory)
  */
 export async function initializeStorage(baseDir) {
   const scenariosDir = path.join(baseDir, 'scenarios');
@@ -64,12 +211,18 @@ async function ensureSecretsGitignore(secretsDir) {
 /**
  * Save scenario to file
  * @param {Object} scenario - Scenario data
- * @param {string} baseDir - Base directory for storage
+ * @param {string} urlProjectId - Project identifier extracted from URL (e.g., "google", "localhost-3000")
  * @returns {Object} - { success: boolean, path: string, error?: string }
  */
-export async function saveScenario(scenario, baseDir) {
+export async function saveScenario(scenario, urlProjectId) {
   try {
-    await initializeStorage(baseDir);
+    // Use URL-based projectId directly
+    const projectId = urlProjectId;
+    const projectPath = `url://${urlProjectId}`;
+
+    // Get project directory
+    const projectDir = path.join(PROJECTS_DIR, projectId);
+    await initializeStorage(projectDir);
 
     const { name, metadata, chain, secrets } = scenario;
 
@@ -81,13 +234,20 @@ export async function saveScenario(scenario, baseDir) {
       };
     }
 
-    const scenariosDir = path.join(baseDir, 'scenarios');
-    const secretsDir = path.join(baseDir, 'secrets');
+    const scenariosDir = path.join(projectDir, 'scenarios');
+    const secretsDir = path.join(projectDir, 'secrets');
+
+    // Add project info to metadata
+    const enhancedMetadata = {
+      ...(metadata || {}),
+      projectId,
+      projectPath
+    };
 
     // Save main scenario file (without secrets)
     const scenarioData = {
       name,
-      metadata: metadata || {},
+      metadata: enhancedMetadata,
       chain,
       version: '1.0',
       createdAt: new Date().toISOString()
@@ -101,8 +261,11 @@ export async function saveScenario(scenario, baseDir) {
       await saveSecrets(name, secrets, secretsDir);
     }
 
-    // Update index
-    await updateIndex(name, metadata, scenariosDir);
+    // Update project-local index
+    await updateIndex(name, enhancedMetadata, scenariosDir);
+
+    // Update global index
+    await updateGlobalIndex(projectId, projectPath, name, enhancedMetadata);
 
     return {
       success: true,
@@ -120,19 +283,40 @@ export async function saveScenario(scenario, baseDir) {
  * Load scenario from file
  * @param {string} name - Scenario name
  * @param {boolean} includeSecrets - Whether to load secrets
- * @param {string} baseDir - Base directory for storage
+ * @param {string|null} projectId - Optional project ID filter
  * @returns {Object} - Scenario data or null
  */
-export async function loadScenario(name, includeSecrets = false, baseDir) {
+export async function loadScenario(name, includeSecrets = false, projectId = null) {
   try {
-    const scenariosDir = path.join(baseDir, 'scenarios');
+    // Find scenario in global index
+    const result = findScenarioInGlobalIndex(name, projectId);
+
+    if (!result) {
+      console.error(`Scenario "${name}" not found${projectId ? ` in project "${projectId}"` : ''}`);
+      return null;
+    }
+
+    // Check for name collision
+    if (result.collision) {
+      const error = {
+        collision: true,
+        message: `Multiple scenarios named "${name}" found. Please specify projectId.`,
+        availableProjectIds: result.matches
+      };
+      console.error(error.message, 'Available projectIds:', result.matches);
+      return error;
+    }
+
+    // Load from project directory
+    const projectDir = path.join(PROJECTS_DIR, result.projectId);
+    const scenariosDir = path.join(projectDir, 'scenarios');
     const scenarioPath = path.join(scenariosDir, `${name}.json`);
     const content = await fs.readFile(scenarioPath, 'utf-8');
     const scenario = JSON.parse(content);
 
     // Load secrets if requested
     if (includeSecrets) {
-      const secretsDir = path.join(baseDir, 'secrets');
+      const secretsDir = path.join(projectDir, 'secrets');
       const secrets = await loadSecrets(name, secretsDir);
       if (secrets) {
         scenario.secrets = secrets;
@@ -235,25 +419,51 @@ async function saveIndex(index, scenariosDir) {
 
 /**
  * List all available scenarios
- * @param {string} baseDir - Base directory for storage
+ * @param {string} currentProjectId - Current project identifier
+ * @param {boolean} allProjects - Whether to list scenarios from all projects
  * @returns {Array} - Array of scenario metadata
  */
-export async function listScenarios(baseDir) {
-  const scenariosDir = path.join(baseDir, 'scenarios');
-  const index = await loadIndex(scenariosDir);
-  return Object.values(index);
+export async function listScenarios(currentProjectId, allProjects = false) {
+  const globalIndex = loadGlobalIndex();
+  const results = [];
+
+  if (allProjects) {
+    // Return scenarios from all projects
+    for (const [projectId, project] of Object.entries(globalIndex.projects)) {
+      for (const scenario of Object.values(project.scenarios)) {
+        results.push({
+          ...scenario,
+          projectId,
+          projectPath: project.projectPath
+        });
+      }
+    }
+  } else {
+    // Return scenarios from current project only
+    if (globalIndex.projects[currentProjectId]) {
+      for (const scenario of Object.values(globalIndex.projects[currentProjectId].scenarios)) {
+        results.push({
+          ...scenario,
+          projectId: currentProjectId,
+          projectPath: globalIndex.projects[currentProjectId].projectPath
+        });
+      }
+    }
+  }
+
+  return results;
 }
 
 /**
  * Search scenarios by query
  * @param {Object} query - Search query { tags?, text?, dependencies? }
- * @param {string} baseDir - Base directory for storage
+ * @param {string} currentProjectId - Current project identifier
+ * @param {boolean} allProjects - Whether to search in all projects
  * @returns {Array} - Matching scenarios
  */
-export async function searchScenarios(query, baseDir) {
-  const scenariosDir = path.join(baseDir, 'scenarios');
-  const index = await loadIndex(scenariosDir);
-  const scenarios = Object.values(index);
+export async function searchScenarios(query, currentProjectId, allProjects = false) {
+  // Get all scenarios based on allProjects flag
+  const scenarios = await listScenarios(currentProjectId, allProjects);
 
   let results = scenarios;
 
@@ -286,13 +496,22 @@ export async function searchScenarios(query, baseDir) {
 /**
  * Delete scenario
  * @param {string} name - Scenario name
- * @param {string} baseDir - Base directory for storage
+ * @param {string|null} projectId - Optional project ID filter
  * @returns {boolean} - Success
  */
-export async function deleteScenario(name, baseDir) {
+export async function deleteScenario(name, projectId = null) {
   try {
-    const scenariosDir = path.join(baseDir, 'scenarios');
-    const secretsDir = path.join(baseDir, 'secrets');
+    // Find scenario in global index
+    const result = findScenarioInGlobalIndex(name, projectId);
+
+    if (!result) {
+      console.error(`Scenario "${name}" not found${projectId ? ` in project "${projectId}"` : ''}`);
+      return false;
+    }
+
+    const projectDir = path.join(PROJECTS_DIR, result.projectId);
+    const scenariosDir = path.join(projectDir, 'scenarios');
+    const secretsDir = path.join(projectDir, 'secrets');
 
     // Delete scenario file
     const scenarioPath = path.join(scenariosDir, `${name}.json`);
@@ -306,10 +525,13 @@ export async function deleteScenario(name, baseDir) {
       // Secrets file may not exist
     }
 
-    // Remove from index
+    // Remove from project-local index
     const index = await loadIndex(scenariosDir);
     delete index[name];
     await saveIndex(index, scenariosDir);
+
+    // Remove from global index
+    await removeFromGlobalIndex(result.projectId, name);
 
     return true;
   } catch (error) {

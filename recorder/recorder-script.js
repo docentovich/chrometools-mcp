@@ -28,6 +28,56 @@ export function generateRecorderScript() {
   'use strict';
 
   // ==========================
+  // URL TO PROJECT UTILITIES
+  // ==========================
+
+  /**
+   * Extract project ID from URL (browser version)
+   * @param {string} url - Full URL
+   * @returns {string} - Project ID
+   */
+  function urlToProjectId(url) {
+    try {
+      if (url.startsWith('file://')) {
+        return 'local';
+      }
+
+      const urlObj = new URL(url);
+      let hostname = urlObj.hostname.toLowerCase();
+      const port = urlObj.port;
+
+      hostname = hostname.replace(/^www\\./, '');
+      const parts = hostname.split('.');
+
+      if (parts.length === 1) {
+        const projectId = sanitizeProjectId(parts[0]);
+        return port ? \`\${projectId}-\${port}\` : projectId;
+      }
+
+      const mainDomain = parts[parts.length - 2];
+      const projectId = sanitizeProjectId(mainDomain);
+      return port ? \`\${projectId}-\${port}\` : projectId;
+
+    } catch (error) {
+      console.error('[url-to-project] Invalid URL:', url, error);
+      return 'unknown';
+    }
+  }
+
+  /**
+   * Sanitize project ID (browser version)
+   * @param {string} id - Raw project ID
+   * @returns {string} - Sanitized ID
+   */
+  function sanitizeProjectId(id) {
+    return id
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+  }
+
+  // ==========================
   // RECORDER STATE
   // ==========================
 
@@ -1393,7 +1443,10 @@ export function generateRecorderScript() {
     // Call MCP server via exposed function
     if (window.saveScenarioToMCP) {
       try {
-        const result = await window.saveScenarioToMCP(scenario);
+        // Extract projectId from URL
+        const urlProjectId = urlToProjectId(state.startUrl || window.location.href);
+
+        const result = await window.saveScenarioToMCP(scenario, urlProjectId);
         if (result.success) {
           // Set clearing flag to prevent any saves during cleanup
           isClearing = true;
@@ -1651,9 +1704,10 @@ export function generateRecorderScript() {
 
 /**
  * Inject recorder into page
+ * Project ID will be automatically determined from URL in browser context
  * @param {Object} page - Puppeteer page instance
  */
-export async function injectRecorder(page, baseDir) {
+export async function injectRecorder(page) {
   try {
     // Check if recorder is already injected
     const alreadyInjected = await page.evaluate(() => {
@@ -1681,20 +1735,20 @@ export async function injectRecorder(page, baseDir) {
 
     // Only expose functions if they don't exist yet
     if (!functionExists) {
-      await page.exposeFunction('saveScenarioToMCP', async (scenarioData) => {
+      // saveScenarioToMCP now receives urlProjectId from browser
+      await page.exposeFunction('saveScenarioToMCP', async (scenarioData, urlProjectId) => {
         const { saveScenario } = await import('./scenario-storage.js');
-        return await saveScenario(scenarioData, baseDir);
+        return await saveScenario(scenarioData, urlProjectId);
       });
 
+      // listScenariosFromMCP returns ALL scenarios (no filtering by project)
       await page.exposeFunction('listScenariosFromMCP', async () => {
-        const { loadIndex } = await import('./scenario-storage.js');
-        const path = await import('path');
+        const { listScenarios } = await import('./scenario-storage.js');
         try {
-          const scenariosDir = path.join(baseDir, 'scenarios');
-          const index = await loadIndex(scenariosDir);
+          const scenarios = await listScenarios(null, true); // null projectId, allProjects=true
           return {
             success: true,
-            scenarios: Object.values(index)
+            scenarios: scenarios
           };
         } catch (error) {
           return {

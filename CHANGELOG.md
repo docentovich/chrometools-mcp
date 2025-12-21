@@ -2,6 +2,156 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2025-12-21
+
+### Added
+- **Name Collision Detection** - Smart handling of scenarios with same name across different projects
+  - `executeScenario` now detects when multiple scenarios share the same name
+  - Returns helpful error with list of available `projectId` values
+  - Optional `projectId` parameter to disambiguate: `executeScenario({ name: "login", projectId: "google" })`
+  - Location: `recorder/scenario-storage.js:111-163`, `recorder/scenario-executor.js:33,49-61,86-90`, `index.js:1677,3558-3571,3597-3600`
+
+### Changed
+- **URL-Based Scenario Organization** - Scenarios now organized by website domain instead of file system project
+  - Project ID automatically extracted from URL where recording starts: `https://google.com` → `google`
+  - Main domain only (subdomains stripped): `mail.google.com` → `google`
+  - Ports included for ALL domains: `localhost:3000` → `localhost-3000`, `example.com:8080` → `example-8080`
+  - Protocol ignored: `http` and `https` both map to same projectId
+  - File URLs: `file:///` → `local`
+  - Location: `utils/url-to-project.js`, `recorder/recorder-script.js:30-78`
+
+- **Global Scenario Access** - All tools now return scenarios from ALL websites
+  - `listScenarios()` returns ALL scenarios with `projectId`, `entryUrl`, `exitUrl` metadata
+  - `searchScenarios()` searches ALL scenarios across all websites
+  - Agent can filter results by `projectId`, `entryUrl`, or `exitUrl` as needed
+  - Removed `allProjects` parameter (no longer needed, always returns all)
+  - Location: `index.js:3586-3610`
+
+- **Simplified API** - Recorder no longer depends on file system project detection
+  - `injectRecorder()` signature changed from `(page, projectDir, projectId, projectPath)` to `(page)`
+  - Project ID determined automatically from page URL in browser context
+  - Removed dependency on `utils/project-detector.js`
+  - Location: `recorder/recorder-script.js:1710-1763`, `index.js:3512-3533`
+
+### Added
+- **URL Normalization Utilities** - New module for extracting project ID from URLs
+  - `urlToProjectId(url)` - Extract and sanitize domain-based project ID
+  - `sanitizeProjectId(id)` - Clean project IDs (lowercase, alphanumeric, hyphens)
+  - Browser-compatible version injected into recorder widget
+  - Location: `utils/url-to-project.js`
+
+### Migration
+- **Automatic v2.1.0 Migration** - Old project-based scenarios removed on first run
+  - Deletes `~/.config/chrometools-mcp/projects/` directory from v2.0
+  - Deletes old global index
+  - Creates `.migration-v2.1.0-done` flag file
+  - One-time migration, starts fresh with URL-based organization
+  - Location: `index.js:780-811`
+
+### Removed
+- **Removed `utils/project-detector.js`** - No longer needed for URL-based organization
+- **Removed helper functions** - `getProjectId()`, `getProjectDir()`, `getCurrentProjectDir()`
+- **Removed old scenarios** - All v2.0 scenarios deleted during migration
+
+### Documentation
+- **Updated README.md** - Complete rewrite of Recorder Tools section
+  - Explained URL-based storage approach with examples
+  - Updated all tool descriptions and examples
+  - Documented domain extraction rules
+  - Added filtering examples for agents
+  - Location: `README.md:507-618`
+
+## [2.0.2] - 2025-12-21
+
+### Fixed
+- **Project Detection for VS Code** - Improved project root detection for IDE environments
+  - Added support for `INIT_CWD` and `npm_config_local_prefix` environment variables
+  - Added `findProjectRootByMarkers()` to detect project by package.json, pom.xml, etc.
+  - Walks up parent directories to find Git root when cwd is IDE installation
+  - Now correctly detects `C:\prj\automation` instead of `Microsoft VS Code` when running in VS Code
+  - Location: `utils/project-detector.js:38-68`, `utils/project-detector.js:85-140`
+
+### Added
+- **Enhanced Project Detection Strategy** - Multiple fallback mechanisms for project root detection
+  - Priority: CLAUDE_PROJECT_DIR → PROJECT_DIR → INIT_CWD → npm prefix → Git root → markers → parent Git → cwd
+  - Supports 8+ project markers: package.json, pom.xml, build.gradle, Cargo.toml, go.mod, etc.
+  - Better logging with `console.error` for debugging project detection
+
+### Documentation
+- **VS Code Setup Guide** - Add instructions for setting PROJECT_DIR in MCP config for VS Code users
+
+## [2.0.1] - 2025-12-21
+
+### Fixed
+- **Recorder Auto-Reinjection** - Fixed critical bug where recorder widget didn't reinject after page navigation
+  - Updated `setupRecorderAutoReinjection()` to use new v2.0 API signature
+  - Fixed both navigation (`framenavigated`) and reload (`load`) event handlers
+  - Recorder now correctly passes `projectDir`, `projectId`, and `projectPath` instead of deprecated `baseDir`
+  - Location: `index.js:483-486`, `index.js:499-502`
+
+## [2.0.0] - 2025-12-21
+
+### Breaking Changes
+- **Project-Based Scenario Storage** - Complete restructuring of scenario storage system
+  - Scenarios now stored in `~/.config/chrometools-mcp/projects/{projectName}/scenarios/`
+  - Each project has its own isolated scenario storage
+  - Automatic project detection via `detectProjectRoot()` (CLAUDE_PROJECT_DIR → PROJECT_DIR → git root → cwd)
+  - Global index file at `~/.config/chrometools-mcp/index.json` for fast scenario discovery
+  - Scenarios include `projectId` and `projectPath` in metadata
+  - Old scenarios in `~/.config/chrometools-mcp/scenarios/` will no longer be accessible
+  - Location: `index.js:66-159`, `recorder/scenario-storage.js`
+
+- **Removed `directory` parameter** - All scenario tools no longer accept explicit directory parameter
+  - Removed from: `enableRecorder`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`
+  - Project directory is now automatically determined
+  - Simplifies API and improves consistency
+  - Location: `index.js:1659-1750` (tool definitions)
+
+### Added
+- **Global Scenario Index** - Fast O(1) scenario lookups without filesystem scanning
+  - Location: `~/.config/chrometools-mcp/index.json`
+  - Contains all projects and their scenarios
+  - Enables quick discovery of scenarios across all projects
+  - AI-friendly: agents can read global index to understand all available scenarios
+  - Location: `index.js:103-159`, `recorder/scenario-storage.js:23-136`
+
+- **Multi-Project Filtering** - New `allProjects` parameter for `listScenarios` and `searchScenarios`
+  - `allProjects: false` (default) - shows only current project's scenarios
+  - `allProjects: true` - shows scenarios from all projects
+  - Enables cross-project scenario discovery and reuse
+  - Location: `index.js:1685`, `index.js:1697`, `recorder/scenario-storage.js:385-453`
+
+- **Cross-Project Dependency Support** - Scenarios can depend on scenarios from other projects
+  - Dependencies automatically resolved across projects via global index
+  - Enables scenario reuse between projects
+  - Location: `recorder/scenario-executor.js:27-121`
+
+- **Storage Path in Tool Descriptions** - All scenario tools now document storage location
+  - Every tool description includes: "Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/"
+  - Helps AI agents understand where to find scenarios
+  - Includes reference to global index location
+  - Location: `index.js:1660`, `index.js:1668`, `index.js:1681`, etc.
+
+### Changed
+- **Scenario Storage Functions** - Updated all storage functions for new architecture
+  - `saveScenario(scenario, projectId, projectPath)` - now requires project info instead of baseDir
+  - `loadScenario(name, includeSecrets, projectId)` - searches globally, optional project filter
+  - `listScenarios(projectId, allProjects)` - reads from global index
+  - `searchScenarios(query, projectId, allProjects)` - searches global index
+  - `deleteScenario(name, projectId)` - finds and deletes from correct project
+  - Location: `recorder/scenario-storage.js:191-500`
+
+- **Recorder Injection** - Updated to pass project information
+  - `injectRecorder(page, projectDir, projectId, projectPath)` - now accepts project details
+  - Scenarios saved with project context automatically
+  - Location: `recorder/recorder-script.js:1659`
+
+### Migration Guide
+- **Old scenarios are inaccessible** - Scenarios in `~/.config/chrometools-mcp/scenarios/` will no longer be found
+  - To migrate: Manually move scenarios to new structure or re-record them
+  - New structure: `~/.config/chrometools-mcp/projects/{projectName}/scenarios/`
+- **No code changes needed** - All changes are internal, MCP tool interface remains compatible (except removed `directory` parameter)
+
 ## [1.9.1] - 2025-12-19
 
 ### Fixed
