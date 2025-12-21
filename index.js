@@ -1,22 +1,67 @@
 #!/usr/bin/env node
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
-import puppeteer from "puppeteer";
+import {Server} from "@modelcontextprotocol/sdk/server/index.js";
+import {StdioServerTransport} from "@modelcontextprotocol/sdk/server/stdio.js";
+import {CallToolRequestSchema, ListToolsRequestSchema,} from "@modelcontextprotocol/sdk/types.js";
 import Jimp from "jimp";
 import pixelmatch from "pixelmatch";
-import { writeFileSync, mkdirSync, readFileSync } from 'fs';
-import { dirname } from 'path';
-import { spawn } from 'child_process';
-import http from 'http';
-import { fileURLToPath } from 'url';
-import path from 'path';
-import { homedir } from 'os';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
+import path, {dirname} from 'path';
+import {fileURLToPath} from 'url';
+import {homedir} from 'os';
+
+// Import browser and platform utilities
+import {closeBrowser} from './browser/browser-manager.js';
+import {isWSL} from './utils/platform-utils.js';
+
+// Import page management utilities
+import {
+    consoleLogs,
+    getLastOpenPage,
+    getOrCreatePage,
+    networkRequests,
+    pageAnalysisCache,
+    pagesWithRecorder
+} from './browser/page-manager.js';
+
+// Import image processing utilities
+import {calculateSSIM, processScreenshot} from './utils/image-processing.js';
+
+// Import CSS utilities
+import {filterCssStyles} from './utils/css-utils.js';
+
+// Import tool schemas and definitions
+import * as schemas from './server/tool-schemas.js';
+import {toolDefinitions} from './server/tool-definitions.js';
+
+// Import element actions helper
+import {executeElementAction} from './utils/element-actions.js';
+// Import hints generator
+import {generateClickHints, generateNavigationHints} from './utils/hints-generator.js';
+
+// Import Recorder modules
+import {injectRecorder} from './recorder/recorder-script.js';
+import {executeScenario} from './recorder/scenario-executor.js';
+import {deleteScenario, listScenarios, loadScenario, searchScenarios} from './recorder/scenario-storage.js';
+
+// Import Code Generators
+import {PlaywrightTypeScriptGenerator} from './utils/code-generators/playwright-typescript.js';
+import {PlaywrightPythonGenerator} from './utils/code-generators/playwright-python.js';
+import {SeleniumPythonGenerator} from './utils/code-generators/selenium-python.js';
+import {SeleniumJavaGenerator} from './utils/code-generators/selenium-java.js';
+// Import Figma tools
+import {
+    collectAllText,
+    extractTextFromNode,
+    fetchFigmaAPI,
+    getFigmaColorPalette,
+    getFigmaComponents,
+    getFigmaStyles,
+    listFigmaPages,
+    normalizeFigmaNodeId,
+    parseFigmaUrl,
+    searchFigmaFrames
+} from './figma-tools.js';
 
 // Debug mode - only use stderr for actual errors, not debug info
 // MCP uses STDIO for JSON-RPC, so console.log/error breaks the protocol
@@ -33,65 +78,10 @@ const __dirname = dirname(__filename);
 // Load element finder utilities
 const elementFinderUtils = readFileSync(path.join(__dirname, 'element-finder-utils.js'), 'utf-8');
 
-// Import hints generator
-import {
-  generateNavigationHints,
-  generateClickHints,
-  generateFormSubmitHints,
-  generatePageHints
-} from './utils/hints-generator.js';
-
-// Import Recorder modules
-import { injectRecorder } from './recorder/recorder-script.js';
-import { executeScenario } from './recorder/scenario-executor.js';
-import {
-  initializeStorage,
-  saveScenario,
-  loadScenario,
-  listScenarios,
-  searchScenarios,
-  deleteScenario
-} from './recorder/scenario-storage.js';
-
-// Import Code Generators
-import { PlaywrightTypeScriptGenerator } from './utils/code-generators/playwright-typescript.js';
-import { PlaywrightPythonGenerator } from './utils/code-generators/playwright-python.js';
-import { SeleniumPythonGenerator } from './utils/code-generators/selenium-python.js';
-import { SeleniumJavaGenerator } from './utils/code-generators/selenium-java.js';
-
 // Base storage directory in user's home folder
 const BASE_STORAGE_DIR = path.join(homedir(), '.config', 'chrometools-mcp');
 const GLOBAL_INDEX_PATH = path.join(BASE_STORAGE_DIR, 'index.json');
 const PROJECTS_DIR = path.join(BASE_STORAGE_DIR, 'projects');
-
-// Import Figma tools
-import {
-  parseFigmaUrl,
-  normalizeFigmaNodeId,
-  fetchFigmaAPI,
-  getFigmaFile,
-  listFigmaPages,
-  searchFigmaFrames,
-  getFigmaComponents,
-  getFigmaStyles,
-  getFigmaColorPalette,
-  extractTextFromNode,
-  collectAllText
-} from './figma-tools.js';
-
-// Detect WSL environment
-const isWSL = (() => {
-  try {
-    const fs = require('fs');
-    const proc_version = fs.readFileSync('/proc/version', 'utf8').toLowerCase();
-    return proc_version.includes('microsoft') || proc_version.includes('wsl');
-  } catch {
-    return false;
-  }
-})();
-
-// Detect Windows environment (including WSL)
-const isWindows = process.platform === 'win32' || isWSL;
 
 /**
  * Load global index from ~/.config/chrometools-mcp/index.json
@@ -129,651 +119,9 @@ function getAllProjectIds() {
   return Object.keys(index.projects || {});
 }
 
-// Get Chrome executable path based on platform
-function getChromePath() {
-  if (process.platform === 'win32') {
-    // Native Windows
-    return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-  } else if (isWSL) {
-    // WSL - use Windows Chrome
-    return '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe';
-  } else {
-    // Linux
-    return '/usr/bin/google-chrome';
-  }
-}
-
-// Get temp directory based on platform
-function getTempDir() {
-  if (process.platform === 'win32') {
-    return process.env.TEMP || 'C:\\Windows\\Temp';
-  } else if (isWSL) {
-    return '/mnt/c/Windows/Temp';
-  } else {
-    return process.env.TMPDIR || '/tmp';
-  }
-}
-
-// Global browser instance (persists between requests)
-let browserPromise = null;
-const openPages = new Map();
-let lastPage = null;
-let chromeProcess = null;
-
-// Console logs storage
-const consoleLogs = [];
-
-// Network requests storage
-const networkRequests = [];
-
-// Page analysis cache (method 4)
-const pageAnalysisCache = new Map();
-
-// Track pages with recorder injected
-const pagesWithRecorder = new WeakSet();
-
-// Debug port for Chrome remote debugging
-const CHROME_DEBUG_PORT = 9222;
-
-// Helper function to get WebSocket endpoint from Chrome
-async function getChromeWebSocketEndpoint(port = CHROME_DEBUG_PORT, maxRetries = 10) {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const response = await new Promise((resolve, reject) => {
-        const req = http.get(`http://localhost:${port}/json/version`, (res) => {
-          let data = '';
-          res.on('data', chunk => data += chunk);
-          res.on('end', () => resolve(data));
-        });
-        req.on('error', reject);
-        req.setTimeout(1000);
-      });
-
-      const info = JSON.parse(response);
-      if (info.webSocketDebuggerUrl) {
-        return info.webSocketDebuggerUrl;
-      }
-    } catch (err) {
-      // Chrome might not be ready yet, wait and retry
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-  }
-  throw new Error('Could not get Chrome WebSocket endpoint after multiple retries');
-}
-
-// Initialize browser (singleton)
-async function getBrowser() {
-  // Check if we have a cached browser and if it's still connected
-  if (browserPromise) {
-    try {
-      const cachedBrowser = await browserPromise;
-      if (cachedBrowser && cachedBrowser.isConnected()) {
-        return cachedBrowser;
-      }
-      // Browser disconnected, reset the promise
-      debugLog("[chrometools-mcp] Browser disconnected, will reconnect...");
-      browserPromise = null;
-    } catch (error) {
-      debugLog("[chrometools-mcp] Error checking cached browser:", error.message);
-      browserPromise = null;
-    }
-  }
-
-  if (!browserPromise) {
-    browserPromise = (async () => {
-      try {
-        let browser;
-        let endpoint;
-
-        // Try to connect to existing Chrome with remote debugging
-        try {
-          endpoint = await getChromeWebSocketEndpoint(CHROME_DEBUG_PORT, 2);
-          browser = await puppeteer.connect({
-            browserWSEndpoint: endpoint,
-            defaultViewport: null,
-          });
-          debugLog("[chrometools-mcp] Connected to existing Chrome instance");
-          debugLog("[chrometools-mcp] WebSocket endpoint:", endpoint);
-
-          // Set up disconnect handler to reset browserPromise
-          browser.on('disconnected', () => {
-            debugLog("[chrometools-mcp] Browser disconnected");
-            browserPromise = null;
-          });
-
-          return browser;
-        } catch (connectError) {
-          debugLog("[chrometools-mcp] No existing Chrome found, launching new instance...");
-        }
-
-        // Launch new Chrome with remote debugging enabled
-        const chromePath = getChromePath();
-        const userDataDir = `${getTempDir()}/chrome-mcp-profile`;
-
-        debugLog("[chrometools-mcp] Chrome path:", chromePath);
-        debugLog("[chrometools-mcp] User data dir:", userDataDir);
-
-        chromeProcess = spawn(chromePath, [
-          `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
-          '--no-first-run',
-          '--no-default-browser-check',
-          `--user-data-dir=${userDataDir}`,
-        ], {
-          detached: true,
-          stdio: 'ignore',
-        });
-
-        chromeProcess.unref(); // Allow Node to exit even if Chrome is running
-
-        debugLog("[chrometools-mcp] Chrome launched with remote debugging on port", CHROME_DEBUG_PORT);
-
-        // Wait for Chrome to start and get the endpoint
-        endpoint = await getChromeWebSocketEndpoint(CHROME_DEBUG_PORT, 20);
-
-        // Connect to the Chrome instance
-        browser = await puppeteer.connect({
-          browserWSEndpoint: endpoint,
-          defaultViewport: null,
-        });
-
-        debugLog("[chrometools-mcp] Connected to Chrome instance");
-        debugLog("[chrometools-mcp] WebSocket endpoint:", endpoint);
-
-        // Set up disconnect handler to reset browserPromise
-        browser.on('disconnected', () => {
-          debugLog("[chrometools-mcp] Browser disconnected");
-          browserPromise = null;
-        });
-
-        return browser;
-      } catch (error) {
-        // Check if it's a display-related error in WSL
-        if (isWSL && (
-          error.message.includes('DISPLAY') ||
-          error.message.includes('connect ECONNREFUSED') ||
-          error.message.includes('cannot open display')
-        )) {
-          const helpMessage = `
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-❌ WSL X Server Error Detected
-
-You are running in WSL environment with headless:false mode.
-This requires an X server to display the browser GUI.
-
-🔧 Solution:
-   1. Start X server on Windows (e.g., VcXsrv, X410)
-   2. Set DISPLAY in your MCP config:
-
-      {
-        "mcpServers": {
-          "chrometools": {
-            "env": {
-              "DISPLAY": "172.25.96.1:0"
-            }
-          }
-        }
-      }
-
-📚 For detailed setup instructions, see:
-   WSL_SETUP.md in chrometools-mcp package
-
-💡 Alternative: Run in headless mode (modify index.js)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-`;
-          console.error(helpMessage);
-          throw new Error(`WSL X Server not available. ${error.message}\n\nSee above for setup instructions.`);
-        }
-
-        // Re-throw other errors as-is
-        throw error;
-      }
-    })();
-  }
-  return browserPromise;
-}
-
-// Setup navigation listener for recorder auto-reinjection
-// Track pages with network monitoring to prevent duplicate setup
-const pagesWithNetworkMonitoring = new WeakSet();
-
-// Setup network monitoring with auto-reinitialization on navigation
-async function setupNetworkMonitoring(page) {
-  // Prevent duplicate setup on the same page
-  if (pagesWithNetworkMonitoring.has(page)) {
-    return;
-  }
-  pagesWithNetworkMonitoring.add(page);
-
-  const client = await page.target().createCDPSession();
-  await client.send('Network.enable');
-
-  client.on('Network.requestWillBeSent', (event) => {
-    const timestamp = new Date().toISOString();
-    networkRequests.push({
-      requestId: event.requestId,
-      url: event.request.url,
-      method: event.request.method,
-      headers: event.request.headers,
-      postData: event.request.postData,
-      timestamp,
-      type: event.type, // Document, Stylesheet, Image, Media, Font, Script, XHR, Fetch, etc.
-      initiator: event.initiator.type, // parser, script, other
-      status: 'pending',
-      documentURL: event.documentURL
-    });
-  });
-
-  client.on('Network.responseReceived', (event) => {
-    const req = networkRequests.find(r => r.requestId === event.requestId);
-    if (req) {
-      req.status = event.response.status;
-      req.statusText = event.response.statusText;
-      req.responseHeaders = event.response.headers;
-      req.mimeType = event.response.mimeType;
-      req.fromCache = event.response.fromDiskCache || event.response.fromServiceWorker;
-      req.timing = event.response.timing;
-    }
-  });
-
-  client.on('Network.loadingFinished', (event) => {
-    const req = networkRequests.find(r => r.requestId === event.requestId);
-    if (req && req.status === 'pending') {
-      req.status = 'completed';
-    }
-    if (req) {
-      req.encodedDataLength = event.encodedDataLength;
-      req.finishedTimestamp = new Date().toISOString();
-    }
-  });
-
-  client.on('Network.loadingFailed', (event) => {
-    const req = networkRequests.find(r => r.requestId === event.requestId);
-    if (req) {
-      req.status = 'failed';
-      req.errorText = event.errorText;
-      req.canceled = event.canceled;
-      req.finishedTimestamp = new Date().toISOString();
-    }
-  });
-
-  // Auto-reinitialize on navigation (CDP session is reset on navigation)
-  let lastUrl = page.url();
-
-  page.on('framenavigated', async (frame) => {
-    // Only handle main frame navigation
-    if (frame !== page.mainFrame()) return;
-
-    const currentUrl = frame.url();
-
-    // Skip if URL hasn't changed
-    if (currentUrl === lastUrl) return;
-    lastUrl = currentUrl;
-
-    // Remove from tracking set to allow re-setup
-    pagesWithNetworkMonitoring.delete(page);
-
-    // Small delay to let navigation settle
-    setTimeout(async () => {
-      try {
-        await setupNetworkMonitoring(page);
-      } catch (error) {
-        debugLog('[chrometools-mcp] Failed to reinitialize network monitoring:', error.message);
-      }
-    }, 100);
-  });
-}
-
-async function setupRecorderAutoReinjection(page) {
-  let reinjectionTimeout = null;
-  let lastUrl = null;
-
-  // Handle navigation events (form submits, link clicks, history API)
-  page.on('framenavigated', async (frame) => {
-    // Only handle main frame navigation
-    if (frame !== page.mainFrame()) return;
-
-    // Get current URL
-    const currentUrl = frame.url();
-
-    // Skip if URL hasn't changed (prevents duplicate injections on same page)
-    if (currentUrl === lastUrl) {
-      return;
-    }
-    lastUrl = currentUrl;
-
-    // Clear any pending reinjection
-    if (reinjectionTimeout) {
-      clearTimeout(reinjectionTimeout);
-    }
-
-    // Debounce reinjection (wait 100ms for navigation to settle)
-    reinjectionTimeout = setTimeout(async () => {
-      // Check if this page had recorder before
-      if (pagesWithRecorder.has(page)) {
-        try {
-          // Project ID will be determined from URL in browser context
-          await injectRecorder(page);
-        } catch (error) {
-          debugLog('[chrometools-mcp] Failed to re-inject recorder:', error.message);
-        }
-      }
-    }, 100);
-  });
-
-  // Handle page reloads (F5, Ctrl+R) - use 'load' event
-  page.on('load', async () => {
-    // Check if this page had recorder before
-    if (pagesWithRecorder.has(page)) {
-      try {
-        // Project ID will be determined from URL in browser context
-        await injectRecorder(page);
-      } catch (error) {
-        debugLog('[chrometools-mcp] Failed to re-inject recorder after reload:', error.message);
-      }
-    }
-  });
-}
-
-// Get or create page for URL
-async function getOrCreatePage(url) {
-  const browser = await getBrowser();
-
-  // Check if page for this URL already exists
-  if (openPages.has(url)) {
-    const existingPage = openPages.get(url);
-    if (!existingPage.isClosed()) {
-      lastPage = existingPage;
-      return existingPage;
-    }
-    openPages.delete(url);
-  }
-
-  // Create new page
-  const page = await browser.newPage();
-
-  // Set up console log capture
-  const client = await page.target().createCDPSession();
-  await client.send('Runtime.enable');
-  await client.send('Log.enable');
-
-  client.on('Runtime.consoleAPICalled', (event) => {
-    const timestamp = new Date().toISOString();
-    const args = event.args.map(arg => {
-      if (arg.value !== undefined) return arg.value;
-      if (arg.description) return arg.description;
-      return String(arg);
-    });
-
-    consoleLogs.push({
-      type: event.type, // log, warn, error, info, debug
-      timestamp,
-      message: args.join(' '),
-      stackTrace: event.stackTrace
-    });
-  });
-
-  client.on('Log.entryAdded', (event) => {
-    const entry = event.entry;
-    consoleLogs.push({
-      type: entry.level, // verbose, info, warning, error
-      timestamp: new Date(entry.timestamp).toISOString(),
-      message: entry.text,
-      source: entry.source,
-      url: entry.url,
-      lineNumber: entry.lineNumber
-    });
-  });
-
-  // Setup network monitoring with auto-reinitialization on navigation
-  await setupNetworkMonitoring(page);
-
-  // Setup recorder auto-reinjection on navigation
-  setupRecorderAutoReinjection(page);
-
-  await page.goto(url, { waitUntil: 'networkidle2' });
-  openPages.set(url, page);
-  lastPage = page;
-
-  return page;
-}
-
-// Get last opened page (for tools that don't need URL)
-async function getLastOpenPage() {
-  if (!lastPage || lastPage.isClosed()) {
-    throw new Error('No page is currently open. Use openBrowser first to open a page.');
-  }
-
-  // Setup recorder auto-reinjection if not already set up
-  // Check if page already has navigation listener
-  const listenerCount = lastPage.listenerCount('framenavigated');
-  if (listenerCount === 0) {
-    setupRecorderAutoReinjection(lastPage);
-  }
-
-  return lastPage;
-}
-
-// Helper function to normalize Figma node ID (convert URL format to API format)
-// Figma helper functions moved to figma-tools.js
-
-// Helper function to process screenshot with compression and scaling
-async function processScreenshot(screenshotBuffer, options = {}) {
-  const {
-    maxWidth = 1024,
-    maxHeight = 8000, // API limit is 8000px
-    quality = 80,
-    format = 'auto',
-    maxFileSize = 3 * 1024 * 1024 // 3 MB limit
-  } = options;
-
-  // Load image with Jimp
-  const image = await Jimp.read(screenshotBuffer);
-  const originalWidth = image.bitmap.width;
-  const originalHeight = image.bitmap.height;
-  const originalSize = screenshotBuffer.length;
-
-  let processed = false;
-
-  // Apply scaling if needed to fit within maxWidth and maxHeight
-  if (maxWidth !== null || maxHeight !== null) {
-    let newWidth = originalWidth;
-    let newHeight = originalHeight;
-
-    // Calculate scale factors for both dimensions
-    let scaleWidth = 1.0;
-    let scaleHeight = 1.0;
-
-    if (maxWidth !== null && originalWidth > maxWidth) {
-      scaleWidth = maxWidth / originalWidth;
-    }
-
-    if (maxHeight !== null && originalHeight > maxHeight) {
-      scaleHeight = maxHeight / originalHeight;
-    }
-
-    // Use the smaller scale factor to ensure both dimensions fit
-    const scale = Math.min(scaleWidth, scaleHeight);
-
-    if (scale < 1.0) {
-      newWidth = Math.round(originalWidth * scale);
-      newHeight = Math.round(originalHeight * scale);
-      image.resize(newWidth, newHeight);
-      processed = true;
-    }
-  }
-
-  // Determine output format
-  let outputFormat = format;
-  let mimeType = 'image/png';
-
-  if (format === 'auto') {
-    // Auto-select: use JPEG for large images, PNG for small
-    const estimatedSize = image.bitmap.width * image.bitmap.height * 4;
-    outputFormat = estimatedSize > 500000 ? 'jpeg' : 'png'; // ~500KB threshold
-  }
-
-  // Convert to buffer with appropriate format and quality
-  let currentQuality = quality;
-  let resultBuffer;
-  let compressionAttempts = 0;
-  const maxCompressionAttempts = 10;
-
-  if (outputFormat === 'jpeg') {
-    image.quality(currentQuality);
-    resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-    mimeType = 'image/jpeg';
-    processed = true;
-
-    // If file exceeds maxFileSize, reduce quality iteratively
-    while (resultBuffer.length > maxFileSize && compressionAttempts < maxCompressionAttempts) {
-      compressionAttempts++;
-      // Reduce quality by 10 points each iteration
-      currentQuality = Math.max(10, currentQuality - 10);
-      image.quality(currentQuality);
-      resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-
-      // If quality is already at minimum and still too large, scale down the image
-      if (currentQuality === 10 && resultBuffer.length > maxFileSize) {
-        const scaleFactor = Math.sqrt(maxFileSize / resultBuffer.length * 0.9); // 0.9 for safety margin
-        const newWidth = Math.round(image.bitmap.width * scaleFactor);
-        const newHeight = Math.round(image.bitmap.height * scaleFactor);
-        image.resize(newWidth, newHeight);
-        image.quality(currentQuality);
-        resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-        processed = true;
-      }
-    }
-  } else {
-    resultBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
-    mimeType = 'image/png';
-
-    // If PNG exceeds maxFileSize, convert to JPEG and compress
-    if (resultBuffer.length > maxFileSize) {
-      outputFormat = 'jpeg';
-      mimeType = 'image/jpeg';
-      currentQuality = quality;
-      image.quality(currentQuality);
-      resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-      processed = true;
-
-      // Reduce quality iteratively if still too large
-      while (resultBuffer.length > maxFileSize && compressionAttempts < maxCompressionAttempts) {
-        compressionAttempts++;
-        currentQuality = Math.max(10, currentQuality - 10);
-        image.quality(currentQuality);
-        resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-
-        // If quality is already at minimum and still too large, scale down the image
-        if (currentQuality === 10 && resultBuffer.length > maxFileSize) {
-          const scaleFactor = Math.sqrt(maxFileSize / resultBuffer.length * 0.9);
-          const newWidth = Math.round(image.bitmap.width * scaleFactor);
-          const newHeight = Math.round(image.bitmap.height * scaleFactor);
-          image.resize(newWidth, newHeight);
-          image.quality(currentQuality);
-          resultBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-          processed = true;
-        }
-      }
-    }
-  }
-
-  // Return original if no processing was needed and format is PNG
-  if (!processed && outputFormat === 'png' && resultBuffer.length <= maxFileSize) {
-    return {
-      buffer: screenshotBuffer,
-      mimeType: 'image/png',
-      metadata: {
-        width: originalWidth,
-        height: originalHeight,
-        originalSize,
-        finalSize: screenshotBuffer.length,
-        format: 'png',
-        compressed: false,
-        scaled: false
-      }
-    };
-  }
-
-  return {
-    buffer: resultBuffer,
-    mimeType,
-    metadata: {
-      width: image.bitmap.width,
-      height: image.bitmap.height,
-      originalWidth,
-      originalHeight,
-      originalSize,
-      finalSize: resultBuffer.length,
-      format: outputFormat,
-      compressed: outputFormat === 'jpeg' || compressionAttempts > 0,
-      scaled: processed,
-      compressionRatio: Math.round((1 - resultBuffer.length / originalSize) * 100),
-      quality: outputFormat === 'jpeg' ? currentQuality : undefined,
-      compressionAttempts: compressionAttempts > 0 ? compressionAttempts : undefined,
-      autoCompressed: compressionAttempts > 0 || (outputFormat === 'jpeg' && format === 'png')
-    }
-  };
-}
-
-// Calculate SSIM (Structural Similarity Index) for image comparison
-function calculateSSIM(img1Data, img2Data, width, height) {
-  if (img1Data.length !== img2Data.length) {
-    return 0;
-  }
-
-  const windowSize = 8;
-  const k1 = 0.01;
-  const k2 = 0.03;
-  const c1 = (k1 * 255) ** 2;
-  const c2 = (k2 * 255) ** 2;
-
-  let ssimSum = 0;
-  let validWindows = 0;
-
-  for (let y = 0; y <= height - windowSize; y += windowSize) {
-    for (let x = 0; x <= width - windowSize; x += windowSize) {
-      let sum1 = 0, sum2 = 0, sum1Sq = 0, sum2Sq = 0, sum12 = 0;
-
-      for (let dy = 0; dy < windowSize; dy++) {
-        for (let dx = 0; dx < windowSize; dx++) {
-          const idx = ((y + dy) * width + (x + dx)) * 4;
-          if (idx + 2 >= img1Data.length) continue;
-
-          const gray1 = (img1Data[idx] * 0.299 + img1Data[idx + 1] * 0.587 + img1Data[idx + 2] * 0.114);
-          const gray2 = (img2Data[idx] * 0.299 + img2Data[idx + 1] * 0.587 + img2Data[idx + 2] * 0.114);
-
-          sum1 += gray1;
-          sum2 += gray2;
-          sum1Sq += gray1 * gray1;
-          sum2Sq += gray2 * gray2;
-          sum12 += gray1 * gray2;
-        }
-      }
-
-      const n = windowSize * windowSize;
-      const mean1 = sum1 / n;
-      const mean2 = sum2 / n;
-      const variance1 = (sum1Sq / n) - (mean1 * mean1);
-      const variance2 = (sum2Sq / n) - (mean2 * mean2);
-      const covariance = (sum12 / n) - (mean1 * mean2);
-
-      const ssim = ((2 * mean1 * mean2 + c1) * (2 * covariance + c2)) /
-        ((mean1 * mean1 + mean2 * mean2 + c1) * (variance1 + variance2 + c2));
-
-      ssimSum += ssim;
-      validWindows++;
-    }
-  }
-
-  return validWindows > 0 ? ssimSum / validWindows : 0;
-}
-
 // Cleanup on exit
 process.on("SIGINT", async () => {
-  if (browserPromise) {
-    const browser = await browserPromise;
-    await browser.close();
-  }
+  await closeBrowser();
   process.exit(0);
 });
 
@@ -823,1054 +171,23 @@ const server = new Server(
   }
 );
 
-// CSS property categorization
-const CSS_CATEGORIES = {
-  layout: [
-    'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
-    'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
-    'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
-    'position', 'top', 'right', 'bottom', 'left', 'z-index',
-    'display', 'float', 'clear', 'overflow', 'overflow-x', 'overflow-y',
-    'flex', 'flex-direction', 'flex-wrap', 'flex-grow', 'flex-shrink', 'flex-basis',
-    'justify-content', 'align-items', 'align-content', 'align-self', 'order',
-    'grid', 'grid-template', 'grid-template-columns', 'grid-template-rows', 'grid-gap',
-    'gap', 'row-gap', 'column-gap',
-    'box-sizing', 'visibility', 'clip', 'clip-path'
-  ],
-  typography: [
-    'font', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant',
-    'line-height', 'letter-spacing', 'word-spacing', 'text-align', 'text-decoration',
-    'text-transform', 'text-indent', 'text-overflow', 'white-space', 'word-break',
-    'word-wrap', 'overflow-wrap', 'hyphens', 'direction', 'unicode-bidi',
-    'writing-mode', 'vertical-align'
-  ],
-  colors: [
-    'color', 'background', 'background-color', 'background-image', 'background-position',
-    'background-size', 'background-repeat', 'background-attachment', 'background-clip',
-    'background-origin', 'background-blend-mode',
-    'border-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
-    'outline-color', 'text-decoration-color', 'caret-color', 'column-rule-color'
-  ],
-  visual: [
-    'opacity', 'transform', 'transform-origin', 'transform-style', 'perspective',
-    'perspective-origin', 'backface-visibility',
-    'transition', 'transition-property', 'transition-duration', 'transition-timing-function', 'transition-delay',
-    'animation', 'animation-name', 'animation-duration', 'animation-timing-function', 'animation-delay',
-    'animation-iteration-count', 'animation-direction', 'animation-fill-mode', 'animation-play-state',
-    'filter', 'backdrop-filter', 'mix-blend-mode', 'isolation',
-    'box-shadow', 'text-shadow',
-    'border', 'border-width', 'border-style', 'border-radius',
-    'border-top', 'border-right', 'border-bottom', 'border-left',
-    'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
-    'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
-    'border-top-left-radius', 'border-top-right-radius', 'border-bottom-right-radius', 'border-bottom-left-radius',
-    'outline', 'outline-width', 'outline-style', 'outline-offset',
-    'cursor', 'pointer-events', 'user-select'
-  ]
-};
-
-// Common default CSS values to filter out
-const CSS_DEFAULTS = {
-  'display': 'inline',
-  'position': 'static',
-  'float': 'none',
-  'clear': 'none',
-  'visibility': 'visible',
-  'overflow': 'visible',
-  'overflow-x': 'visible',
-  'overflow-y': 'visible',
-  'z-index': 'auto',
-  'opacity': '1',
-  'transform': 'none',
-  'filter': 'none',
-  'backdrop-filter': 'none',
-  'box-shadow': 'none',
-  'text-shadow': 'none',
-  'border-style': 'none',
-  'border-width': '0px',
-  'outline-style': 'none',
-  'outline-width': '0px',
-  'margin': '0px',
-  'margin-top': '0px',
-  'margin-right': '0px',
-  'margin-bottom': '0px',
-  'margin-left': '0px',
-  'padding': '0px',
-  'padding-top': '0px',
-  'padding-right': '0px',
-  'padding-bottom': '0px',
-  'padding-left': '0px',
-  'background-image': 'none',
-  'transition': 'all 0s ease 0s',
-  'animation': 'none',
-  'pointer-events': 'auto',
-  'user-select': 'auto',
-  'cursor': 'auto',
-  'text-decoration': 'none',
-  'text-transform': 'none',
-  'font-weight': '400',
-  'font-style': 'normal',
-  'font-variant': 'normal',
-  'letter-spacing': 'normal',
-  'word-spacing': 'normal',
-  'text-align': 'start',
-  'white-space': 'normal',
-  'word-break': 'normal',
-  'overflow-wrap': 'normal',
-  'hyphens': 'manual'
-};
-
-// Filter computed CSS styles based on options
-function filterCssStyles(computedStyle, options = {}) {
-  const { category, properties, includeDefaults = false } = options;
-
-  let filtered = computedStyle;
-
-  // Filter by specific properties (highest priority)
-  if (properties && properties.length > 0) {
-    filtered = filtered.filter(prop =>
-      properties.some(p => prop.name.toLowerCase() === p.toLowerCase())
-    );
-  }
-  // Filter by category
-  else if (category && category !== 'all') {
-    const categoryProps = CSS_CATEGORIES[category] || [];
-    filtered = filtered.filter(prop =>
-      categoryProps.some(p => prop.name.toLowerCase().startsWith(p.toLowerCase()))
-    );
-  }
-
-  // Filter out default values if requested
-  if (!includeDefaults) {
-    filtered = filtered.filter(prop => {
-      const defaultValue = CSS_DEFAULTS[prop.name];
-      if (!defaultValue) return true;
-
-      // Normalize values for comparison
-      const normalizedValue = prop.value.replace(/\s+/g, ' ').trim();
-      const normalizedDefault = defaultValue.replace(/\s+/g, ' ').trim();
-
-      return normalizedValue !== normalizedDefault;
-    });
-  }
-
-  return filtered;
-}
-
-// Tool schemas
-const PingSchema = z.object({
-  message: z.string().optional().describe("Optional message to send"),
-});
-
-const OpenBrowserSchema = z.object({
-  url: z.string().describe("URL to open in the browser"),
-});
-
-const ClickSchema = z.object({
-  selector: z.string().describe("CSS selector for element to click"),
-  waitAfter: z.number().optional().describe("Milliseconds to wait after click (default: 1500)"),
-  screenshot: z.boolean().optional().describe("Capture screenshot after click (default: false for performance)"),
-  timeout: z.number().optional().describe("Maximum time to wait for operation in ms (default: 30000)"),
-});
-
-const TypeSchema = z.object({
-  selector: z.string().describe("CSS selector for input element"),
-  text: z.string().describe("Text to type"),
-  delay: z.number().optional().describe("Delay between keystrokes in ms (default: 0)"),
-  clearFirst: z.boolean().optional().describe("Clear field before typing (default: true)"),
-});
-
-const GetElementSchema = z.object({
-  selector: z.string().optional().describe("CSS selector (optional, defaults to body)"),
-});
-
-const GetComputedCssSchema = z.object({
-  selector: z.string().optional().describe("CSS selector (optional, defaults to body)"),
-  category: z.enum(['all', 'layout', 'typography', 'colors', 'visual']).optional().describe("Filter by CSS category: 'layout' (sizing, positioning), 'typography' (fonts, text), 'colors' (color schemes), 'visual' (effects, transforms), 'all' (default)"),
-  properties: z.array(z.string()).optional().describe("Specific CSS properties to return (e.g., ['color', 'font-size']). Overrides category filter."),
-  includeDefaults: z.boolean().optional().describe("Include properties with default values (default: false)"),
-});
-
-const GetBoxModelSchema = z.object({
-  selector: z.string().describe("CSS selector for element"),
-});
-
-const ScreenshotSchema = z.object({
-  selector: z.string().describe("CSS selector for element to screenshot"),
-  padding: z.number().optional().describe("Padding around element in pixels (default: 0)"),
-  maxWidth: z.number().nullable().optional().describe("Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)"),
-  maxHeight: z.number().nullable().optional().describe("Maximum height in pixels, auto-scales if larger (default: 8000 for API limit, set to null for original size)"),
-  quality: z.number().min(1).max(100).optional().describe("JPEG quality 1-100 (default: 80, only applies to JPEG format)"),
-  format: z.enum(['png', 'jpeg', 'auto']).optional().describe("Image format: 'png', 'jpeg', or 'auto' (default: 'auto' - chooses based on size)"),
-});
-
-const SaveScreenshotSchema = z.object({
-  selector: z.string().describe("CSS selector for element to screenshot"),
-  filePath: z.string().describe("Absolute path where to save file"),
-  padding: z.number().optional().describe("Padding around element in pixels (default: 0)"),
-  maxWidth: z.number().nullable().optional().describe("Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)"),
-  maxHeight: z.number().nullable().optional().describe("Maximum height in pixels, auto-scales if larger (default: 8000 for API limit, set to null for original size)"),
-  quality: z.number().min(1).max(100).optional().describe("JPEG quality 1-100 (default: 80, only applies to JPEG format)"),
-  format: z.enum(['png', 'jpeg', 'auto']).optional().describe("Image format: 'png', 'jpeg', or 'auto' (default: 'auto' - chooses based on size)"),
-});
-
-const ScrollToSchema = z.object({
-  selector: z.string().describe("CSS selector for element to scroll to"),
-  behavior: z.enum(['auto', 'smooth']).optional().describe("Scroll behavior (default: auto)"),
-});
-
-const WaitForElementSchema = z.object({
-  selector: z.string().describe("CSS selector to wait for"),
-  timeout: z.number().optional().describe("Maximum time to wait in milliseconds (default: 5000)"),
-  visible: z.boolean().optional().describe("Wait for element to be visible (default: true)"),
-});
-
-const ExecuteScriptSchema = z.object({
-  script: z.string().describe("JavaScript code to execute in page context"),
-  waitAfter: z.number().optional().describe("Milliseconds to wait after execution (default: 500)"),
-  screenshot: z.boolean().optional().describe("Capture screenshot after execution (default: false for performance)"),
-  timeout: z.number().optional().describe("Maximum time to wait for operation in ms (default: 30000)"),
-});
-
-// Phase 2 schemas
-const GetConsoleLogsSchema = z.object({
-  types: z.array(z.enum(['log', 'warn', 'error', 'info', 'debug', 'verbose', 'warning']))
-    .optional()
-    .describe("Filter by log types (default: all)"),
-  clear: z.boolean().optional().describe("Clear logs after reading (default: false)"),
-});
-
-// Network tools schemas
-const ListNetworkRequestsSchema = z.object({
-  types: z.array(z.enum(['Document', 'Stylesheet', 'Image', 'Media', 'Font', 'Script', 'XHR', 'Fetch', 'WebSocket', 'Other']))
-    .optional()
-    .default(['Fetch', 'XHR'])
-    .describe("Filter by request types (default: Fetch, XHR)"),
-  status: z.enum(['pending', 'completed', 'failed', 'all'])
-    .optional()
-    .describe("Filter by status (default: all)"),
-  limit: z.number().min(1).max(500).optional().default(50).describe("Maximum number of requests to return (default: 50)"),
-  offset: z.number().min(0).optional().default(0).describe("Number of requests to skip before returning results (default: 0)"),
-  clear: z.boolean().optional().describe("Clear requests after reading (default: false)"),
-});
-
-const GetNetworkRequestSchema = z.object({
-  requestId: z.string().describe("Request ID to get details for"),
-});
-
-const FilterNetworkRequestsSchema = z.object({
-  urlPattern: z.string().describe("URL pattern to filter by (regex or partial match)"),
-  types: z.array(z.enum(['Document', 'Stylesheet', 'Image', 'Media', 'Font', 'Script', 'XHR', 'Fetch', 'WebSocket', 'Other']))
-    .optional()
-    .default(['Fetch', 'XHR'])
-    .describe("Filter by request types (default: Fetch, XHR)"),
-  clear: z.boolean().optional().describe("Clear requests after reading (default: false)"),
-});
-
-const HoverSchema = z.object({
-  selector: z.string().describe("CSS selector for element to hover"),
-});
-
-const SetStylesSchema = z.object({
-  selector: z.string().describe("CSS selector for element to modify"),
-  styles: z.array(z.object({
-    name: z.string().describe("CSS property name (e.g., 'color')"),
-    value: z.string().describe("CSS property value (e.g., 'red')")
-  })).describe("Array of CSS property name-value pairs"),
-});
-
-const SetViewportSchema = z.object({
-  width: z.number().min(320).max(4000).describe("Viewport width in pixels (320-4000)"),
-  height: z.number().min(200).max(3000).describe("Viewport height in pixels (200-3000)"),
-  deviceScaleFactor: z.number().min(0.5).max(3).optional().describe("Device pixel ratio (0.5-3, default: 1)"),
-});
-
-const GetViewportSchema = z.object({});
-
-const NavigateToSchema = z.object({
-  url: z.string().describe("URL to navigate to"),
-  waitUntil: z.enum(['load', 'domcontentloaded', 'networkidle0', 'networkidle2'])
-    .optional()
-    .describe("Wait until event (default: networkidle2)"),
-});
-
-// Figma tools schemas
-const GetFigmaFrameSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
-  fileKey: z.string().describe("Figma file key (from URL: figma.com/file/FILE_KEY/...)"),
-  nodeId: z.string().describe("Figma node ID (frame/component ID)"),
-  scale: z.number().min(0.1).max(4).optional().describe("Export scale (0.1-4, default: 2)"),
-  format: z.enum(['png', 'jpg', 'svg']).optional().describe("Export format (default: png)")
-});
-
-const CompareFigmaToElementSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
-  fileKey: z.string().describe("Figma file key"),
-  nodeId: z.string().describe("Figma frame/component ID"),
-  selector: z.string().describe("CSS selector for page element"),
-  threshold: z.number().min(0).max(1).optional().describe("Difference threshold (0-1, default: 0.05)"),
-  figmaScale: z.number().min(0.1).max(4).optional().describe("Figma export scale (default: 2)")
-});
-
-const GetFigmaSpecsSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
-  fileKey: z.string().describe("Figma file key"),
-  nodeId: z.string().describe("Figma frame/component ID")
-});
-
-const ParseFigmaUrlSchema = z.object({
-  url: z.string().describe("Full Figma URL or fileKey")
-});
-
-const ListFigmaPagesSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
-  fileKey: z.string().describe("Figma file key or full Figma URL")
-});
-
-const SearchFigmaFramesSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
-  fileKey: z.string().describe("Figma file key or full Figma URL"),
-  searchQuery: z.string().describe("Search query")
-});
-
-const GetFigmaComponentsSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
-  fileKey: z.string().describe("Figma file key or full Figma URL")
-});
-
-const GetFigmaStylesSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
-  fileKey: z.string().describe("Figma file key or full Figma URL")
-});
-
-const GetFigmaColorPaletteSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
-  fileKey: z.string().describe("Figma file key or full Figma URL")
-});
-
-// New AI optimization tools schemas
-const SmartFindElementSchema = z.object({
-  description: z.string().describe("Natural language description of element to find (e.g., 'login button', 'email field')"),
-  maxResults: z.number().min(1).max(20).optional().describe("Maximum number of candidates to return (default: 5)"),
-  action: z.object({
-    type: z.enum(['click', 'type', 'scrollTo', 'screenshot', 'hover', 'setStyles']).describe("Action to perform on the best match"),
-    text: z.string().optional().describe("Text to type (required for 'type' action)"),
-    styles: z.array(z.object({
-      name: z.string(),
-      value: z.string()
-    })).optional().describe("Styles to apply (required for 'setStyles' action)"),
-    screenshot: z.boolean().optional().describe("Capture screenshot after action (default: false)"),
-    waitAfter: z.number().optional().describe("Wait time in ms after action"),
-  }).optional().describe("Optional action to perform on the best matching element"),
-});
-
-const AnalyzePageSchema = z.object({
-  refresh: z.boolean().optional().describe("Force refresh of cached analysis (default: false)"),
-});
-
-const GetAllInteractiveElementsSchema = z.object({
-  includeHidden: z.boolean().optional().describe("Include hidden elements (default: false)"),
-});
-
-const FindElementsByTextSchema = z.object({
-  text: z.string().describe("Text to search for in elements"),
-  exact: z.boolean().optional().describe("Exact match only (default: false)"),
-  caseSensitive: z.boolean().optional().describe("Case sensitive search (default: false)"),
-  action: z.object({
-    type: z.enum(['click', 'type', 'scrollTo', 'screenshot', 'hover', 'setStyles']).describe("Action to perform on the first match"),
-    text: z.string().optional().describe("Text to type (required for 'type' action)"),
-    styles: z.array(z.object({
-      name: z.string(),
-      value: z.string()
-    })).optional().describe("Styles to apply (required for 'setStyles' action)"),
-    screenshot: z.boolean().optional().describe("Capture screenshot after action (default: false)"),
-    waitAfter: z.number().optional().describe("Wait time in ms after action"),
-  }).optional().describe("Optional action to perform on the first matching element"),
-});
-
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
-    tools: [
-      {
-        name: "ping",
-        description: "Simple ping-pong tool for testing. Returns 'pong' with optional message.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            message: { type: "string", description: "Optional message to include in response" },
-          },
-        },
-      },
-      {
-        name: "openBrowser",
-        description: "Open browser and navigate to URL. Window persists for further interactions.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            url: { type: "string", description: "URL to navigate to" },
-          },
-          required: ["url"],
-        },
-      },
-      {
-        name: "click",
-        description: "Click element. Waits for animations. Optional screenshot parameter.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector" },
-            waitAfter: { type: "number", description: "Wait ms (default: 1500)" },
-            screenshot: { type: "boolean", description: "Screenshot (default: false)" },
-            timeout: { type: "number", description: "Max wait ms (default: 30000)" },
-          },
-          required: ["selector"],
-        },
-      },
-      {
-        name: "type",
-        description: "Type text into input field. Optional clear and typing delay.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector" },
-            text: { type: "string", description: "Text to type" },
-            delay: { type: "number", description: "Keystroke delay ms (default: 0)" },
-            clearFirst: { type: "boolean", description: "Clear first (default: true)" },
-          },
-          required: ["selector", "text"],
-        },
-      },
-      {
-        name: "getElement",
-        description: "Get HTML markup of element. Prefer analyzePage for better efficiency.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector (default: body)" },
-          },
-        },
-      },
-      {
-        name: "getComputedCss",
-        description: "Get computed CSS styles for element. For layout debugging and responsive design.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector (default: body)" },
-            category: {
-              type: "string",
-              enum: ["all", "layout", "typography", "colors", "visual"],
-              description: "Filter: 'layout', 'typography', 'colors', 'visual', 'all' (default)"
-            },
-            properties: {
-              type: "array",
-              items: { type: "string" },
-              description: "Specific properties. Overrides category."
-            },
-            includeDefaults: {
-              type: "boolean",
-              description: "Include defaults (default: false)"
-            },
-          },
-        },
-      },
-      {
-        name: "getBoxModel",
-        description: "Get element box model: dimensions, positioning, margins, padding, borders.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector" },
-          },
-          required: ["selector"],
-        },
-      },
-      {
-        name: "screenshot",
-        description: "Capture element image (15-25k tokens). For visual comparison. Use analyzePage for form data/validation (2-5k tokens).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector" },
-            padding: { type: "number", description: "Padding px (default: 0)" },
-            maxWidth: { type: "number", description: "Max width px (default: 1024, null=original)" },
-            maxHeight: { type: "number", description: "Max height px (default: 8000, null=original)" },
-            quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality (default: 80)" },
-            format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Format (default: auto)" },
-          },
-          required: ["selector"],
-        },
-      },
-      {
-        name: "saveScreenshot",
-        description: "Save screenshot to file without returning in context. Auto-scales and compresses. Use maxWidth: null and format: 'png' for original quality.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector" },
-            filePath: { type: "string", description: "Save path (extension auto-adjusted)" },
-            padding: { type: "number", description: "Padding px (default: 0)" },
-            maxWidth: { type: "number", description: "Max width px (default: 1024, null=original)" },
-            maxHeight: { type: "number", description: "Max height px (default: 8000, null=original)" },
-            quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality (default: 80)" },
-            format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Format (default: auto)" },
-          },
-          required: ["selector", "filePath"],
-        },
-      },
-      {
-        name: "scrollTo",
-        description: "Scroll to element. For lazy loading and visibility testing.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector" },
-            behavior: { type: "string", enum: ["auto", "smooth"], description: "Behavior (default: auto)" },
-          },
-          required: ["selector"],
-        },
-      },
-      {
-        name: "waitForElement",
-        description: "Wait for element to appear. For dynamic content and lazy-loaded elements.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector" },
-            timeout: { type: "number", description: "Max wait ms (default: 5000)" },
-            visible: { type: "boolean", description: "Wait for visible (default: true)" },
-          },
-          required: ["selector"],
-        },
-      },
-      {
-        name: "executeScript",
-        description: "Execute JavaScript. Use only when specialized tools insufficient. Prefer analyzePage or findElementsByText.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            script: { type: "string", description: "JavaScript code" },
-            waitAfter: { type: "number", description: "Wait ms (default: 500)" },
-            screenshot: { type: "boolean", description: "Screenshot (default: false)" },
-            timeout: { type: "number", description: "Max wait ms (default: 30000)" },
-          },
-          required: ["script"],
-        },
-      },
-      {
-        name: "getConsoleLogs",
-        description: "Get browser console messages. For debugging JS errors and tracking behavior.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            types: { type: "array", items: { type: "string", enum: ["log", "warn", "error", "info", "debug", "verbose", "warning"] }, description: "Filter types (default: all)" },
-            clear: { type: "boolean", description: "Clear after read (default: false)" },
-          },
-        },
-      },
-      {
-        name: "listNetworkRequests",
-        description: "List network requests (method, URL, status). Use getNetworkRequest for details. Supports pagination.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter types (default: Fetch, XHR)" },
-            status: { type: "string", enum: ["pending", "completed", "failed", "all"], description: "Filter status (default: all)" },
-            limit: { type: "number", description: "Max requests (default: 50)" },
-            offset: { type: "number", description: "Skip requests (default: 0)" },
-            clear: { type: "boolean", description: "Clear after read (default: false)" },
-          },
-        },
-      },
-      {
-        name: "getNetworkRequest",
-        description: "Get network request details (headers, payload, response). Use requestId from listNetworkRequests.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            requestId: { type: "string", description: "Request ID" },
-          },
-          required: ["requestId"],
-        },
-      },
-      {
-        name: "filterNetworkRequests",
-        description: "Filter network requests by URL pattern. Returns matching requests with full details.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            urlPattern: { type: "string", description: "URL pattern (regex or partial)" },
-            types: { type: "array", items: { type: "string", enum: ["Document", "Stylesheet", "Image", "Media", "Font", "Script", "XHR", "Fetch", "WebSocket", "Other"] }, description: "Filter types (default: Fetch, XHR)" },
-            clear: { type: "boolean", description: "Clear after read (default: false)" },
-          },
-          required: ["urlPattern"],
-        },
-      },
-      {
-        name: "hover",
-        description: "Hover over element. For testing hover effects, tooltips, and CSS :hover states.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector" },
-          },
-          required: ["selector"],
-        },
-      },
-      {
-        name: "setStyles",
-        description: "Apply inline CSS to element. For live editing and prototyping.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector" },
-            styles: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  name: { type: "string", description: "Property name" },
-                  value: { type: "string", description: "Property value" },
-                },
-                required: ["name", "value"],
-              },
-              description: "CSS property name-value pairs",
-            },
-          },
-          required: ["selector", "styles"],
-        },
-      },
-      {
-        name: "setViewport",
-        description: "Change viewport dimensions. Test responsive layouts across screen sizes.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            width: { type: "number", minimum: 320, maximum: 4000, description: "Width px" },
-            height: { type: "number", minimum: 200, maximum: 3000, description: "Height px" },
-            deviceScaleFactor: { type: "number", minimum: 0.5, maximum: 3, description: "Pixel ratio (default: 1)" },
-          },
-          required: ["width", "height"],
-        },
-      },
-      {
-        name: "getViewport",
-        description: "Get viewport size and pixel ratio. For responsive design testing.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "navigateTo",
-        description: "Navigate to new URL. Reuses browser instance.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            url: { type: "string", description: "URL to navigate to" },
-            waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle0", "networkidle2"], description: "Wait event (default: networkidle2)" },
-          },
-          required: ["url"],
-        },
-      },
-      {
-        name: "getFigmaFrame",
-        description: "Export Figma frame as PNG. Requires API token and file/node IDs.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
-            fileKey: { type: "string", description: "File key" },
-            nodeId: { type: "string", description: "Frame/component ID" },
-            scale: { type: "number", minimum: 0.1, maximum: 4, description: "Scale (default: 2)" },
-            format: { type: "string", enum: ["png", "jpg", "svg"], description: "Format (default: png)" },
-          },
-          required: ["fileKey", "nodeId"],
-        },
-      },
-      {
-        name: "compareFigmaToElement",
-        description: "Compare Figma design with browser element. Pixel-perfect validation.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
-            fileKey: { type: "string", description: "File key" },
-            nodeId: { type: "string", description: "Frame/component ID" },
-            selector: { type: "string", description: "CSS selector" },
-            threshold: { type: "number", minimum: 0, maximum: 1, description: "Diff threshold (default: 0.05)" },
-            figmaScale: { type: "number", minimum: 0.1, maximum: 4, description: "Scale (default: 2)" },
-          },
-          required: ["fileKey", "nodeId", "selector"],
-        },
-      },
-      {
-        name: "getFigmaSpecs",
-        description: "Extract design specs from Figma: colors, fonts, dimensions, spacing.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
-            fileKey: { type: "string", description: "File key" },
-            nodeId: { type: "string", description: "Frame/component ID" },
-          },
-          required: ["fileKey", "nodeId"],
-        },
-      },
-      {
-        name: "parseFigmaUrl",
-        description: "Parse Figma URL to extract fileKey and nodeId.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            url: { type: "string", description: "Figma URL or fileKey" },
-          },
-          required: ["url"],
-        },
-      },
-      {
-        name: "listFigmaPages",
-        description: "Get file structure: all pages and frames. Use first to discover file contents.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
-            fileKey: { type: "string", description: "File key or URL" },
-          },
-          required: ["fileKey"],
-        },
-      },
-      {
-        name: "searchFigmaFrames",
-        description: "Search frames/components by name. Case-insensitive across all pages.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
-            fileKey: { type: "string", description: "File key or URL" },
-            searchQuery: { type: "string", description: "Search query" },
-          },
-          required: ["fileKey", "searchQuery"],
-        },
-      },
-      {
-        name: "getFigmaComponents",
-        description: "Get all components from file (Design System). For extracting design system.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
-            fileKey: { type: "string", description: "File key or URL" },
-          },
-          required: ["fileKey"],
-        },
-      },
-      {
-        name: "getFigmaStyles",
-        description: "Get all styles: color, text, effect, grid. For extracting design tokens.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
-            fileKey: { type: "string", description: "File key or URL" },
-          },
-          required: ["fileKey"],
-        },
-      },
-      {
-        name: "getFigmaColorPalette",
-        description: "Extract color palette. Returns unique colors with hex, rgba, usage count.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
-            fileKey: { type: "string", description: "File key or URL" },
-          },
-          required: ["fileKey"],
-        },
-      },
-      {
-        name: "smartFindElement",
-        description: "Find elements with natural language. Returns ranked candidates. Prefer analyzePage for better performance.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            description: { type: "string", description: "Natural language description" },
-            maxResults: { type: "number", minimum: 1, maximum: 20, description: "Max candidates (default: 5)" },
-            action: {
-              type: "object",
-              properties: {
-                type: { type: "string", enum: ["click", "type", "scrollTo", "screenshot", "hover", "setStyles"], description: "Action type" },
-                text: { type: "string", description: "Text for 'type'" },
-                styles: { type: "array", items: { type: "object", properties: { name: { type: "string" }, value: { type: "string" } } }, description: "Styles for 'setStyles'" },
-                screenshot: { type: "boolean", description: "Screenshot (default: false)" },
-                waitAfter: { type: "number", description: "Wait ms" },
-              },
-              required: ["type"],
-              description: "Optional action on element",
-            },
-          },
-          required: ["description"],
-        },
-      },
-      {
-        name: "analyzePage",
-        description: "Get page state: forms, inputs, buttons, links with values. Use refresh:true after interactions. Cached per URL. 2-5k tokens vs screenshot 15-25k.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            refresh: { type: "boolean", description: "Refresh cache (default: false)" },
-          },
-        },
-      },
-      {
-        name: "getAllInteractiveElements",
-        description: "Get all interactive elements with selectors. For understanding available actions.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            includeHidden: { type: "boolean", description: "Include hidden (default: false)" },
-          },
-        },
-      },
-      {
-        name: "findElementsByText",
-        description: "Find elements by text. Returns elements with selectors. Optional actions on first match.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            text: { type: "string", description: "Search text" },
-            exact: { type: "boolean", description: "Exact match (default: false)" },
-            caseSensitive: { type: "boolean", description: "Case sensitive (default: false)" },
-            action: {
-              type: "object",
-              properties: {
-                type: { type: "string", enum: ["click", "type", "scrollTo", "screenshot", "hover", "setStyles"], description: "Action type" },
-                text: { type: "string", description: "Text for 'type'" },
-                styles: { type: "array", items: { type: "object", properties: { name: { type: "string" }, value: { type: "string" } } }, description: "Styles for 'setStyles'" },
-                screenshot: { type: "boolean", description: "Screenshot (default: false)" },
-                waitAfter: { type: "number", description: "Wait ms" },
-              },
-              required: ["type"],
-              description: "Optional action on first match",
-            },
-          },
-          required: ["text"],
-        },
-      },
-      {
-        name: "enableRecorder",
-        description: "Inject recorder UI widget. Visual recording with start/stop/save controls. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "executeScenario",
-        description: "Execute recorded scenario by name. Runs actions with dependency resolution. Scenarios are organized by domain in ~/.config/chrometools-mcp/projects/{domain}/scenarios/. If multiple scenarios have the same name across different domains, specify projectId to disambiguate.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "Scenario name" },
-            projectId: { type: "string", description: "Optional: Project ID (domain) to disambiguate scenarios with same name. Examples: 'google', 'localhost-3000'" },
-            parameters: { type: "object", description: "Execution parameters" },
-            executeDependencies: { type: "boolean", description: "Execute dependencies (default: true)" },
-          },
-          required: ["name"],
-        },
-      },
-      {
-        name: "listScenarios",
-        description: "List all scenarios with metadata. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            allProjects: { type: "boolean", description: "List scenarios from all projects (default: false, shows only current project)" },
-          },
-        },
-      },
-      {
-        name: "searchScenarios",
-        description: "Search scenarios by text or tags. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            text: { type: "string", description: "Search text" },
-            tags: { type: "array", items: { type: "string" }, description: "Filter tags" },
-            allProjects: { type: "boolean", description: "Search in all projects (default: false, searches only current project)" },
-          },
-        },
-      },
-      {
-        name: "getScenarioInfo",
-        description: "Get scenario details: actions, parameters, dependencies. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "Scenario name" },
-            includeSecrets: { type: "boolean", description: "Include secrets (default: false)" },
-          },
-          required: ["name"],
-        },
-      },
-      {
-        name: "deleteScenario",
-        description: "Delete scenario and secrets. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "Scenario name" },
-          },
-          required: ["name"],
-        },
-      },
-      {
-        name: "exportScenarioAsCode",
-        description: "Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS modules, styled-components). Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            scenarioName: {
-              type: "string",
-              description: "Name of scenario to export"
-            },
-            language: {
-              type: "string",
-              enum: ["playwright-typescript", "playwright-python", "selenium-python", "selenium-java"],
-              description: "Target test framework and language"
-            },
-            cleanSelectors: {
-              type: "boolean",
-              description: "Remove unstable CSS classes (default: true)"
-            },
-            includeComments: {
-              type: "boolean",
-              description: "Include descriptive comments (default: true)"
-            },
-          },
-          required: ["scenarioName", "language"],
-        },
-      },
-    ],
+    tools: toolDefinitions,
   };
 });
 
-// Helper function to execute actions on elements
-async function executeElementAction(page, selector, action) {
-  if (!action || !action.type) {
-    return null;
-  }
 
-  const element = await page.$(selector);
-  if (!element) {
-    throw new Error(`Element not found for action: ${selector}`);
-  }
 
-  const result = {
-    action: action.type,
-    selector,
-    success: true,
-  };
-
-  switch (action.type) {
-    case 'click':
-      await element.click();
-      await new Promise(resolve => setTimeout(resolve, action.waitAfter || 1500));
-      result.message = `Clicked on ${selector}`;
-
-      if (action.screenshot) {
-        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
-        result.screenshot = screenshot;
-      }
-      break;
-
-    case 'type':
-      if (!action.text) {
-        throw new Error('text parameter is required for type action');
-      }
-      await element.click({ clickCount: 3 });
-      await page.keyboard.press('Backspace');
-      await element.type(action.text, { delay: 0 });
-      await new Promise(resolve => setTimeout(resolve, action.waitAfter || 500));
-      result.message = `Typed "${action.text}" into ${selector}`;
-
-      if (action.screenshot) {
-        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
-        result.screenshot = screenshot;
-      }
-      break;
-
-    case 'scrollTo':
-      await element.scrollIntoView({ behavior: 'auto' });
-      await new Promise(resolve => setTimeout(resolve, action.waitAfter || 300));
-      const position = await page.evaluate(() => ({
-        x: window.scrollX,
-        y: window.scrollY
-      }));
-      result.message = `Scrolled to ${selector}`;
-      result.position = position;
-      break;
-
-    case 'screenshot':
-      const box = await element.boundingBox();
-      if (!box) {
-        throw new Error(`Element not visible: ${selector}`);
-      }
-      const clip = {
-        x: Math.max(box.x, 0),
-        y: Math.max(box.y, 0),
-        width: Math.max(box.width, 1),
-        height: Math.max(box.height, 1)
-      };
-      const screenshot = await page.screenshot({ clip, encoding: 'base64' });
-      result.message = `Captured screenshot of ${selector}`;
-      result.screenshot = screenshot;
-      break;
-
-    case 'hover':
-      await element.hover();
-      await new Promise(resolve => setTimeout(resolve, action.waitAfter || 100));
-      result.message = `Hovered over ${selector}`;
-
-      if (action.screenshot) {
-        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
-        result.screenshot = screenshot;
-      }
-      break;
-
-    case 'setStyles':
-      if (!action.styles || !Array.isArray(action.styles)) {
-        throw new Error('styles parameter is required for setStyles action');
-      }
-      const stylesObject = {};
-      for (const style of action.styles) {
-        stylesObject[style.name] = style.value;
-      }
-      await page.evaluate((sel, styles) => {
-        const el = document.querySelector(sel);
-        if (el) {
-          Object.entries(styles).forEach(([key, value]) => {
-            el.style.setProperty(key, value);
-          });
-        }
-      }, selector, stylesObject);
-      await new Promise(resolve => setTimeout(resolve, action.waitAfter || 100));
-      result.message = `Applied styles to ${selector}`;
-      result.styles = stylesObject;
-
-      if (action.screenshot) {
-        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
-        result.screenshot = screenshot;
-      }
-      break;
-
-    default:
-      throw new Error(`Unknown action type: ${action.type}`);
-  }
-
-  return result;
+// Wrapper to add timeout protection for all tool calls
+async function executeToolWithTimeout(toolName, toolFunction, timeoutMs = 120000) {
+  return Promise.race([
+    toolFunction(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Tool '${toolName}' timeout after ${timeoutMs/1000}s`)), timeoutMs)
+    )
+  ]);
 }
 
 // Handle tool calls
@@ -1878,8 +195,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
+    // Execute with timeout wrapper (2 minutes default, 5 minutes for scenario execution)
+    const toolTimeout = name === 'executeScenario' ? 360000 : 120000; // 6 min for scenarios, 2 min for others
+
+    return await executeToolWithTimeout(name, async () => {
+      return await executeToolInternal(name, args);
+    }, toolTimeout);
+  } catch (error) {
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: false,
+          error: error.message,
+          tool: name
+        }, null, 2)
+      }],
+      isError: true,
+    };
+  }
+});
+
+// Internal tool execution function
+async function executeToolInternal(name, args) {
+  try {
     if (name === "ping") {
-      const validatedArgs = PingSchema.parse(args);
+      const validatedArgs = schemas.PingSchema.parse(args);
       const responseMessage = validatedArgs.message
         ? `pong: ${validatedArgs.message}`
         : "pong";
@@ -1895,7 +236,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "openBrowser") {
-      const validatedArgs = OpenBrowserSchema.parse(args);
+      const validatedArgs = schemas.OpenBrowserSchema.parse(args);
       const page = await getOrCreatePage(validatedArgs.url);
       const title = await page.title();
 
@@ -1913,7 +254,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "click") {
-      const validatedArgs = ClickSchema.parse(args);
+      const validatedArgs = schemas.ClickSchema.parse(args);
       const page = await getLastOpenPage();
       const timeout = validatedArgs.timeout || 30000;
 
@@ -1961,7 +302,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "type") {
-      const validatedArgs = TypeSchema.parse(args);
+      const validatedArgs = schemas.TypeSchema.parse(args);
       const page = await getLastOpenPage();
 
       const element = await page.$(validatedArgs.selector);
@@ -1985,7 +326,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getElement") {
-      const validatedArgs = GetElementSchema.parse(args);
+      const validatedArgs = schemas.GetElementSchema.parse(args);
       const page = await getLastOpenPage();
 
       const client = await page.target().createCDPSession();
@@ -2011,7 +352,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getComputedCss") {
-      const validatedArgs = GetComputedCssSchema.parse(args);
+      const validatedArgs = schemas.GetComputedCssSchema.parse(args);
       const page = await getLastOpenPage();
 
       const client = await page.target().createCDPSession();
@@ -2058,7 +399,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getBoxModel") {
-      const validatedArgs = GetBoxModelSchema.parse(args);
+      const validatedArgs = schemas.GetBoxModelSchema.parse(args);
       const page = await getLastOpenPage();
 
       const client = await page.target().createCDPSession();
@@ -2096,7 +437,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "screenshot") {
-      const validatedArgs = ScreenshotSchema.parse(args);
+      const validatedArgs = schemas.ScreenshotSchema.parse(args);
       const page = await getLastOpenPage();
 
       const element = await page.$(validatedArgs.selector);
@@ -2152,7 +493,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "saveScreenshot") {
-      const validatedArgs = SaveScreenshotSchema.parse(args);
+      const validatedArgs = schemas.SaveScreenshotSchema.parse(args);
       const page = await getLastOpenPage();
 
       const element = await page.$(validatedArgs.selector);
@@ -2209,7 +550,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "scrollTo") {
-      const validatedArgs = ScrollToSchema.parse(args);
+      const validatedArgs = schemas.ScrollToSchema.parse(args);
       const page = await getLastOpenPage();
 
       // Check if element exists
@@ -2242,7 +583,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "waitForElement") {
-      const validatedArgs = WaitForElementSchema.parse(args);
+      const validatedArgs = schemas.WaitForElementSchema.parse(args);
       const page = await getLastOpenPage();
       const timeout = validatedArgs.timeout || 5000;
       const waitForVisible = validatedArgs.visible !== false;
@@ -2287,7 +628,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "executeScript") {
-      const validatedArgs = ExecuteScriptSchema.parse(args);
+      const validatedArgs = schemas.ExecuteScriptSchema.parse(args);
       const page = await getLastOpenPage();
       const timeout = validatedArgs.timeout || 30000;
 
@@ -2332,7 +673,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getConsoleLogs") {
-      const validatedArgs = GetConsoleLogsSchema.parse(args);
+      const validatedArgs = schemas.GetConsoleLogsSchema.parse(args);
 
       let logs = consoleLogs;
 
@@ -2365,7 +706,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // Tool 1: listNetworkRequests - compact summary
     if (name === "listNetworkRequests") {
-      const validatedArgs = ListNetworkRequestsSchema.parse(args);
+      const validatedArgs = schemas.ListNetworkRequestsSchema.parse(args);
 
       let requests = networkRequests;
 
@@ -2417,7 +758,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // Tool 2: getNetworkRequest - full details of single request
     if (name === "getNetworkRequest") {
-      const validatedArgs = GetNetworkRequestSchema.parse(args);
+      const validatedArgs = schemas.GetNetworkRequestSchema.parse(args);
 
       const req = networkRequests.find(r => r.requestId === validatedArgs.requestId);
       if (!req) {
@@ -2465,7 +806,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // Tool 3: filterNetworkRequests - filter by URL pattern with full details
     if (name === "filterNetworkRequests") {
-      const validatedArgs = FilterNetworkRequestsSchema.parse(args);
+      const validatedArgs = schemas.FilterNetworkRequestsSchema.parse(args);
 
       let requests = networkRequests;
 
@@ -2530,7 +871,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "hover") {
-      const validatedArgs = HoverSchema.parse(args);
+      const validatedArgs = schemas.HoverSchema.parse(args);
       const page = await getLastOpenPage();
 
       const element = await page.$(validatedArgs.selector);
@@ -2550,7 +891,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "setStyles") {
-      const validatedArgs = SetStylesSchema.parse(args);
+      const validatedArgs = schemas.SetStylesSchema.parse(args);
       const page = await getLastOpenPage();
 
       const stylesObject = {};
@@ -2580,7 +921,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "setViewport") {
-      const validatedArgs = SetViewportSchema.parse(args);
+      const validatedArgs = schemas.SetViewportSchema.parse(args);
       const page = await getLastOpenPage();
 
       await page.setViewport({
@@ -2623,7 +964,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "navigateTo") {
-      const validatedArgs = NavigateToSchema.parse(args);
+      const validatedArgs = schemas.NavigateToSchema.parse(args);
       const page = await getLastOpenPage();
 
       // Navigate to the new URL (always navigate, don't use cache)
@@ -2644,7 +985,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // Figma tools
     if (name === "getFigmaFrame") {
-      const validatedArgs = GetFigmaFrameSchema.parse(args);
+      const validatedArgs = schemas.GetFigmaFrameSchema.parse(args);
       const token = validatedArgs.figmaToken || FIGMA_TOKEN;
       if (!token) {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
@@ -2722,7 +1063,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "compareFigmaToElement") {
-      const validatedArgs = CompareFigmaToElementSchema.parse(args);
+      const validatedArgs = schemas.CompareFigmaToElementSchema.parse(args);
       const token = validatedArgs.figmaToken || FIGMA_TOKEN;
       if (!token) {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
@@ -2853,7 +1194,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getFigmaSpecs") {
-      const validatedArgs = GetFigmaSpecsSchema.parse(args);
+      const validatedArgs = schemas.GetFigmaSpecsSchema.parse(args);
       const token = validatedArgs.figmaToken || FIGMA_TOKEN;
       if (!token) {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
@@ -2995,7 +1336,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "parseFigmaUrl") {
-      const validatedArgs = ParseFigmaUrlSchema.parse(args);
+      const validatedArgs = schemas.ParseFigmaUrlSchema.parse(args);
       const result = parseFigmaUrl(validatedArgs.url);
 
       return {
@@ -3006,7 +1347,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "listFigmaPages") {
-      const validatedArgs = ListFigmaPagesSchema.parse(args);
+      const validatedArgs = schemas.ListFigmaPagesSchema.parse(args);
       const token = validatedArgs.figmaToken || FIGMA_TOKEN;
       if (!token) {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
@@ -3026,7 +1367,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "searchFigmaFrames") {
-      const validatedArgs = SearchFigmaFramesSchema.parse(args);
+      const validatedArgs = schemas.SearchFigmaFramesSchema.parse(args);
       const token = validatedArgs.figmaToken || FIGMA_TOKEN;
       if (!token) {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
@@ -3046,7 +1387,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getFigmaComponents") {
-      const validatedArgs = GetFigmaComponentsSchema.parse(args);
+      const validatedArgs = schemas.GetFigmaComponentsSchema.parse(args);
       const token = validatedArgs.figmaToken || FIGMA_TOKEN;
       if (!token) {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
@@ -3066,7 +1407,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getFigmaStyles") {
-      const validatedArgs = GetFigmaStylesSchema.parse(args);
+      const validatedArgs = schemas.GetFigmaStylesSchema.parse(args);
       const token = validatedArgs.figmaToken || FIGMA_TOKEN;
       if (!token) {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
@@ -3086,7 +1427,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getFigmaColorPalette") {
-      const validatedArgs = GetFigmaColorPaletteSchema.parse(args);
+      const validatedArgs = schemas.GetFigmaColorPaletteSchema.parse(args);
       const token = validatedArgs.figmaToken || FIGMA_TOKEN;
       if (!token) {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
@@ -3107,7 +1448,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // New AI optimization tools
     if (name === "smartFindElement") {
-      const validatedArgs = SmartFindElementSchema.parse(args);
+      const validatedArgs = schemas.SmartFindElementSchema.parse(args);
       const page = await getLastOpenPage();
       const maxResults = validatedArgs.maxResults || 5;
 
@@ -3220,7 +1561,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "analyzePage") {
-      const validatedArgs = AnalyzePageSchema.parse(args);
+      const validatedArgs = schemas.AnalyzePageSchema.parse(args);
       const page = await getLastOpenPage();
       const pageUrl = page.url();
 
@@ -3376,7 +1717,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "getAllInteractiveElements") {
-      const validatedArgs = GetAllInteractiveElementsSchema.parse(args);
+      const validatedArgs = schemas.GetAllInteractiveElementsSchema.parse(args);
       const page = await getLastOpenPage();
 
       const elements = await page.evaluate((includeHidden, utilsCode) => {
@@ -3424,7 +1765,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "findElementsByText") {
-      const validatedArgs = FindElementsByTextSchema.parse(args);
+      const validatedArgs = schemas.FindElementsByTextSchema.parse(args);
       const page = await getLastOpenPage();
 
       const elements = await page.evaluate((text, exact, caseSensitive, utilsCode) => {
@@ -3578,14 +1919,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: 'text',
               text: JSON.stringify({
                 success: false,
-                error: `Scenario "${args.name}" has no entryUrl. Cannot auto-open browser.`
+                error: `Scenario "${args.name}" has no entryUrl. Cannot auto-open browser. Please open a browser first or ensure scenario has entryUrl.`
               }, null, 2)
             }]
           };
         }
 
-        // Auto-open browser at scenario's entry URL
-        page = await getOrCreatePage(entryUrl);
+        // Auto-open browser at scenario's entry URL with timeout
+        try {
+          page = await Promise.race([
+            getOrCreatePage(entryUrl),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Browser open timeout')), 30000)
+            )
+          ]);
+        } catch (openError) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: `Failed to open browser: ${openError.message}`
+              }, null, 2)
+            }]
+          };
+        }
       }
 
       const options = {};
@@ -3600,7 +1958,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         options.projectId = args.projectId;
       }
 
-      const result = await executeScenario(args.name, page, args.parameters || {}, options);
+      // Execute scenario with timeout (5 minutes max)
+      let result;
+      try {
+        result = await Promise.race([
+          executeScenario(args.name, page, args.parameters || {}, options),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Scenario execution timeout (5 minutes)')), 300000)
+          )
+        ]);
+      } catch (executeError) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: `Scenario execution failed: ${executeError.message}`,
+              stack: executeError.stack
+            }, null, 2)
+          }]
+        };
+      }
 
       return {
         content: [{
@@ -3726,17 +2104,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       isError: true,
     };
   } catch (error) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Error: ${error.message}`,
-        },
-      ],
-      isError: true,
-    };
+    // Re-throw to be caught by outer executeToolWithTimeout wrapper
+    throw error;
   }
-});
+}
 
 // Start server
 async function main() {

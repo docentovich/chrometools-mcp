@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.1] - 2025-12-21
+
+### Fixed
+- **executeScenario Timeout Fix** - Prevents hanging when no browser tab is attached
+  - Auto-opens browser at scenario's entryUrl if no page is open
+  - Added timeout protection (1s) for page state checks to prevent hanging on `isClosed()`
+  - Added 30s timeout for browser opening operation
+  - Added 5min timeout for scenario execution with clear error messages
+  - Location: `browser/page-manager.js:255-290`, `index.js:1875-1955`
+
+- **URL Validation Fix** - Fixed false negative in scenario exit URL validation
+  - Added 500ms wait before URL check to allow navigation/redirects to complete
+  - Changed from `page.url()` to `page.evaluate(() => window.location.href)` for more reliable current URL
+  - Fixes issue where correct URL was reported as wrong due to timing
+  - Location: `recorder/scenario-executor.js:186-191`
+
+- **Global Timeout Protection** - All MCP tools now protected from hanging
+  - Added `executeToolWithTimeout()` wrapper for all tool calls
+  - Default timeout: 2 minutes for regular tools, 6 minutes for executeScenario
+  - Tools return clear error messages instead of hanging indefinitely
+  - Location: `index.js:183-217`
+
+### Changed
+- **Code Refactoring** - Reduced index.js from 3761 to 2093 lines (-44%)
+  - Extracted tool schemas to `server/tool-schemas.js` (34 schemas, 282 lines)
+  - Extracted tool definitions to `server/tool-definitions.js` (41 tools, 569 lines)
+  - Extracted browser management to `browser/browser-manager.js` (207 lines)
+  - Extracted page management to `browser/page-manager.js` (268 lines)
+  - Extracted image processing to `utils/image-processing.js` (254 lines)
+  - Extracted CSS utilities to `utils/css-utils.js` (163 lines)
+  - Extracted platform utilities to `utils/platform-utils.js` (63 lines)
+  - Better code organization and maintainability
+
 ## [2.1.0] - 2025-12-21
 
 ### Added

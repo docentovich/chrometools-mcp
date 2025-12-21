@@ -183,7 +183,11 @@ async function executeSingleScenario(scenario, page, params = {}, options = {}) 
 
     // Validate final URL if exitUrl is specified in metadata
     if (scenario.metadata?.exitUrl) {
-      const currentUrl = page.url();
+      // Wait a bit for any pending navigation/redirects to complete
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Get current URL from the page (more reliable than page.url() for recent navigation)
+      const currentUrl = await page.evaluate(() => window.location.href);
       const expectedUrl = scenario.metadata.exitUrl;
 
       // Normalize URLs for comparison (remove trailing slashes, fragments)
