@@ -14,7 +14,7 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
-  - [Recorder Tools](#6-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode
+  - [Recorder Tools](#6-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, generatePageObject
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
@@ -688,6 +688,61 @@ Export recorded scenario as executable test code for various frameworks. Automat
   - Emotion: `css-1a2b3c4d` → removed
   - Hash suffixes: `component_a1b2c3d` → removed
   - Prefers stable selectors: `data-testid`, `role`, `aria-label`, semantic attributes
+
+#### generatePageObject ⭐ **NEW**
+Generate Page Object Model (POM) class from current page structure. Analyzes page, extracts interactive elements, and generates framework-specific code with smart naming and helper methods.
+
+- **Parameters**:
+  - `className` (optional): Page Object class name (auto-generated from page title/URL if not provided)
+  - `framework` (optional): Target framework - `"playwright-typescript"` (default), `"playwright-python"`, `"selenium-python"`, `"selenium-java"`
+  - `includeComments` (optional): Include descriptive comments (default: true)
+  - `groupElements` (optional): Group elements by page sections (default: true)
+
+- **Features**:
+  - **Smart Selector Generation**: Prioritizes id > name > data-testid > unique class > CSS path
+  - **Intelligent Naming**: Auto-generates element names from labels, placeholders, text, attributes
+  - **Section Grouping**: Groups elements by semantic sections (header, nav, form, footer, main, etc.)
+  - **Helper Methods**: Auto-generates fill() and click() methods for common actions
+  - **Multi-Framework**: Supports Playwright (TS/Python) and Selenium (Python/Java)
+
+- **Use cases**:
+  - Generate POM classes for test automation
+  - Create maintainable test structure from existing pages
+  - Bootstrap test framework setup quickly
+  - Extract page structure for documentation
+
+- **Returns**: Page Object code with metadata (className, url, title, elementCount, framework)
+
+- **Example**:
+  ```javascript
+  // 1. Navigate to page
+  openBrowser({ url: "https://example.com/login" })
+
+  // 2. Generate Page Object
+  generatePageObject({
+    className: "LoginPage",
+    framework: "playwright-typescript",
+    includeComments: true,
+    groupElements: true
+  })
+
+  // Returns:
+  {
+    "success": true,
+    "className": "LoginPage",
+    "url": "https://example.com/login",
+    "title": "Login - Example Site",
+    "elementCount": 12,
+    "framework": "playwright-typescript",
+    "code": "import { Page, Locator } from '@playwright/test';\n\nexport class LoginPage {\n  readonly page: Page;\n  \n  /** Email input field */\n  readonly emailInput: Locator;\n  /** Password input field */\n  readonly passwordInput: Locator;\n  /** Login button */\n  readonly loginButton: Locator;\n  \n  constructor(page: Page) {\n    this.page = page;\n    this.emailInput = page.locator('#email');\n    this.passwordInput = page.locator('#password');\n    this.loginButton = page.locator('button[type=\"submit\"]');\n  }\n  \n  async goto() {\n    await this.page.goto('https://example.com/login');\n  }\n  \n  async fillEmailInput(text: string) {\n    await this.emailInput.fill(text);\n  }\n  \n  async fillPasswordInput(text: string) {\n    await this.passwordInput.fill(text);\n  }\n  \n  async clickLoginButton() {\n    await this.loginButton.click();\n  }\n}"
+  }
+  ```
+
+- **Supported Frameworks**:
+  - `playwright-typescript`: Playwright with TypeScript (locators, async/await, Page Object pattern)
+  - `playwright-python`: Playwright with Python (sync API, snake_case naming)
+  - `selenium-python`: Selenium with Python (WebDriver, explicit waits, By locators)
+  - `selenium-java`: Selenium with Java (WebDriver, Page Factory compatible)
 
 ---
 

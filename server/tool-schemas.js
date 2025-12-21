@@ -280,3 +280,10 @@ export const ExportScenarioAsCodeSchema = z.object({
   includeComments: z.boolean().optional().describe("Include descriptive comments (default: true)"),
   directory: z.string().optional().describe("Directory where scenarios are stored (optional)")
 });
+
+export const GeneratePageObjectSchema = z.object({
+  className: z.string().optional().describe("Page Object class name (optional, auto-generated from page title/URL if not provided)"),
+  framework: z.enum(['playwright-typescript', 'playwright-python', 'selenium-python', 'selenium-java']).optional().describe("Target test framework (default: playwright-typescript)"),
+  includeComments: z.boolean().optional().describe("Include descriptive comments in generated code (default: true)"),
+  groupElements: z.boolean().optional().describe("Group elements by page sections (default: true)")
+});

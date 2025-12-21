@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2025-12-21
+
+### Added
+- **Page Object Model (POM) Generator** - New `generatePageObject` MCP tool for automated Page Object creation
+  - Analyzes current page and extracts interactive elements (inputs, buttons, links, etc.)
+  - Smart selector generation: prioritizes id > name > data-testid > unique class > CSS path
+  - Auto-generates meaningful element names from labels, placeholders, text content
+  - Groups elements by semantic sections (header, nav, form, footer, etc.)
+  - Supports 4 frameworks: Playwright TypeScript/Python, Selenium Python/Java
+  - Generates helper methods automatically (fill/click methods for common actions)
+  - Example: `generatePageObject({ framework: 'playwright-typescript' })`
+  - Location: `recorder/page-object-generator.js`, `index.js:46,2098-2136`
+
+### Fixed
+- **Dependency Resolution with projectId** - Fixed collision errors when executing scenarios with dependencies
+  - Dependencies now correctly inherit parent scenario's projectId when not explicitly specified
+  - Explicit dependency projectId in metadata takes precedence over inherited value
+  - Fixes error: "Dependency 'test': Multiple scenarios named 'test' found"
+  - Location: `recorder/scenario-executor.js:63-119`
+
 ## [2.1.1] - 2025-12-21
 
 ### Fixed

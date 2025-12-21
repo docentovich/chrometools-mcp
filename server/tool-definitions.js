@@ -566,4 +566,30 @@ export const toolDefinitions = [
           required: ["scenarioName", "language"],
         },
       },
+      {
+        name: "generatePageObject",
+        description: "Generate Page Object Model (POM) class from current page analysis. Analyzes page structure, extracts interactive elements (inputs, buttons, links), groups them by sections (header, nav, form, etc.), and generates framework-specific code. Supports Playwright (TypeScript/Python) and Selenium (Python/Java). Auto-generates smart element names and helper methods.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            className: {
+              type: "string",
+              description: "Page Object class name (optional, auto-generated from page title/URL if not provided)"
+            },
+            framework: {
+              type: "string",
+              enum: ["playwright-typescript", "playwright-python", "selenium-python", "selenium-java"],
+              description: "Target test framework (default: playwright-typescript)"
+            },
+            includeComments: {
+              type: "boolean",
+              description: "Include descriptive comments in generated code (default: true)"
+            },
+            groupElements: {
+              type: "boolean",
+              description: "Group elements by page sections (default: true)"
+            },
+          },
+        },
+      },
 ];

@@ -43,6 +43,7 @@ import {generateClickHints, generateNavigationHints} from './utils/hints-generat
 import {injectRecorder} from './recorder/recorder-script.js';
 import {executeScenario} from './recorder/scenario-executor.js';
 import {deleteScenario, listScenarios, loadScenario, searchScenarios} from './recorder/scenario-storage.js';
+import {generatePageObject} from './recorder/page-object-generator.js';
 
 // Import Code Generators
 import {PlaywrightTypeScriptGenerator} from './utils/code-generators/playwright-typescript.js';
@@ -2092,6 +2093,46 @@ async function executeToolInternal(name, args) {
           text: code
         }]
       };
+    }
+
+    if (name === "generatePageObject") {
+      const page = await getLastOpenPage();
+
+      const options = {
+        className: args.className || null,
+        framework: args.framework || 'playwright-typescript',
+        includeComments: args.includeComments !== false,
+        groupElements: args.groupElements !== false
+      };
+
+      const result = await generatePageObject(page, options);
+
+      if (result.success) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              className: result.className,
+              url: result.url,
+              title: result.title,
+              elementCount: result.elementCount,
+              framework: result.framework,
+              code: result.code
+            }, null, 2)
+          }]
+        };
+      } else {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: result.error || 'Failed to generate Page Object'
+            }, null, 2)
+          }],
+          isError: true
+        };
+      }
     }
 
     return {

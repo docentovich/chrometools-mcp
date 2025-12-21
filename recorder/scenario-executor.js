@@ -60,31 +60,34 @@ export async function executeScenario(scenarioName, page, params = {}, options =
       return result;
     }
 
-    let chain = [scenarioName]; // Default: execute only the requested scenario
+    let chain = [{ name: scenarioName, projectId }]; // Default: execute only the requested scenario
 
     // Resolve and execute dependencies if enabled
     if (executeDependencies && initialScenario.metadata?.dependencies) {
       // Build a simplified index from metadata for dependency resolution
       // In the new system, we need to resolve cross-project dependencies
-      // For now, execute dependencies in order as specified
+      // Dependencies inherit parent's projectId unless they specify their own
       chain = [
-        ...initialScenario.metadata.dependencies.map(dep => dep.scenario),
-        scenarioName
+        ...initialScenario.metadata.dependencies.map(dep => ({
+          name: dep.scenario,
+          projectId: dep.projectId || projectId // Use explicit projectId or inherit from parent
+        })),
+        { name: scenarioName, projectId }
       ];
     }
 
     // Execute chain in order
-    for (const name of chain) {
-      const scenario = await loadScenario(name, true, null); // Load with secrets (dependencies may be in different projects)
+    for (const item of chain) {
+      const scenario = await loadScenario(item.name, true, item.projectId); // Load with secrets, using item's projectId
 
       if (!scenario) {
-        result.errors.push(`Scenario "${name}" not found`);
+        result.errors.push(`Scenario "${item.name}" not found`);
         return result;
       }
 
       // Check for name collision in dependencies
       if (scenario.collision) {
-        result.errors.push(`Dependency "${name}": ${scenario.message}`);
+        result.errors.push(`Dependency "${item.name}": ${scenario.message}`);
         result.availableProjectIds = scenario.availableProjectIds;
         return result;
       }
@@ -97,7 +100,7 @@ export async function executeScenario(scenarioName, page, params = {}, options =
             const shouldExecute = await checkDependencyCondition(dep.condition, context);
 
             if (!shouldExecute) {
-              debugLog(`Skipping scenario "${name}" due to condition`);
+              debugLog(`Skipping scenario "${item.name}" due to condition`);
               continue;
             }
           }
@@ -113,7 +116,7 @@ export async function executeScenario(scenarioName, page, params = {}, options =
         timeout
       });
 
-      result.executedScenarios.push(name);
+      result.executedScenarios.push(item.name);
 
       if (!scenarioResult.success) {
         result.errors.push(...scenarioResult.errors);
