@@ -2,6 +2,86 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.3.2] - 2025-12-25
+
+### Changed
+- **appendScenarioToFile** - Simplified architecture: MCP server no longer reads test files
+  - Removed `FileAppender.validateFile()` and `FileAppender.readFile()` calls
+  - Removed `generator.appendTest()` call - no longer merges content server-side
+  - Returns only test code (without imports) via `testCode` field
+  - Changed `action: "write_file"` → `action: "append_test"` (more accurate description)
+  - Claude Code now responsible for reading file, appending test, and writing back
+  - Clearer separation of concerns: MCP generates code, Claude Code handles file I/O
+  - Location: `index.js:2126-2215`
+
+## [2.3.1] - 2024-12-25
+
+### Fixed
+- **executeScenario** - Fixed scenario execution when current page URL doesn't match scenario's entryUrl
+  - Added automatic navigation to entryUrl before executing scenario
+  - Normalizes URLs for comparison (ignores trailing slashes, query params like `nr`, `redirect_ts`)
+  - Prevents timeout errors when scenario expects different page than currently open
+  - Example: If scenario recorded on `ya.ru` but current page is `ya.ru/search/`, automatically navigates to `ya.ru`
+  - Logs navigation events to console for debugging
+  - Location: `index.js:1951-1987`
+
+- **appendScenarioToFile** - Unified response format with exportScenarioAsCode for better Claude Code compatibility
+  - Changed `action: "append_to_file"` → `action: "write_file"` (clearer action)
+  - Changed `updatedContent` → `testCode` (same field name as exportScenarioAsCode)
+  - Added `content` field (duplicate of testCode for compatibility)
+  - Simplified instruction: single-step "Write the testCode..." instead of two-step "Read... then write..."
+  - Improved error message when file not found: now suggests using exportScenarioAsCode instead
+  - Location: `index.js:2191-2229`
+
+## [2.3.0] - 2024-12-25
+
+### Breaking Changes
+- **exportScenarioAsCode** - Removed append-to-file functionality to eliminate confusion
+  - **REMOVED** parameters: `appendToFile`, `testName`, `insertPosition`, `referenceTestName`
+  - Now exclusively creates NEW test files (returns JSON with `action: "create_new_file"`)
+  - Returns JSON format with `action`, `suggestedFileName`, `testCode`, `instruction` fields
+  - Claude Code writes files based on returned JSON (MCP server no longer writes files directly)
+  - Migration: Use new `appendScenarioToFile` tool instead of `appendToFile` parameter
+
+### Added
+- **appendScenarioToFile** - NEW tool for appending tests to existing files
+  - Parameters: `scenarioName`, `language`, `targetFile` (required)
+  - Optional: `testName`, `insertPosition`, `referenceTestName`, `cleanSelectors`, `includeComments`, `generatePageObject`, `pageObjectClassName`
+  - Returns JSON with `action: "append_to_file"`, `targetFile`, `updatedContent`, `instruction`
+  - Safely appends tests without overwriting existing tests
+  - Claude Code writes updated file content based on returned JSON
+  - Location: `index.js:2041-2186`, `server/tool-definitions.js:577-628`
+
+### Changed
+- **exportScenarioAsCode** - Changed return format from plain text to structured JSON
+  - Returns: `{action, suggestedFileName, testCode, instruction, pageObject?}`
+  - Suggests filename based on scenario name and language
+  - Includes clear instructions for Claude Code to create files
+  - Location: `index.js:2188-2357`, `server/tool-definitions.js:542-576`
+- **File writing responsibility** - Moved from MCP server to Claude Code
+  - MCP tools now return JSON with file content + instructions
+  - Claude Code uses Write tool to create/update files
+  - Eliminates risk of MCP server directly overwriting files
+
+### Documentation
+- **README.md** - Split exportScenarioAsCode documentation into two sections
+  - exportScenarioAsCode: For creating new test files
+  - appendScenarioToFile: For appending to existing files
+  - Updated tool count: 39+ → 40+ tools
+  - Added clear examples for both tools with JSON response formats
+  - Location: `README.md:11,17,652-806`
+
+## [2.2.1] - 2024-12-24
+
+### Improved
+- **exportScenarioAsCode** - Clarified tool description to prevent accidental test file overwrites
+  - Added explicit warning: default mode (without `appendToFile`) returns code for NEW file
+  - Emphasized that `appendToFile` parameter is **REQUIRED** to safely add tests to existing files
+  - Updated `appendToFile` parameter description to highlight safety aspect
+  - Updated `insertPosition` and `referenceTestName` descriptions to clarify they only work with `appendToFile`
+  - Added warning section in README.md documentation
+  - Location: `server/tool-definitions.js:544,575-589`, `README.md:667-669`
+
 ## [2.2.0] - 2025-12-21
 
 ### Added

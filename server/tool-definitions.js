@@ -541,7 +541,7 @@ export const toolDefinitions = [
       },
       {
         name: "exportScenarioAsCode",
-        description: "Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS modules, styled-components). Optionally generates Page Object class for the page. Can append to existing test files. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        description: "Export recorded scenario as executable test code for creating a NEW test file. Automatically cleans unstable selectors (CSS modules, styled-components). Optionally generates Page Object class. Returns JSON with code and suggested filename - Claude Code will create the file. To add tests to EXISTING files, use 'appendScenarioToFile' instead. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
         inputSchema: {
           type: "object",
           properties: {
@@ -570,9 +570,28 @@ export const toolDefinitions = [
               type: "string",
               description: "Page Object class name (optional, auto-generated if not provided)"
             },
-            appendToFile: {
+          },
+          required: ["scenarioName", "language"],
+        },
+      },
+      {
+        name: "appendScenarioToFile",
+        description: "Append recorded scenario as test code to an EXISTING test file. Automatically cleans unstable selectors (CSS modules, styled-components). Optionally generates Page Object class. Returns JSON with test code and target file - Claude Code will append to the file without overwriting existing tests. To create NEW test files, use 'exportScenarioAsCode' instead. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            scenarioName: {
               type: "string",
-              description: "Path to existing test file to append to (enables append mode)"
+              description: "Name of scenario to export"
+            },
+            language: {
+              type: "string",
+              enum: ["playwright-typescript", "playwright-python", "selenium-python", "selenium-java"],
+              description: "Target test framework and language"
+            },
+            targetFile: {
+              type: "string",
+              description: "Path to existing test file to append to (REQUIRED)"
             },
             testName: {
               type: "string",
@@ -581,14 +600,30 @@ export const toolDefinitions = [
             insertPosition: {
               type: "string",
               enum: ["end", "before", "after"],
-              description: "Where to insert test: 'end' (default), 'before', or 'after' a reference test"
+              description: "Where to insert test: 'end' (default - after all tests), 'before' (before reference test), or 'after' (after reference test)"
             },
             referenceTestName: {
               type: "string",
-              description: "Reference test name for 'before'/'after' insertion"
+              description: "Reference test name for 'before'/'after' insertion. Required when insertPosition is 'before' or 'after'"
+            },
+            cleanSelectors: {
+              type: "boolean",
+              description: "Remove unstable CSS classes (default: true)"
+            },
+            includeComments: {
+              type: "boolean",
+              description: "Include descriptive comments (default: true)"
+            },
+            generatePageObject: {
+              type: "boolean",
+              description: "Also generate Page Object class for the page (default: false)"
+            },
+            pageObjectClassName: {
+              type: "string",
+              description: "Page Object class name (optional, auto-generated if not provided)"
             },
           },
-          required: ["scenarioName", "language"],
+          required: ["scenarioName", "language", "targetFile"],
         },
       },
       {

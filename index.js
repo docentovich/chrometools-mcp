@@ -1948,6 +1948,44 @@ async function executeToolInternal(name, args) {
         }
       }
 
+      // Check if current page URL matches scenario's entryUrl
+      // If not, navigate to entryUrl before executing scenario
+      const entryUrl = scenario.metadata?.entryUrl;
+      if (entryUrl) {
+        try {
+          const currentUrl = page.url();
+
+          // Normalize URLs for comparison (remove trailing slashes, hash, some query params)
+          const normalizeUrl = (url) => {
+            try {
+              const urlObj = new URL(url);
+              // Keep protocol, hostname, pathname - ignore some query params like nr, redirect_ts
+              return `${urlObj.protocol}//${urlObj.hostname}${urlObj.pathname}`.replace(/\/$/, '');
+            } catch (e) {
+              return url;
+            }
+          };
+
+          const normalizedCurrent = normalizeUrl(currentUrl);
+          const normalizedEntry = normalizeUrl(entryUrl);
+
+          if (normalizedCurrent !== normalizedEntry) {
+            console.error(`[executeScenario] Current URL (${currentUrl}) doesn't match scenario entryUrl (${entryUrl})`);
+            console.error(`[executeScenario] Navigating to entryUrl...`);
+
+            await page.goto(entryUrl, {
+              waitUntil: 'networkidle2',
+              timeout: 30000
+            });
+
+            console.error(`[executeScenario] Navigation completed`);
+          }
+        } catch (navError) {
+          console.error(`[executeScenario] Warning: Failed to navigate to entryUrl: ${navError.message}`);
+          // Continue anyway - scenario might still work
+        }
+      }
+
       const options = {};
 
       // Pass executeDependencies option if provided
@@ -2038,6 +2076,145 @@ async function executeToolInternal(name, args) {
       };
     }
 
+    if (name === "appendScenarioToFile") {
+      const scenario = await loadScenario(args.scenarioName, false, null);
+
+      if (!scenario) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: `Scenario "${args.scenarioName}" not found`
+            }, null, 2)
+          }],
+          isError: true
+        };
+      }
+
+      // Select generator based on language
+      let generator;
+      const options = {
+        cleanSelectors: args.cleanSelectors !== false, // default true
+        includeComments: args.includeComments !== false, // default true
+      };
+
+      switch (args.language) {
+        case 'playwright-typescript':
+          generator = new PlaywrightTypeScriptGenerator(options);
+          break;
+        case 'playwright-python':
+          generator = new PlaywrightPythonGenerator(options);
+          break;
+        case 'selenium-python':
+          generator = new SeleniumPythonGenerator(options);
+          break;
+        case 'selenium-java':
+          generator = new SeleniumJavaGenerator(options);
+          break;
+        default:
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: `Unknown language: ${args.language}. Supported: playwright-typescript, playwright-python, selenium-python, selenium-java`
+              }, null, 2)
+            }],
+            isError: true
+          };
+      }
+
+      try {
+        // Generate test code only (without imports)
+        const testOnly = generator.generateTestOnly(scenario, {
+          ...options,
+          testName: args.testName
+        });
+
+        // Prepare append options for Claude Code
+        const appendOptions = {
+          insertPosition: args.insertPosition || 'end',
+          referenceTestName: args.referenceTestName
+        };
+
+        // Generate Page Object if requested
+        let pageObjectData = null;
+        if (args.generatePageObject) {
+          try {
+            const entryUrl = scenario.metadata?.entryUrl;
+            if (entryUrl) {
+              let page;
+              try {
+                page = await getLastOpenPage();
+                const currentUrl = page.url();
+                if (currentUrl !== entryUrl) {
+                  await page.goto(entryUrl, { waitUntil: 'networkidle2' });
+                }
+              } catch (error) {
+                page = await getOrCreatePage(entryUrl);
+              }
+
+              const pageObjectOptions = {
+                className: args.pageObjectClassName || null,
+                framework: args.language,
+                includeComments: args.includeComments !== false,
+                groupElements: true
+              };
+
+              const pageObjectResult = await generatePageObject(page, pageObjectOptions);
+              if (pageObjectResult.success) {
+                // Suggest filename based on className
+                const extension = args.language.includes('typescript') ? '.ts' :
+                                 args.language.includes('java') ? '.java' : '.py';
+                pageObjectData = {
+                  code: pageObjectResult.code,
+                  className: pageObjectResult.className,
+                  suggestedFileName: `${pageObjectResult.className}${extension}`,
+                  elementCount: pageObjectResult.elementCount
+                };
+              }
+            }
+          } catch (error) {
+            // Page Object generation failed, continue without it
+          }
+        }
+
+        // Return JSON with instructions for Claude Code to append the test
+        const result = {
+          action: 'append_test',
+          targetFile: args.targetFile,
+          testCode: testOnly,  // Only test code, no imports
+          testName: args.testName || scenario.metadata?.name,
+          insertPosition: appendOptions.insertPosition,
+          referenceTestName: appendOptions.referenceTestName,
+          instruction: `Read file '${args.targetFile}', append the testCode at position '${appendOptions.insertPosition}', then write the file back.`
+        };
+
+        if (pageObjectData) {
+          result.pageObject = pageObjectData;
+          result.instruction += ` Also create a Page Object file '${pageObjectData.suggestedFileName}' with the provided pageObject.code.`;
+        }
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(result, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: error.message,
+              action: 'append_test',
+              targetFile: args.targetFile
+            }, null, 2)
+          }],
+          isError: true
+        };
+      }
+    }
+
     if (name === "exportScenarioAsCode") {
       const scenario = await loadScenario(args.scenarioName, false, null);
 
@@ -2085,82 +2262,17 @@ async function executeToolInternal(name, args) {
           };
       }
 
-      // Check if append mode is requested
-      if (args.appendToFile) {
-        try {
-          // Validate file path and extension
-          FileAppender.validateFile(args.appendToFile, args.language);
-
-          // Read existing file content
-          const existingContent = FileAppender.readFile(args.appendToFile);
-
-          // Check if file is empty - if so, generate full test with imports
-          if (FileAppender.isEmpty(existingContent)) {
-            const fullCode = generator.generate(scenario, options);
-            FileAppender.writeFile(args.appendToFile, fullCode);
-
-            return {
-              content: [{
-                type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  mode: 'append',
-                  file: args.appendToFile,
-                  testName: args.testName || scenario.metadata?.name,
-                  message: `Test written to empty file: ${args.appendToFile}`
-                }, null, 2)
-              }]
-            };
-          }
-
-          // Generate only test function (without imports)
-          const testOnly = generator.generateTestOnly(scenario, {
-            ...options,
-            testName: args.testName
-          });
-
-          // Append test to existing content
-          const appendOptions = {
-            insertPosition: args.insertPosition || 'end',
-            referenceTestName: args.referenceTestName
-          };
-
-          const updatedContent = generator.appendTest(existingContent, testOnly, appendOptions);
-
-          // Write updated content to file
-          FileAppender.writeFile(args.appendToFile, updatedContent);
-
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                mode: 'append',
-                file: args.appendToFile,
-                testName: args.testName || scenario.metadata?.name,
-                insertPosition: appendOptions.insertPosition,
-                message: `Test '${args.testName || scenario.metadata?.name}' successfully appended to ${args.appendToFile}`
-              }, null, 2)
-            }]
-          };
-        } catch (error) {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: false,
-                mode: 'append',
-                file: args.appendToFile,
-                error: error.message
-              }, null, 2)
-            }],
-            isError: true
-          };
-        }
-      }
-
-      // Non-append mode: Generate test code
+      // Generate test code with full imports
       const testCode = generator.generate(scenario, options);
+
+      // Generate suggested filename
+      const testName = scenario.metadata?.name || 'test';
+      const extension = args.language.includes('typescript') ? '.spec.ts' :
+                       args.language.includes('java') ? 'Test.java' :
+                       args.language.includes('python') ? '_test.py' : '.test.js';
+      const suggestedFileName = args.language.includes('java')
+        ? testName.charAt(0).toUpperCase() + testName.slice(1) + 'Test.java'
+        : testName.replace(/\s+/g, '_').toLowerCase() + extension;
 
       // If generatePageObject is requested, also generate Page Object class
       if (args.generatePageObject) {
@@ -2205,19 +2317,26 @@ async function executeToolInternal(name, args) {
           const pageObjectResult = await generatePageObject(page, pageObjectOptions);
 
           if (pageObjectResult.success) {
+            // Suggest Page Object filename
+            const poExtension = args.language.includes('typescript') ? '.ts' :
+                               args.language.includes('java') ? '.java' : '.py';
+            const pageObjectFileName = `${pageObjectResult.className}${poExtension}`;
+
             // Return both test code and Page Object code
             return {
               content: [{
                 type: 'text',
                 text: JSON.stringify({
-                  success: true,
+                  action: 'create_new_file',
+                  suggestedFileName: suggestedFileName,
                   testCode: testCode,
-                  pageObjectCode: pageObjectResult.code,
-                  pageObjectClassName: pageObjectResult.className,
-                  framework: args.language,
-                  scenarioName: args.scenarioName,
-                  url: pageObjectResult.url,
-                  elementCount: pageObjectResult.elementCount
+                  pageObject: {
+                    code: pageObjectResult.code,
+                    className: pageObjectResult.className,
+                    suggestedFileName: pageObjectFileName,
+                    elementCount: pageObjectResult.elementCount
+                  },
+                  instruction: `Create a new test file '${suggestedFileName}' with the testCode. Also create a Page Object file '${pageObjectFileName}' with the pageObject.code.`
                 }, null, 2)
               }]
             };
@@ -2227,10 +2346,11 @@ async function executeToolInternal(name, args) {
               content: [{
                 type: 'text',
                 text: JSON.stringify({
-                  success: true,
+                  action: 'create_new_file',
+                  suggestedFileName: suggestedFileName,
                   testCode: testCode,
-                  pageObjectCode: null,
-                  warning: 'Page Object generation failed: ' + (pageObjectResult.error || 'Unknown error')
+                  warning: 'Page Object generation failed: ' + (pageObjectResult.error || 'Unknown error'),
+                  instruction: `Create a new test file '${suggestedFileName}' with the testCode.`
                 }, null, 2)
               }]
             };
@@ -2241,10 +2361,11 @@ async function executeToolInternal(name, args) {
             content: [{
               type: 'text',
               text: JSON.stringify({
-                success: true,
+                action: 'create_new_file',
+                suggestedFileName: suggestedFileName,
                 testCode: testCode,
-                pageObjectCode: null,
-                warning: 'Page Object generation error: ' + error.message
+                warning: 'Page Object generation error: ' + error.message,
+                instruction: `Create a new test file '${suggestedFileName}' with the testCode.`
               }, null, 2)
             }]
           };
@@ -2255,7 +2376,12 @@ async function executeToolInternal(name, args) {
       return {
         content: [{
           type: 'text',
-          text: testCode
+          text: JSON.stringify({
+            action: 'create_new_file',
+            suggestedFileName: suggestedFileName,
+            testCode: testCode,
+            instruction: `Create a new test file '${suggestedFileName}' with the testCode.`
+          }, null, 2)
         }]
       };
     }

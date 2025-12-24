@@ -8,13 +8,13 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 - [Usage](#usage)
 - [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
 - [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
-- [Available Tools](#available-tools) - **39+ Tools Total**
+- [Available Tools](#available-tools) - **40+ Tools Total**
   - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getAllInteractiveElements, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
-  - [Recorder Tools](#6-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, generatePageObject
+  - [Recorder Tools](#6-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
@@ -650,7 +650,7 @@ Delete a scenario and its associated secrets. Searches all projects to find the 
 - **Returns**: Success confirmation
 
 #### exportScenarioAsCode ⭐ **NEW**
-Export recorded scenario as executable test code for various frameworks. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Optionally generates Page Object class for the page. Can append tests to existing files. Searches all projects to find the scenario.
+Export recorded scenario as executable test code for creating a **NEW** test file. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Optionally generates Page Object class. Returns JSON with code and suggested filename - Claude Code will create the file. To add tests to **EXISTING** files, use `appendScenarioToFile` instead.
 
 - **Parameters**:
   - `scenarioName` (required): Name of scenario to export
@@ -659,38 +659,34 @@ Export recorded scenario as executable test code for various frameworks. Automat
   - `includeComments` (optional): Include descriptive comments (default: true)
   - `generatePageObject` (optional): Also generate Page Object class for the page (default: false)
   - `pageObjectClassName` (optional): Custom Page Object class name (auto-generated if not provided)
-  - `appendToFile` (optional): Path to existing test file to append to (enables **append mode**) ⭐ **NEW**
-  - `testName` (optional): Override test name (default: from scenario name) ⭐ **NEW**
-  - `insertPosition` (optional): Where to insert: `'end'` (default), `'before'`, `'after'` ⭐ **NEW**
-  - `referenceTestName` (optional): Reference test name for before/after insertion ⭐ **NEW**
 
-- **Use case**: Convert recorded scenarios into maintainable test code with optional Page Objects, or append to existing test suites
+- **Use case**: Create new test files from recorded scenarios with optional Page Objects
 
-- **Returns**:
-  - **Without `appendToFile`**: Test code as string (or JSON with Page Object)
-  - **With `appendToFile`**: JSON with `{success, mode: "append", file, testName, message}`
+- **Returns**: JSON with:
+  - `action`: `"create_new_file"`
+  - `suggestedFileName`: Suggested test filename
+  - `testCode`: Full test code with imports
+  - `instruction`: Instructions for Claude Code
+  - `pageObject` (if `generatePageObject=true`): Page Object code and metadata
 
-- **Example 1 - Test only** (default behavior):
+- **Example 1 - Test only**:
   ```javascript
-  // Export scenario as Playwright TypeScript
+  // Export scenario as new Playwright TypeScript file
   exportScenarioAsCode({
     scenarioName: "checkout_flow",
-    language: "playwright-typescript",
-    cleanSelectors: true,
-    includeComments: true
+    language: "playwright-typescript"
   })
 
-  // Returns clean test code:
-  // import { test, expect } from '@playwright/test';
-  //
-  // test('checkout_flow', async ({ page }) => {
-  //   await page.goto('https://example.com');
-  //   await page.locator('button[data-testid="add-to-cart"]').click();
-  //   await expect(page).toHaveURL(/checkout/);
-  // });
+  // Returns JSON:
+  {
+    "action": "create_new_file",
+    "suggestedFileName": "checkout_flow.spec.ts",
+    "testCode": "import { test, expect } from '@playwright/test';\n\ntest('checkout_flow', async ({ page }) => {\n  await page.goto('https://example.com');\n  await page.locator('button[data-testid=\"add-to-cart\"]').click();\n  await expect(page).toHaveURL(/checkout/);\n});",
+    "instruction": "Create a new test file 'checkout_flow.spec.ts' with the testCode."
+  }
   ```
 
-- **Example 2 - Test + Page Object** ⭐ **NEW**:
+- **Example 2 - Test + Page Object**:
   ```javascript
   // Export with Page Object class
   exportScenarioAsCode({
@@ -702,55 +698,17 @@ Export recorded scenario as executable test code for various frameworks. Automat
 
   // Returns JSON with both files:
   {
-    "success": true,
+    "action": "create_new_file",
+    "suggestedFileName": "login_test.spec.ts",
     "testCode": "import { test } from '@playwright/test';\nimport { LoginPage } from './LoginPage';\n\ntest('login_test', async ({ page }) => {\n  const loginPage = new LoginPage(page);\n  await loginPage.goto();\n  await loginPage.fillEmailInput('user@test.com');\n  await loginPage.clickLoginButton();\n});",
-    "pageObjectCode": "import { Page, Locator } from '@playwright/test';\n\nexport class LoginPage {\n  readonly page: Page;\n  readonly emailInput: Locator;\n  readonly loginButton: Locator;\n  \n  constructor(page: Page) {\n    this.page = page;\n    this.emailInput = page.locator('#email');\n    this.loginButton = page.locator('button[type=\"submit\"]');\n  }\n  \n  async goto() {\n    await this.page.goto('https://example.com/login');\n  }\n  \n  async fillEmailInput(text: string) {\n    await this.emailInput.fill(text);\n  }\n  \n  async clickLoginButton() {\n    await this.loginButton.click();\n  }\n}",
-    "pageObjectClassName": "LoginPage",
-    "framework": "playwright-typescript",
-    "elementCount": 12
+    "pageObject": {
+      "code": "import { Page, Locator } from '@playwright/test';\n\nexport class LoginPage { ... }",
+      "className": "LoginPage",
+      "suggestedFileName": "LoginPage.ts",
+      "elementCount": 12
+    },
+    "instruction": "Create a new test file 'login_test.spec.ts' with the testCode. Also create a Page Object file 'LoginPage.ts' with the pageObject.code."
   }
-  ```
-
-- **Example 3 - Append Mode** ⭐ **NEW**:
-  ```javascript
-  // Append test to end of existing file
-  exportScenarioAsCode({
-    scenarioName: "new_feature_test",
-    language: "playwright-typescript",
-    appendToFile: "./tests/features.spec.ts"
-  })
-
-  // Returns:
-  {
-    "success": true,
-    "mode": "append",
-    "file": "./tests/features.spec.ts",
-    "testName": "new_feature_test",
-    "insertPosition": "end",
-    "message": "Test 'new_feature_test' successfully appended to ./tests/features.spec.ts"
-  }
-  ```
-
-- **Example 4 - Append with Position Control** ⭐ **NEW**:
-  ```javascript
-  // Insert test before specific test
-  exportScenarioAsCode({
-    scenarioName: "setup_test",
-    language: "selenium-python",
-    appendToFile: "./tests/test_suite.py",
-    insertPosition: "before",
-    referenceTestName: "main_test",
-    testName: "test_setup_data"  // Override name
-  })
-
-  // Or insert after specific test
-  exportScenarioAsCode({
-    scenarioName: "cleanup",
-    language: "playwright-python",
-    appendToFile: "./tests/test_flow.py",
-    insertPosition: "after",
-    referenceTestName: "test_main_flow"
-  })
   ```
 
 - **Selector Cleaning**: Automatically removes unstable patterns:
@@ -759,6 +717,98 @@ Export recorded scenario as executable test code for various frameworks. Automat
   - Emotion: `css-1a2b3c4d` → removed
   - Hash suffixes: `component_a1b2c3d` → removed
   - Prefers stable selectors: `data-testid`, `role`, `aria-label`, semantic attributes
+
+#### appendScenarioToFile ⭐ **NEW v2.3.0**
+Append recorded scenario as test code to an **EXISTING** test file. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Optionally generates Page Object class. Returns JSON with test code (without imports) - Claude Code will read the file, append the test, and write back. To create **NEW** test files, use `exportScenarioAsCode` instead.
+
+- **Parameters**:
+  - `scenarioName` (required): Name of scenario to export
+  - `language` (required): Target framework - `"playwright-typescript"`, `"playwright-python"`, `"selenium-python"`, `"selenium-java"`
+  - `targetFile` (required): Path to existing test file to append to
+  - `testName` (optional): Override test name (default: from scenario name)
+  - `insertPosition` (optional): Where to insert: `'end'` (default), `'before'`, `'after'`
+  - `referenceTestName` (optional): Reference test name for 'before'/'after' insertion
+  - `cleanSelectors` (optional): Remove unstable CSS classes (default: true)
+  - `includeComments` (optional): Include descriptive comments (default: true)
+  - `generatePageObject` (optional): Also generate Page Object class for the page (default: false)
+  - `pageObjectClassName` (optional): Custom Page Object class name (auto-generated if not provided)
+
+- **Use case**: Add tests to existing test files without overwriting current tests
+
+- **Architecture**: MCP server generates only test code (without imports). Claude Code reads the target file, appends the test at the specified position, and writes the file back. This separation ensures MCP doesn't need file system access to test files.
+
+- **Returns**: JSON with:
+  - `action`: `"append_test"`
+  - `targetFile`: Path to file to update
+  - `testCode`: Test code only (without imports/headers)
+  - `testName`: Name of test to append
+  - `insertPosition`: Where to insert test
+  - `referenceTestName`: Reference test for 'before'/'after' positioning
+  - `instruction`: Instructions for Claude Code to read/append/write
+  - `pageObject` (if `generatePageObject=true`): Page Object code and metadata
+
+- **Example 1 - Append to end**:
+  ```javascript
+  // Append test to end of existing file
+  appendScenarioToFile({
+    scenarioName: "new_feature_test",
+    language: "playwright-typescript",
+    targetFile: "./tests/features.spec.ts"
+  })
+
+  // Returns JSON:
+  {
+    "action": "append_test",
+    "targetFile": "./tests/features.spec.ts",
+    "testCode": "test('new_feature_test', async ({ page }) => {\n  // Test implementation\n  await page.click('#submit');\n  await expect(page.locator('.result')).toBeVisible();\n});",
+    "testName": "new_feature_test",
+    "insertPosition": "end",
+    "referenceTestName": null,
+    "instruction": "Read file './tests/features.spec.ts', append the testCode at position 'end', then write the file back."
+  }
+  ```
+
+- **Example 2 - Insert before specific test**:
+  ```javascript
+  // Insert test before specific test
+  appendScenarioToFile({
+    scenarioName: "setup_test",
+    language: "selenium-python",
+    targetFile: "./tests/test_suite.py",
+    insertPosition: "before",
+    referenceTestName: "test_main",
+    testName: "test_setup_data"
+  })
+  ```
+
+- **Example 3 - Append with Page Object**:
+  ```javascript
+  // Append test and generate Page Object
+  appendScenarioToFile({
+    scenarioName: "login_test",
+    language: "playwright-typescript",
+    targetFile: "./tests/auth.spec.ts",
+    generatePageObject: true,
+    pageObjectClassName: "LoginPage"
+  })
+
+  // Returns JSON with both test code and Page Object:
+  {
+    "action": "append_test",
+    "targetFile": "./tests/auth.spec.ts",
+    "testCode": "test('login_test', async ({ page }) => {\n  await page.fill('#username', 'user');\n  await page.fill('#password', 'pass');\n  await page.click('button[type=\"submit\"]');\n});",
+    "testName": "login_test",
+    "insertPosition": "end",
+    "referenceTestName": null,
+    "pageObject": {
+      "code": "export class LoginPage { ... }",
+      "className": "LoginPage",
+      "suggestedFileName": "LoginPage.ts",
+      "elementCount": 8
+    },
+    "instruction": "Read file './tests/auth.spec.ts', append the testCode at position 'end', then write the file back. Also create a Page Object file 'LoginPage.ts' with the provided pageObject.code."
+  }
+  ```
 
 #### generatePageObject ⭐ **NEW**
 Generate Page Object Model (POM) class from current page structure. Analyzes page, extracts interactive elements, and generates framework-specific code with smart naming and helper methods.
