@@ -965,6 +965,106 @@ If you don't need to see the browser window, you can use xvfb (virtual X server)
 
 This runs Chrome in GUI mode but on a virtual display (window is not visible).
 
+### Tool Filtering with ENABLED_TOOLS
+
+By default, all tools are enabled. You can selectively enable only specific tool groups using the `ENABLED_TOOLS` environment variable.
+
+**Why filter tools?**
+
+Each tool definition is sent to the AI in every request, consuming context tokens. All 43 tools consume ~28k tokens (~14% of context window). By enabling only the groups you need, you can significantly reduce token usage:
+
+- **Save tokens:** Fewer tools = less context consumed per request
+- **Reduce costs:** Lower token usage means lower API costs
+- **Improve focus:** AI sees only relevant tools for your workflow
+- **Security/compliance:** Restrict available capabilities when needed
+
+**Available Tool Groups:**
+
+| Group | Description | Tools (count) |
+|-------|-------------|---------------|
+| `core` | Basic tools | `ping`, `openBrowser` (2) |
+| `interaction` | User interaction | `click`, `type`, `scrollTo`, `waitForElement`, `hover` (5) |
+| `inspection` | Page inspection | `getElement`, `getComputedCss`, `getBoxModel`, `screenshot`, `saveScreenshot` (5) |
+| `debug` | Debugging & network | `getConsoleLogs`, `listNetworkRequests`, `getNetworkRequest`, `filterNetworkRequests` (4) |
+| `advanced` | Advanced automation & AI | `executeScript`, `setStyles`, `setViewport`, `getViewport`, `navigateTo`, `smartFindElement`, `analyzePage`, `getAllInteractiveElements`, `findElementsByText` (9) |
+| `recorder` | Scenario recording | `enableRecorder`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`, `appendScenarioToFile`, `generatePageObject` (9) |
+| `figma` | Figma integration | `getFigmaFrame`, `compareFigmaToElement`, `getFigmaSpecs`, `parseFigmaUrl`, `listFigmaPages`, `searchFigmaFrames`, `getFigmaComponents`, `getFigmaStyles`, `getFigmaColorPalette` (9) |
+
+**Total:** 43 tools across 7 groups
+
+**Configuration:**
+
+**Claude Desktop** (`~/.claude/mcp_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "chrometools": {
+      "command": "npx",
+      "args": ["-y", "chrometools-mcp"],
+      "env": {
+        "ENABLED_TOOLS": "core,interaction,inspection"
+      }
+    }
+  }
+}
+```
+
+**Claude Code** (`~/.claude.json`):
+
+```json
+{
+  "mcpServers": {
+    "chrometools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "chrometools-mcp"],
+      "env": {
+        "ENABLED_TOOLS": "core,interaction,advanced"
+      }
+    }
+  }
+}
+```
+
+**Format:**
+- Comma-separated list of group names (e.g., `"core,interaction,advanced"`)
+- Spaces are automatically trimmed
+- If not set or empty, all tools are enabled (default behavior)
+
+**Example configurations:**
+
+**Basic automation only:**
+```json
+"ENABLED_TOOLS": "core,interaction,inspection"
+```
+
+**Advanced automation with AI:**
+```json
+"ENABLED_TOOLS": "core,interaction,advanced"
+```
+
+**With debugging tools:**
+```json
+"ENABLED_TOOLS": "core,interaction,inspection,debug"
+```
+
+**Figma design validation:**
+```json
+"ENABLED_TOOLS": "core,figma"
+```
+
+**Full automation with recording:**
+```json
+"ENABLED_TOOLS": "core,interaction,inspection,debug,advanced,recorder"
+```
+
+**All tools (default):**
+```json
+"env": {}
+```
+or omit the `env` field entirely.
+
 ### Figma API Token Setup
 
 To use Figma tools, you need to configure your Figma Personal Access Token.

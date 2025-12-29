@@ -33,6 +33,7 @@ import {filterCssStyles} from './utils/css-utils.js';
 // Import tool schemas and definitions
 import * as schemas from './server/tool-schemas.js';
 import {toolDefinitions} from './server/tool-definitions.js';
+import {getToolsFromGroups, getAllGroupNames} from './server/tool-groups.js';
 
 // Import element actions helper
 import {executeElementAction} from './utils/element-actions.js';
@@ -73,6 +74,16 @@ const debugLog = DEBUG_MODE ? console.error : () => {};
 // Figma token from environment variable (can be set in MCP config)
 const FIGMA_TOKEN = process.env.FIGMA_TOKEN || null;
 
+// Tool filtering - read ENABLED_TOOLS environment variable
+// If set, only enable specified tool groups (comma-separated list)
+// If not set, enable all tools (default behavior)
+const ENABLED_TOOLS = process.env.ENABLED_TOOLS;
+let enabledToolsSet = null;
+
+if (ENABLED_TOOLS) {
+  const groupNames = ENABLED_TOOLS.split(',').map(g => g.trim()).filter(g => g.length > 0);
+  enabledToolsSet = getToolsFromGroups(groupNames);
+}
 // Get current directory for loading utils
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -164,7 +175,7 @@ try {
 const server = new Server(
   {
     name: "chrometools-mcp",
-    version: "2.1.0",
+    version: "2.4.0",
   },
   {
     capabilities: {
@@ -175,8 +186,13 @@ const server = new Server(
 
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
+  // Filter tools based on ENABLED_TOOLS environment variable
+  const tools = enabledToolsSet
+    ? toolDefinitions.filter(tool => enabledToolsSet.has(tool.name))
+    : toolDefinitions;
+
   return {
-    tools: toolDefinitions,
+    tools,
   };
 });
 

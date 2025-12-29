@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.0] - 2025-12-29
+
+### Added
+- **Tool Filtering by Groups** - New `ENABLED_TOOLS` environment variable for selective group enabling
+  - Configure via `env.ENABLED_TOOLS` in MCP client config (comma-separated list of group names)
+  - Available groups: `core`, `interaction`, `inspection`, `debug`, `advanced`, `recorder`, `figma`
+  - Group structure optimized:
+    - `debug` - NEW group for debugging tools (console logs, network monitoring)
+    - `advanced` - Combined with AI tools (now includes smartFindElement, analyzePage, etc.)
+  - If not set, all tools are enabled (default behavior)
+  - If set, only tools from specified groups are available to AI
+  - Primary benefit: **Token optimization** - all 43 tools consume ~28k tokens (~14% of context). Enable only needed groups to reduce token usage and costs
+  - Additional use cases: security/compliance restrictions, workflow simplification, improved AI focus
+  - Examples:
+    - Basic automation: `ENABLED_TOOLS=core,interaction,inspection`
+    - Advanced with AI: `ENABLED_TOOLS=core,interaction,advanced`
+    - With debugging: `ENABLED_TOOLS=core,interaction,inspection,debug`
+    - Figma validation: `ENABLED_TOOLS=core,figma`
+  - Location:
+    - `server/tool-groups.js` - group definitions (7 groups, 43 tools total)
+    - `index.js:36` - import groups module
+    - `index.js:77-92` - parsing and filtering logic
+    - `index.js:195-203` - apply filter to ListTools handler
+  - Documentation: README.md section "Tool Filtering with ENABLED_TOOLS"
+
 ## [2.3.2] - 2025-12-25
 
 ### Changed
