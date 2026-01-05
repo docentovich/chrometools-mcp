@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.2] - 2026-01-05
+
+### Added
+- **`analyzePage` - `includeAll` parameter** - New optional parameter to get ALL page elements, not just interactive ones
+  - Set `includeAll: true` to get complete page structure with selectors for all visible elements
+  - Returns new `allElements` array containing divs, spans, headings, and all other visible elements
+  - Each element includes: selector, tag, text, classes, id, and attributes (role, aria-label)
+  - Useful for layout work and styling - find any element, get its selector, then use `getComputedCss` or `setStyles`
+  - Example workflow: `analyzePage({ includeAll: true })` → find element → `getComputedCss({ selector })` or `setStyles({ selector })`
+  - Skips hidden elements and non-visual tags (SCRIPT, STYLE, META, etc.)
+  - Location: `index.js:1613-1751`, schemas in `tools/tool-schemas.js:215`, `server/tool-schemas.js:221`
+
+### Changed
+- **Tool Groups reorganization** - Moved `executeScript` and `navigateTo` from `advanced` to `core` group
+  - These are fundamental navigation and scripting tools that should be available in basic configurations
+  - Core group now includes: `ping`, `openBrowser`, `executeScript`, `navigateTo` (4 tools)
+  - Advanced group now has: `setStyles`, `setViewport`, `getViewport`, `smartFindElement`, `analyzePage`, `getAllInteractiveElements`, `findElementsByText` (7 tools)
+  - Location: `server/tool-groups.js:8,21-29`
+
 ## [2.4.0] - 2025-12-29
 
 ### Added

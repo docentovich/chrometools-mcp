@@ -5,7 +5,7 @@
  */
 
 export const toolGroups = {
-  core: ['ping', 'openBrowser'],
+  core: ['ping', 'openBrowser', 'executeScript', 'navigateTo'],
 
   interaction: ['click', 'type', 'scrollTo', 'waitForElement', 'hover'],
 
@@ -19,11 +19,9 @@ export const toolGroups = {
   ],
 
   advanced: [
-    'executeScript',
     'setStyles',
     'setViewport',
     'getViewport',
-    'navigateTo',
     'smartFindElement',
     'analyzePage',
     'getAllInteractiveElements',

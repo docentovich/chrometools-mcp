@@ -1595,7 +1595,7 @@ async function executeToolInternal(name, args) {
       }
 
       // Perform comprehensive analysis
-      const analysis = await page.evaluate((utilsCode) => {
+      const analysis = await page.evaluate((includeAll, utilsCode) => {
         // Inject utilities
         eval(utilsCode);
 
@@ -1609,6 +1609,11 @@ async function executeToolInternal(name, args) {
           links: [],
           navigation: [],
         };
+
+        // Add allElements array if includeAll is true
+        if (includeAll) {
+          result.allElements = [];
+        }
 
         // Analyze forms
         document.querySelectorAll('form').forEach((form, idx) => {
@@ -1712,8 +1717,41 @@ async function executeToolInternal(name, args) {
           });
         });
 
+        // Collect all elements if requested
+        if (includeAll) {
+          const skipTags = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'META', 'LINK', 'HEAD', 'TITLE'];
+
+          document.querySelectorAll('body *').forEach(el => {
+            if (skipTags.includes(el.tagName)) return;
+
+            // Skip elements with no dimensions (hidden)
+            if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+
+            // Get text content (own text, not children)
+            let ownText = '';
+            for (const node of el.childNodes) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                ownText += node.textContent;
+              }
+            }
+            ownText = ownText.trim();
+
+            result.allElements.push({
+              selector: getUniqueSelectorInPage(el),
+              tag: el.tagName.toLowerCase(),
+              text: ownText.substring(0, 100),
+              classes: el.className ? el.className.split(' ').filter(c => c) : [],
+              id: el.id || null,
+              attributes: {
+                role: el.getAttribute('role') || null,
+                'aria-label': el.getAttribute('aria-label') || null,
+              }
+            });
+          });
+        }
+
         return result;
-      }, elementFinderUtils);
+      }, validatedArgs.includeAll || false, elementFinderUtils);
 
       // Cache the result
       pageAnalysisCache.set(pageUrl, analysis);

@@ -212,6 +212,7 @@ export const SmartFindElementSchema = z.object({
 
 export const AnalyzePageSchema = z.object({
   refresh: z.boolean().optional().describe("Force refresh of cached analysis (default: false)"),
+  includeAll: z.boolean().optional().describe("Include all elements on page, not just interactive ones (default: false). Useful for layout work and finding non-interactive elements to style."),
 });
 
 export const GetAllInteractiveElementsSchema = z.object({

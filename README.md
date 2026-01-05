@@ -148,18 +148,27 @@ Get current page state and structure. Returns complete map of forms (with values
   - **After form submissions** (check results, errors)
   - **After AJAX updates** (dynamic content loaded)
   - When debugging (see actual form values, not just visual)
+  - **Layout/styling work** - use `includeAll: true` to get ALL page elements with selectors
 - **Parameters**:
   - `refresh` (optional): Force refresh cache to get CURRENT state after changes (default: false)
+  - `includeAll` (optional): Include ALL page elements, not just interactive ones (default: false). Useful for layout work - find any element, get its selector, then use `getComputedCss` or `setStyles` on it.
 - **Why better than screenshot**:
   - Shows actual data (form values, validation errors) not just visual
   - Uses 2-5k tokens vs screenshot 15-25k tokens
   - Returns structured data with selectors
-- **Returns**: Complete map of forms (with current values), inputs, buttons, links, navigation with selectors
+- **Returns**:
+  - By default: Complete map of forms (with current values), inputs, buttons, links, navigation with selectors
+  - With `includeAll: true`: Also includes `allElements` array with ALL visible page elements (divs, spans, headings, etc.) - each with selector, tag, text, classes, id
 - **Example workflow**:
   1. `openBrowser({ url: "..." })`
   2. `analyzePage()` ← Initial analysis
   3. `click({ selector: "submit-btn" })`
   4. **`analyzePage({ refresh: true })`** ← See what changed after click!
+- **Layout work example**:
+  1. `analyzePage({ includeAll: true })` ← Get all elements
+  2. Find element you want to style (e.g., `div.header`)
+  3. `getComputedCss({ selector: "div.header" })` ← Get current styles
+  4. `setStyles({ selector: "div.header", styles: [...] })` ← Apply new styles
 
 #### getAllInteractiveElements
 Get all clickable/fillable elements with their selectors.

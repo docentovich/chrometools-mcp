@@ -429,11 +429,12 @@ export const toolDefinitions = [
       },
       {
         name: "analyzePage",
-        description: "Get page state: forms, inputs, buttons, links with values. Use refresh:true after interactions. Cached per URL. 2-5k tokens vs screenshot 15-25k.",
+        description: "Get page state: forms, inputs, buttons, links with values. Use refresh:true after interactions. Cached per URL. 2-5k tokens vs screenshot 15-25k. Set includeAll:true to get ALL page elements (useful for layout work and styling non-interactive elements).",
         inputSchema: {
           type: "object",
           properties: {
             refresh: { type: "boolean", description: "Refresh cache (default: false)" },
+            includeAll: { type: "boolean", description: "Include all elements on page, not just interactive ones (default: false)" },
           },
         },
       },
