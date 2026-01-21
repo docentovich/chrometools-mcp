@@ -7,7 +7,7 @@
 export const toolGroups = {
   core: ['ping', 'openBrowser', 'executeScript', 'navigateTo'],
 
-  interaction: ['click', 'type', 'scrollTo', 'waitForElement', 'hover'],
+  interaction: ['click', 'type', 'scrollTo', 'waitForElement', 'hover', 'selectOption', 'drag', 'scrollHorizontal'],
 
   inspection: ['getElement', 'getComputedCss', 'getBoxModel', 'screenshot', 'saveScreenshot'],
 
@@ -49,7 +49,8 @@ export const toolGroups = {
     'searchFigmaFrames',
     'getFigmaComponents',
     'getFigmaStyles',
-    'getFigmaColorPalette'
+    'getFigmaColorPalette',
+    'convertFigmaToCode'
   ]
 };
 

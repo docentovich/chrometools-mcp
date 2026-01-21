@@ -377,3 +377,123 @@ export function collectAllText(node, texts = []) {
   }
   return texts;
 }
+
+/**
+ * Simplify Figma node structure for code generation
+ * Extracts only essential properties: layout, styling, text, and children
+ */
+export function simplifyNode(node) {
+  if (!node) return null;
+
+  const simplified = {
+    type: node.type,
+    name: node.name,
+  };
+
+  // Dimensions
+  if (node.absoluteBoundingBox) {
+    simplified.size = {
+      width: Math.round(node.absoluteBoundingBox.width),
+      height: Math.round(node.absoluteBoundingBox.height),
+    };
+  }
+
+  // Layout properties (Auto Layout / Flexbox)
+  if (node.layoutMode) {
+    simplified.layout = {
+      mode: node.layoutMode, // HORIZONTAL or VERTICAL
+      padding: (node.paddingLeft || node.paddingTop || node.paddingRight || node.paddingBottom) ? {
+        top: node.paddingTop || 0,
+        right: node.paddingRight || 0,
+        bottom: node.paddingBottom || 0,
+        left: node.paddingLeft || 0,
+      } : undefined,
+      gap: node.itemSpacing,
+      align: node.primaryAxisAlignItems,
+      justify: node.counterAxisAlignItems,
+    };
+  }
+
+  // Border radius
+  if (node.cornerRadius) {
+    simplified.borderRadius = node.cornerRadius;
+  } else if (node.rectangleCornerRadii) {
+    simplified.borderRadius = node.rectangleCornerRadii;
+  }
+
+  // Fills (backgrounds)
+  if (node.fills && node.fills.length > 0) {
+    simplified.fills = node.fills
+      .filter(fill => fill.visible !== false)
+      .map(fill => ({
+        type: fill.type,
+        color: fill.color ? {
+          r: Math.round(fill.color.r * 255),
+          g: Math.round(fill.color.g * 255),
+          b: Math.round(fill.color.b * 255),
+          a: fill.color.a !== undefined ? Math.round(fill.color.a * 100) / 100 : 1,
+        } : undefined,
+        opacity: fill.opacity,
+      }));
+  }
+
+  // Strokes (borders)
+  if (node.strokes && node.strokes.length > 0) {
+    simplified.strokes = node.strokes
+      .filter(stroke => stroke.visible !== false)
+      .map(stroke => ({
+        type: stroke.type,
+        color: stroke.color ? {
+          r: Math.round(stroke.color.r * 255),
+          g: Math.round(stroke.color.g * 255),
+          b: Math.round(stroke.color.b * 255),
+          a: stroke.color.a !== undefined ? Math.round(stroke.color.a * 100) / 100 : 1,
+        } : undefined,
+      }));
+
+    if (node.strokeWeight) {
+      simplified.strokeWeight = node.strokeWeight;
+    }
+  }
+
+  // Effects (shadows, blurs)
+  if (node.effects && node.effects.length > 0) {
+    simplified.effects = node.effects
+      .filter(effect => effect.visible !== false)
+      .map(effect => ({
+        type: effect.type,
+        radius: effect.radius,
+        offset: effect.offset,
+        color: effect.color ? {
+          r: Math.round(effect.color.r * 255),
+          g: Math.round(effect.color.g * 255),
+          b: Math.round(effect.color.b * 255),
+          a: Math.round(effect.color.a * 100) / 100,
+        } : undefined,
+      }));
+  }
+
+  // Text properties
+  if (node.type === 'TEXT') {
+    simplified.text = node.characters;
+    if (node.style) {
+      simplified.textStyle = {
+        fontFamily: node.style.fontFamily,
+        fontWeight: node.style.fontWeight,
+        fontSize: node.style.fontSize,
+        lineHeight: node.style.lineHeightPx,
+        letterSpacing: node.style.letterSpacing,
+        textAlign: node.style.textAlignHorizontal,
+      };
+    }
+  }
+
+  // Recursively simplify children
+  if (node.children && node.children.length > 0) {
+    simplified.children = node.children
+      .map(child => simplifyNode(child))
+      .filter(Boolean); // Remove null values
+  }
+
+  return simplified;
+}

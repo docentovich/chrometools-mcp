@@ -63,7 +63,8 @@ import {
     listFigmaPages,
     normalizeFigmaNodeId,
     parseFigmaUrl,
-    searchFigmaFrames
+    searchFigmaFrames,
+    simplifyNode
 } from './figma-tools.js';
 
 // Debug mode - only use stderr for actual errors, not debug info
@@ -908,6 +909,240 @@ async function executeToolInternal(name, args) {
       };
     }
 
+    if (name === "selectOption") {
+      const validatedArgs = schemas.SelectOptionSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      // Select option with priority: value > text > index
+      const result = await page.evaluate((selector, value, text, index) => {
+        const selectElement = document.querySelector(selector);
+        if (!selectElement || selectElement.tagName !== 'SELECT') {
+          return { success: false, error: `Select element not found: ${selector}` };
+        }
+
+        let selectedOption = null;
+
+        // Priority 1: Select by value
+        if (value !== undefined && value !== null) {
+          const option = Array.from(selectElement.options).find(opt => opt.value === value);
+          if (option) {
+            selectElement.value = value;
+            selectedOption = option;
+          }
+        }
+
+        // Priority 2: Select by text
+        if (!selectedOption && text !== undefined && text !== null) {
+          const option = Array.from(selectElement.options).find(opt => opt.textContent.trim() === text);
+          if (option) {
+            selectElement.value = option.value;
+            selectedOption = option;
+          }
+        }
+
+        // Priority 3: Select by index
+        if (!selectedOption && index !== undefined && index !== null) {
+          if (index >= 0 && index < selectElement.options.length) {
+            selectElement.selectedIndex = index;
+            selectedOption = selectElement.options[index];
+          }
+        }
+
+        if (!selectedOption) {
+          return { success: false, error: 'No matching option found' };
+        }
+
+        // Trigger events for React and other frameworks
+        selectElement.dispatchEvent(new Event('input', { bubbles: true }));
+        selectElement.dispatchEvent(new Event('change', { bubbles: true }));
+
+        return {
+          success: true,
+          selectedValue: selectElement.value,
+          selectedText: selectedOption.textContent.trim(),
+          selectedIndex: selectElement.selectedIndex
+        };
+      }, validatedArgs.selector, validatedArgs.value, validatedArgs.text, validatedArgs.index);
+
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: `Selected option in ${validatedArgs.selector}:\n` +
+                `  Value: ${result.selectedValue}\n` +
+                `  Text: ${result.selectedText}\n` +
+                `  Index: ${result.selectedIndex}`
+        }],
+      };
+    }
+
+    if (name === "drag") {
+      const validatedArgs = schemas.DragSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const distance = validatedArgs.distance || 100;
+      const duration = validatedArgs.duration || 500;
+
+      // Calculate drag deltas based on direction
+      let deltaX = 0;
+      let deltaY = 0;
+
+      switch (validatedArgs.direction) {
+        case 'up':
+          deltaY = -distance;
+          break;
+        case 'down':
+          deltaY = distance;
+          break;
+        case 'left':
+          deltaX = -distance;
+          break;
+        case 'right':
+          deltaX = distance;
+          break;
+        case 'up-left':
+          deltaY = -distance;
+          deltaX = -distance;
+          break;
+        case 'up-right':
+          deltaY = -distance;
+          deltaX = distance;
+          break;
+        case 'down-left':
+          deltaY = distance;
+          deltaX = -distance;
+          break;
+        case 'down-right':
+          deltaY = distance;
+          deltaX = distance;
+          break;
+      }
+
+      // Get element center position for drag start
+      const elementInfo = await page.evaluate((selector) => {
+        const element = document.querySelector(selector);
+        if (!element) {
+          return { success: false, error: `Element not found: ${selector}` };
+        }
+
+        const rect = element.getBoundingClientRect();
+        return {
+          success: true,
+          centerX: rect.left + rect.width / 2,
+          centerY: rect.top + rect.height / 2,
+          width: rect.width,
+          height: rect.height
+        };
+      }, validatedArgs.selector);
+
+      if (!elementInfo.success) {
+        throw new Error(elementInfo.error);
+      }
+
+      // Perform drag: mousedown → mousemove → mouseup
+      const startX = elementInfo.centerX;
+      const startY = elementInfo.centerY;
+      const endX = startX + deltaX;
+      const endY = startY + deltaY;
+
+      // Move to start position
+      await page.mouse.move(startX, startY);
+
+      // Press mouse button (start drag)
+      await page.mouse.down();
+
+      // Wait a bit to ensure drag is registered
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Move mouse to end position (drag)
+      const steps = Math.max(10, Math.floor(duration / 20)); // Smooth movement
+      await page.mouse.move(endX, endY, { steps });
+
+      // Wait for duration
+      await new Promise(resolve => setTimeout(resolve, Math.max(0, duration - steps * 20)));
+
+      // Release mouse button (end drag)
+      await page.mouse.up();
+
+      return {
+        content: [{
+          type: "text",
+          text: `Dragged ${validatedArgs.selector} ${validatedArgs.direction} by ${distance}px:\n` +
+                `  Start position: (${Math.round(startX)}, ${Math.round(startY)})\n` +
+                `  End position: (${Math.round(endX)}, ${Math.round(endY)})\n` +
+                `  Delta: (${deltaX}px, ${deltaY}px)\n` +
+                `  Duration: ${duration}ms`
+        }],
+      };
+    }
+
+    if (name === "scrollHorizontal") {
+      const validatedArgs = schemas.ScrollHorizontalSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const behavior = validatedArgs.behavior || 'auto';
+
+      const result = await page.evaluate((selector, direction, amount, behavior) => {
+        const element = document.querySelector(selector);
+        if (!element) {
+          return { success: false, error: `Element not found: ${selector}` };
+        }
+
+        // Determine scroll amount
+        let scrollAmount;
+        if (amount === 'full') {
+          // Scroll to the end
+          scrollAmount = direction === 'right'
+            ? element.scrollWidth - element.clientWidth
+            : 0;
+        } else {
+          // Relative scroll
+          scrollAmount = direction === 'right'
+            ? element.scrollLeft + amount
+            : element.scrollLeft - amount;
+        }
+
+        // Perform scroll
+        element.scrollTo({
+          left: scrollAmount,
+          behavior: behavior
+        });
+
+        // Wait a bit for scroll to complete (if smooth)
+        return new Promise(resolve => {
+          setTimeout(() => {
+            resolve({
+              success: true,
+              scrollLeft: element.scrollLeft,
+              scrollWidth: element.scrollWidth,
+              clientWidth: element.clientWidth,
+              canScrollRight: element.scrollLeft < (element.scrollWidth - element.clientWidth),
+              canScrollLeft: element.scrollLeft > 0
+            });
+          }, behavior === 'smooth' ? 300 : 50);
+        });
+      }, validatedArgs.selector, validatedArgs.direction, validatedArgs.amount, behavior);
+
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: `Scrolled ${validatedArgs.selector} ${validatedArgs.direction}:\n` +
+                `  Scroll position: ${result.scrollLeft}px\n` +
+                `  Total width: ${result.scrollWidth}px\n` +
+                `  Visible width: ${result.clientWidth}px\n` +
+                `  Can scroll right: ${result.canScrollRight}\n` +
+                `  Can scroll left: ${result.canScrollLeft}`
+        }],
+      };
+    }
+
     if (name === "setStyles") {
       const validatedArgs = schemas.SetStylesSchema.parse(args);
       const page = await getLastOpenPage();
@@ -1464,6 +1699,111 @@ async function executeToolInternal(name, args) {
       };
     }
 
+    if (name === "convertFigmaToCode") {
+      const validatedArgs = schemas.ConvertFigmaToCodeSchema.parse(args);
+      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
+      if (!token) {
+        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
+      }
+
+      // Normalize node ID
+      const nodeId = normalizeFigmaNodeId(validatedArgs.nodeId);
+      const framework = validatedArgs.framework || 'react';
+      const includeComments = validatedArgs.includeComments !== false; // default true
+
+      // Fetch node structure
+      const nodesData = await fetchFigmaAPI(
+        `files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(nodeId)}`,
+        token
+      );
+
+      if (!nodesData.nodes || !nodesData.nodes[nodeId]) {
+        throw new Error(`Node ${nodeId} not found in Figma file ${validatedArgs.fileKey}`);
+      }
+
+      // Fetch rendered image at 2x scale
+      const exportData = await fetchFigmaAPI(
+        `images/${validatedArgs.fileKey}?ids=${nodeId}&scale=2&format=png`,
+        token
+      );
+
+      if (!exportData.images || !exportData.images[nodeId]) {
+        throw new Error(`Failed to export image for node ${nodeId}`);
+      }
+
+      const imageUrl = exportData.images[nodeId];
+
+      // Simplify node structure
+      const nodeInfo = nodesData.nodes[nodeId];
+      const simplifiedNode = simplifyNode(nodeInfo.document);
+
+      // Build AI instruction based on framework
+      const frameworkInstructions = {
+        'react': 'React (JavaScript) with Tailwind CSS',
+        'react-typescript': 'React (TypeScript) with Tailwind CSS',
+        'html': 'Pure HTML with Tailwind CSS classes'
+      };
+
+      const instruction = `# Figma to Code Conversion
+
+## Design Image
+![Design](${imageUrl})
+
+## Task
+Convert this Figma design to ${frameworkInstructions[framework]}.
+
+## Design Structure (Simplified)
+\`\`\`json
+${JSON.stringify(simplifiedNode, null, 2)}
+\`\`\`
+
+## Instructions
+
+### Framework: ${framework.toUpperCase()}
+${framework.startsWith('react') ? `
+- Create a functional React component
+- Use Tailwind CSS for all styling
+- Props: Accept any necessary data as props
+- Use semantic HTML elements (div, section, button, h1-h6, p, etc.)
+${framework === 'react-typescript' ? '- Add TypeScript type definitions for props' : ''}
+` : `
+- Create clean, semantic HTML structure
+- Use Tailwind CSS classes for styling
+- No JavaScript required unless interactive elements present
+`}
+
+### Styling Guidelines
+1. **Colors**: Convert RGB values to Tailwind colors or use arbitrary values: \`bg-[rgb(r,g,b)]\`
+2. **Spacing**: Use Tailwind spacing scale (p-4, m-2, gap-4) matching design padding/gaps
+3. **Layout**:
+   - HORIZONTAL → \`flex flex-row\`
+   - VERTICAL → \`flex flex-col\`
+   - Use \`justify-*\` and \`items-*\` for alignment
+4. **Typography**: Match font families, weights, sizes from textStyle properties
+5. **Border Radius**: \`rounded-[Npx]\` for exact values
+6. **Shadows**: Use Tailwind shadow utilities or arbitrary values
+7. **Responsive**: Add responsive variants if design suggests multiple breakpoints
+
+### Quality Requirements
+- **Clean code**: No unnecessary divs, proper semantic structure
+- **Accurate spacing**: Match design padding, gaps, and margins
+- **Proper hierarchy**: Respect component nesting from design structure
+${includeComments ? '- **Comments**: Add brief comments explaining complex layout decisions' : ''}
+- **Accessibility**: Use proper ARIA labels where needed
+
+### Output Format
+Return ONLY the code, no explanations. ${framework.startsWith('react') ? 'Export the component as default.' : 'Provide complete HTML structure.'}
+
+Start coding now.`;
+
+      return {
+        content: [{
+          type: "text",
+          text: instruction
+        }],
+      };
+    }
+
     // New AI optimization tools
     if (name === "smartFindElement") {
       const validatedArgs = schemas.SmartFindElementSchema.parse(args);
@@ -1629,9 +1969,9 @@ async function executeToolInternal(name, args) {
           form.querySelectorAll('input, textarea, select').forEach(field => {
             if (field.type === 'submit' || field.type === 'button') return;
 
-            formData.fields.push({
+            const fieldData = {
               selector: getUniqueSelectorInPage(field),
-              type: field.type || 'text',
+              type: field.type || (field.tagName === 'SELECT' ? 'select' : 'text'),
               name: field.name,
               id: field.id,
               placeholder: field.placeholder,
@@ -1640,7 +1980,23 @@ async function executeToolInternal(name, args) {
                 return label ? label.textContent.trim() : null;
               })(),
               required: field.required,
-            });
+            };
+
+            // Add select-specific information
+            if (field.tagName === 'SELECT') {
+              fieldData.options = Array.from(field.options).map((opt, idx) => ({
+                value: opt.value,
+                text: opt.textContent.trim(),
+                index: idx,
+                selected: opt.selected,
+                disabled: opt.disabled
+              }));
+              fieldData.selectedIndex = field.selectedIndex;
+              fieldData.selectedValue = field.value;
+              fieldData.selectedText = field.options[field.selectedIndex]?.textContent.trim() || null;
+            }
+
+            formData.fields.push(fieldData);
           });
 
           // Find submit button
@@ -1672,12 +2028,28 @@ async function executeToolInternal(name, args) {
           if (input.type === 'submit' || input.type === 'button' || input.type === 'hidden') return;
           if (input.offsetWidth === 0 && input.offsetHeight === 0) return;
 
-          result.inputs.push({
+          const inputData = {
             selector: getUniqueSelectorInPage(input),
-            type: input.type || 'text',
+            type: input.type || (input.tagName === 'SELECT' ? 'select' : 'text'),
             name: input.name,
             placeholder: input.placeholder,
-          });
+          };
+
+          // Add select-specific information
+          if (input.tagName === 'SELECT') {
+            inputData.options = Array.from(input.options).map((opt, idx) => ({
+              value: opt.value,
+              text: opt.textContent.trim(),
+              index: idx,
+              selected: opt.selected,
+              disabled: opt.disabled
+            }));
+            inputData.selectedIndex = input.selectedIndex;
+            inputData.selectedValue = input.value;
+            inputData.selectedText = input.options[input.selectedIndex]?.textContent.trim() || null;
+          }
+
+          result.inputs.push(inputData);
         });
 
         // All links
@@ -1740,7 +2112,18 @@ async function executeToolInternal(name, args) {
               selector: getUniqueSelectorInPage(el),
               tag: el.tagName.toLowerCase(),
               text: ownText.substring(0, 100),
-              classes: el.className ? el.className.split(' ').filter(c => c) : [],
+              classes: (() => {
+                // Handle both string className (HTML) and SVGAnimatedString (SVG)
+                if (!el.className) return [];
+                if (typeof el.className === 'string') {
+                  return el.className.split(' ').filter(c => c);
+                }
+                // SVG elements have className.baseVal
+                if (el.className.baseVal) {
+                  return el.className.baseVal.split(' ').filter(c => c);
+                }
+                return [];
+              })(),
               id: el.id || null,
               attributes: {
                 role: el.getAttribute('role') || null,

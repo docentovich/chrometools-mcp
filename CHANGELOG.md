@@ -2,6 +2,126 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.0] - 2026-01-21
+
+### Added
+- **`selectOption` tool** - Select options in HTML dropdown elements with intelligent priority-based selection
+  - Parameters: `selector` (required), `value`, `text`, or `index` (specify at least one)
+  - Selection priority: value → text → index (tries value first, falls back to text, then index)
+  - Automatically triggers `input` and `change` events for React and other frameworks
+  - Returns selected option details (value, text, index)
+  - Location: `index.js:911-979`, schemas in `server/tool-schemas.js:40-45`, definitions in `server/tool-definitions.js:234-247`, tool group in `server/tool-groups.js:10`
+
+- **`drag` tool** - Drag element by mouse (click-hold-move-release) in any direction
+  - Parameters: `selector` (required), `direction` (required: 'up', 'down', 'left', 'right', 'up-left', 'up-right', 'down-left', 'down-right'), `distance` (optional, default: 100), `duration` (optional, default: 500ms)
+  - Emulates real mouse drag: moves to element center, presses button, drags, releases button
+  - Supports 8 directions including 4 diagonal directions for maximum flexibility
+  - Use for: interactive maps (Google Maps, Leaflet), Gantt charts, SVG diagrams, canvas, drag-to-pan interfaces
+  - NOT for: standard overflow scrollbars (use `scrollTo` or `scrollHorizontal` instead)
+  - Location: `index.js:982-1091`, schemas in `server/tool-schemas.js:47-53`, definitions in `server/tool-definitions.js:248-261`, tool group in `server/tool-groups.js:10`
+
+- **`scrollHorizontal` tool** - Scroll element horizontally for tables, carousels, and wide content
+  - Parameters: `selector` (required), `direction` (required: 'left' or 'right'), `amount` (required: pixels or 'full'), `behavior` (optional: 'auto' or 'smooth')
+  - Supports precise pixel-based scrolling or 'full' to scroll to the end
+  - Returns detailed scroll state: position, total width, visible width, and scroll availability (canScrollLeft, canScrollRight)
+  - Uses native `scrollTo` API with smooth/auto behavior options
+  - Location: `index.js:1055-1117`, schemas in `server/tool-schemas.js:55-60`, definitions in `server/tool-definitions.js:262-275`, tool group in `server/tool-groups.js:10`
+
+### Fixed
+- **🔥 CRITICAL: Fixed `drag` tool implementation** - Now correctly emulates mouse drag instead of changing scrollLeft/scrollTop
+  - Problem: Previous implementation used `scrollLeft`/`scrollTop` animation which only works for `overflow: auto/scroll` containers
+  - Impact: **Did not work with custom drag-to-scroll interfaces** like:
+    - ❌ Interactive maps (Google Maps, Leaflet, Mapbox)
+    - ❌ Gantt charts and timeline diagrams (SVG-based)
+    - ❌ Canvas elements with pan/zoom
+    - ❌ Custom drag handlers (React DnD, interact.js)
+  - Solution: Complete rewrite using Puppeteer's `page.mouse` API:
+    1. Finds element center position
+    2. Moves mouse to center (`page.mouse.move`)
+    3. Presses mouse button (`page.mouse.down`)
+    4. Drags to target position with smooth motion (`page.mouse.move` with steps)
+    5. Releases mouse button (`page.mouse.up`)
+  - Result: **Now works with ANY drag-scrollable element** including SVG diagrams, maps, and custom implementations
+  - Location: `index.js:982-1091`, updated description in `README.md:277-285`
+  - Reported by: User testing on Gantt chart with `<svg class="gantt">` element
+
+- **Fixed `analyzePage` crash with `includeAll: true` on SVG elements** - Now handles both HTML and SVG className types
+  - Problem: `className.split is not a function` error when page contains SVG elements
+  - Cause: SVG elements have `className` as `SVGAnimatedString` object (with `.baseVal` property), not a string
+  - Solution: Added type checking - uses `className.baseVal` for SVG elements, direct string for HTML
+  - Location: `index.js:2126-2137`
+
+- **🔥 CRITICAL: Fixed Tailwind CSS selector generation bug** - `getUniqueSelectorInPage` now works correctly with Tailwind/utility-first CSS frameworks
+  - Problem: Generated invalid CSS selectors like `button.hover:bg-blue-700` containing special characters (`:`, `/`, `[]`)
+  - Impact: **ALL AI-powered tools failed** with `SyntaxError: invalid selector` on Tailwind/styled-components apps:
+    - ❌ `analyzePage` - couldn't read page state
+    - ❌ `findElementsByText` - couldn't find elements by text
+    - ❌ `smartFindElement` - couldn't find elements by description
+    - ❌ `getAllInteractiveElements` - couldn't list interactive elements
+  - Solution: Complete rewrite of selector generation logic with intelligent filtering:
+    1. **New priority hierarchy** (most reliable first):
+       - `#id` (ID attribute)
+       - `[data-testid="..."]` (test IDs, very common in modern apps)
+       - `[data-*="..."]` (other data attributes)
+       - `[aria-label="..."]` (accessibility labels)
+       - `[role="..."]` (ARIA roles)
+       - `[name="..."]` (form element names)
+       - `tag.semantic-class` (non-Tailwind classes only)
+       - `tag:nth-of-type(n)` (fallback with path)
+    2. **Tailwind class filtering** - New `isTailwindClass()` function detects and excludes:
+       - Variant classes with `:` (hover:, focus:, md:, lg:, etc.)
+       - Fraction classes with `/` (w-1/2, space-x-1/2)
+       - Arbitrary values with `[]` (bg-[#1da1f2], w-[500px])
+       - 60+ common Tailwind prefixes (bg-, text-, p-, m-, flex-, etc.)
+    3. **CSS.escape() integration** - All selectors properly escaped (with fallback for old browsers)
+    4. **Semantic attribute prioritization** - Prefers stable, meaningful selectors over utility classes
+  - Result: **Unblocks testing of ALL modern apps** using Tailwind, styled-components, CSS modules, Emotion, etc.
+  - Location: `element-finder-utils.js:316-509` (complete rewrite, ~200 lines)
+  - Reported by: AI agent encountering `SyntaxError` on every tool call in React+Tailwind app
+
+### Changed
+- **Improved tool descriptions for better AI agent behavior** - Prevents premature use of `executeScript`
+  - `click` - Emphasized as PRIMARY tool for clicking, works with React/Vue/Angular synthetic events
+  - `type` - Emphasized as PRIMARY tool for input, updates React hooks and Vue reactive data correctly
+  - `executeScript` - ⚠️ Marked as LAST RESORT with strict warnings, never use for clicking/typing/reading
+  - `findElementsByText` - Highlighted as alternative to executeScript for finding elements
+  - `analyzePage` - Emphasized as PRIMARY tool for reading page state, more efficient than executeScript
+  - Location: `server/tool-definitions.js:31,45,162,510,489`
+
+- **Added "Tool Usage Priority" section to README** - Clear hierarchy preventing executeScript abuse
+  - Three workflows: Clicking/Interaction, Filling Forms, Reading Page State
+  - Each shows specialized tools first (click, type, analyzePage), executeScript last
+  - Explains why specialized tools work with React/Vue/Angular while executeScript may fail
+  - Location: `README.md:116-147`
+
+- **`analyzePage` enhancement** - Now detects and reports HTML select elements with all available options
+  - Select fields in forms and inputs sections now include `options` array with value, text, index, selected, and disabled status
+  - Includes `selectedIndex`, `selectedValue`, and `selectedText` for current selection
+  - Enables AI agents to see all dropdown options without additional queries
+  - Makes `selectOption` tool usage more intelligent and reliable
+  - Location: `index.js:1632-1660` (forms), `index.js:1691-1713` (inputs)
+
+- **Tool groups** - Added 3 new tools to `interaction` group: `selectOption`, `dragScroll`, `scrollHorizontal`
+  - Total interaction tools: 8 (was 5)
+  - Total tools in project: 44+ (was 40+)
+  - Location: `server/tool-groups.js:10`
+
+- **`convertFigmaToCode` tool** - Convert Figma designs to React/Tailwind code with AI assistance
+  - Parameters: `figmaToken` (optional), `fileKey` (required), `nodeId` (required), `framework` (optional: 'react', 'react-typescript', 'html'), `includeComments` (optional, default: true)
+  - Fetches design structure (layout, colors, typography, spacing) and rendered image at 2x scale
+  - Returns AI-optimized instruction prompt with simplified JSON structure and framework-specific guidelines
+  - Supports React (JavaScript), React (TypeScript), and pure HTML with Tailwind CSS
+  - Generates clean, semantic code with proper spacing, accessibility, and component structure
+  - Uses existing Figma token mechanism (from parameter or FIGMA_TOKEN env var)
+  - Location: `index.js:1676-1779`, schemas in `server/tool-schemas.js:225-231`, definitions in `server/tool-definitions.js:448-462`, tool group in `server/tool-groups.js:53`, helper in `figma-tools.js:381-499`
+
+- **`simplifyNode` helper** - New function in figma-tools.js for code generation
+  - Recursively extracts essential design properties from Figma node structure
+  - Captures: layout (flexbox), dimensions, padding/gaps, colors (fills/strokes), effects (shadows), typography, border radius
+  - Filters out invisible elements and rounds numeric values for cleaner output
+  - Used by `convertFigmaToCode` to provide AI with actionable design data
+  - Location: `figma-tools.js:381-499`
+
 ## [2.4.2] - 2026-01-05
 
 ### Added

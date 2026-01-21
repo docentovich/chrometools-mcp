@@ -37,6 +37,28 @@ export const HoverSchema = z.object({
   selector: z.string().describe("CSS selector for element to hover"),
 });
 
+export const SelectOptionSchema = z.object({
+  selector: z.string().describe("CSS selector for select element"),
+  value: z.string().optional().describe("Value of option to select (option's value attribute)"),
+  text: z.string().optional().describe("Text content of option to select"),
+  index: z.number().min(0).optional().describe("Index of option to select (0-based)"),
+});
+
+export const DragSchema = z.object({
+  selector: z.string().describe("CSS selector for element to drag"),
+  direction: z.enum(['up', 'down', 'left', 'right', 'up-left', 'up-right', 'down-left', 'down-right'])
+    .describe("Direction to drag: vertical (up, down), horizontal (left, right), or diagonal (up-left, up-right, down-left, down-right)"),
+  distance: z.number().min(1).optional().describe("Distance to drag in pixels (default: 100)"),
+  duration: z.number().min(100).optional().describe("Duration of drag operation in milliseconds (default: 500)"),
+});
+
+export const ScrollHorizontalSchema = z.object({
+  selector: z.string().describe("CSS selector for element to scroll"),
+  direction: z.enum(['left', 'right']).describe("Direction to scroll horizontally"),
+  amount: z.union([z.number().min(1), z.literal('full')]).describe("Amount to scroll in pixels, or 'full' to scroll to the end"),
+  behavior: z.enum(['auto', 'smooth']).optional().describe("Scroll behavior (default: auto)"),
+});
+
 // CSS tools
 export const GetComputedCssSchema = z.object({
   selector: z.string().optional().describe("CSS selector (optional, defaults to body)"),
@@ -198,6 +220,14 @@ export const GetFigmaStylesSchema = z.object({
 export const GetFigmaColorPaletteSchema = z.object({
   figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
   fileKey: z.string().describe("Figma file key or full Figma URL")
+});
+
+export const ConvertFigmaToCodeSchema = z.object({
+  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  fileKey: z.string().describe("Figma file key (from URL: figma.com/file/FILE_KEY/...)"),
+  nodeId: z.string().describe("Figma node ID (frame/component ID, formats: '123:456' or '123-456')"),
+  framework: z.enum(['react', 'react-typescript', 'html']).optional().describe("Target framework (default: react)"),
+  includeComments: z.boolean().optional().describe("Include descriptive comments in generated code (default: true)")
 });
 
 // Page analysis tools

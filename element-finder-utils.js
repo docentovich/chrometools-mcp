@@ -306,72 +306,180 @@ function isSafeSelectorValue(value) {
 }
 
 /**
- * Generate unique CSS selector for an element
+ * Check if a class name is a Tailwind CSS utility class
+ * Tailwind classes contain special characters that break CSS selectors:
+ * - Colons (:) for variants like hover:, focus:, md:, etc.
+ * - Slashes (/) for fractions like w-1/2
+ * - Brackets ([]) for arbitrary values like bg-[#1da1f2]
+ * - Dots (.) in decimal values
  */
-function getUniqueSelectorInPage(element) {
-  // Try ID first
-  if (element.id) {
-    return `#${element.id}`;
+function isTailwindClass(className) {
+  if (!className || typeof className !== 'string') return false;
+
+  // Check for special characters that indicate Tailwind variants/utilities
+  if (/[:\/\[\]]/.test(className)) {
+    return true;
   }
 
-  // Try unique class combination
-  if (element.className) {
-    const classes = element.className.split(' ').filter(c => c.trim());
-    if (classes.length > 0) {
-      const selector = `${element.tagName.toLowerCase()}.${classes.join('.')}`;
-      if (document.querySelectorAll(selector).length === 1) {
-        return selector;
-      }
-      // Try with first class only
-      const firstClassSelector = `${element.tagName.toLowerCase()}.${classes[0]}`;
-      if (document.querySelectorAll(firstClassSelector).length === 1) {
-        return firstClassSelector;
-      }
+  // Common Tailwind utility prefixes
+  const tailwindPrefixes = [
+    'bg-', 'text-', 'border-', 'rounded-', 'shadow-', 'font-', 'leading-',
+    'flex-', 'grid-', 'p-', 'px-', 'py-', 'pt-', 'pb-', 'pl-', 'pr-',
+    'm-', 'mx-', 'my-', 'mt-', 'mb-', 'ml-', 'mr-', 'space-',
+    'w-', 'h-', 'min-', 'max-', 'gap-', 'inset-', 'top-', 'right-', 'bottom-', 'left-',
+    'justify-', 'items-', 'content-', 'self-', 'place-',
+    'overflow-', 'opacity-', 'cursor-', 'transition-', 'transform-',
+    'duration-', 'ease-', 'delay-', 'animate-', 'scale-', 'rotate-', 'translate-',
+    'z-', 'order-', 'col-', 'row-', 'auto-', 'tracking-', 'select-',
+    'sr-', 'not-', 'pointer-', 'resize-', 'list-', 'appearance-',
+    'underline', 'line-through', 'no-underline', 'uppercase', 'lowercase', 'capitalize',
+    'italic', 'not-italic', 'ordinal', 'slashed-zero', 'lining-nums', 'oldstyle-nums',
+    'proportional-nums', 'tabular-nums', 'diagonal-fractions', 'stacked-fractions',
+    'hidden', 'block', 'inline', 'flex', 'grid', 'table', 'contents',
+    'absolute', 'relative', 'fixed', 'sticky', 'static'
+  ];
+
+  // Check if className starts with known Tailwind prefix
+  return tailwindPrefixes.some(prefix => className.startsWith(prefix));
+}
+
+/**
+ * Generate unique CSS selector for an element
+ * Priority: id → data-testid → data-* → aria-label → role → semantic classes → nth-child
+ * Filters out Tailwind CSS classes to avoid invalid selectors
+ */
+function getUniqueSelectorInPage(element) {
+  const tagName = element.tagName.toLowerCase();
+
+  // 1. Try ID first (highest priority)
+  if (element.id && isSafeSelectorValue(element.id)) {
+    try {
+      return `#${CSS.escape(element.id)}`;
+    } catch (e) {
+      // CSS.escape not available in old browsers, use simple escape
+      return `#${element.id.replace(/[^\w-]/g, '\\$&')}`;
     }
   }
 
-  // Try name attribute (only if value is safe)
-  if (element.name && isSafeSelectorValue(element.name)) {
-    const selector = `${element.tagName.toLowerCase()}[name="${element.name}"]`;
+  // 2. Try data-testid (very common in modern apps)
+  if (element.dataset && element.dataset.testid && isSafeSelectorValue(element.dataset.testid)) {
+    const selector = `[data-testid="${element.dataset.testid}"]`;
     try {
       if (document.querySelectorAll(selector).length === 1) {
         return selector;
       }
     } catch (e) {
-      // Invalid selector, skip
+      // Invalid selector, continue
     }
   }
 
-  // Try data attributes (only if values are safe)
+  // 3. Try other data-* attributes (only if values are safe)
   const dataAttrs = Array.from(element.attributes)
-    .filter(attr => attr.name.startsWith('data-') && isSafeSelectorValue(attr.value))
+    .filter(attr => attr.name.startsWith('data-') &&
+                    attr.name !== 'data-testid' &&
+                    isSafeSelectorValue(attr.value))
     .slice(0, 2);
 
   for (const attr of dataAttrs) {
-    const selector = `${element.tagName.toLowerCase()}[${attr.name}="${attr.value}"]`;
+    const selector = `${tagName}[${attr.name}="${attr.value}"]`;
     try {
       if (document.querySelectorAll(selector).length === 1) {
         return selector;
       }
     } catch (e) {
-      // Invalid selector, skip
       continue;
     }
   }
 
-  // Fallback: nth-child
+  // 4. Try aria-label
+  const ariaLabel = element.getAttribute('aria-label');
+  if (ariaLabel && isSafeSelectorValue(ariaLabel)) {
+    const selector = `${tagName}[aria-label="${ariaLabel}"]`;
+    try {
+      if (document.querySelectorAll(selector).length === 1) {
+        return selector;
+      }
+    } catch (e) {
+      // Invalid selector, continue
+    }
+  }
+
+  // 5. Try role attribute
+  const role = element.getAttribute('role');
+  if (role && isSafeSelectorValue(role)) {
+    const selector = `${tagName}[role="${role}"]`;
+    try {
+      if (document.querySelectorAll(selector).length === 1) {
+        return selector;
+      }
+    } catch (e) {
+      // Invalid selector, continue
+    }
+  }
+
+  // 6. Try name attribute (common for form inputs)
+  if (element.name && isSafeSelectorValue(element.name)) {
+    const selector = `${tagName}[name="${element.name}"]`;
+    try {
+      if (document.querySelectorAll(selector).length === 1) {
+        return selector;
+      }
+    } catch (e) {
+      // Invalid selector, continue
+    }
+  }
+
+  // 7. Try semantic classes (filter out Tailwind)
+  if (element.className && typeof element.className === 'string') {
+    const classes = element.className.split(' ')
+      .filter(c => c.trim() && !isTailwindClass(c))
+      .slice(0, 3); // Limit to 3 classes max
+
+    if (classes.length > 0) {
+      try {
+        // Try with all filtered classes
+        const escapedClasses = classes.map(c => {
+          try {
+            return CSS.escape(c);
+          } catch (e) {
+            return c.replace(/[^\w-]/g, '\\$&');
+          }
+        });
+        const selector = `${tagName}.${escapedClasses.join('.')}`;
+        if (document.querySelectorAll(selector).length === 1) {
+          return selector;
+        }
+
+        // Try with first class only
+        const firstClassSelector = `${tagName}.${escapedClasses[0]}`;
+        if (document.querySelectorAll(firstClassSelector).length === 1) {
+          return firstClassSelector;
+        }
+      } catch (e) {
+        // Invalid selector, continue to fallback
+      }
+    }
+  }
+
+  // 8. Fallback: nth-of-type with path
   let current = element;
   const path = [];
 
   while (current && current.tagName) {
     let selector = current.tagName.toLowerCase();
 
-    if (current.id) {
-      selector = `#${current.id}`;
+    // Stop at element with ID
+    if (current.id && isSafeSelectorValue(current.id)) {
+      try {
+        selector = `#${CSS.escape(current.id)}`;
+      } catch (e) {
+        selector = `#${current.id.replace(/[^\w-]/g, '\\$&')}`;
+      }
       path.unshift(selector);
       break;
     }
 
+    // Calculate nth-of-type
     let sibling = current;
     let nth = 1;
 
@@ -382,7 +490,9 @@ function getUniqueSelectorInPage(element) {
       }
     }
 
-    if (nth > 1) {
+    // Only add nth-of-type if there are multiple siblings of same type
+    if (nth > 1 || (current.parentElement &&
+        Array.from(current.parentElement.children).filter(c => c.tagName === current.tagName).length > 1)) {
       selector += `:nth-of-type(${nth})`;
     }
 

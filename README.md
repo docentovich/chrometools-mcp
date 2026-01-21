@@ -8,10 +8,10 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 - [Usage](#usage)
 - [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
 - [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
-- [Available Tools](#available-tools) - **40+ Tools Total**
+- [Available Tools](#available-tools) - **44+ Tools Total**
   - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getAllInteractiveElements, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
-  - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo
+  - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, dragScroll, scrollHorizontal
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
   - [Recorder Tools](#6-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
@@ -112,6 +112,39 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
 📚 [Full Recorder Guide](RECORDER_QUICKSTART.md) | [Recorder Spec](RECORDER_SPEC.md)
 
 ## Available Tools
+
+### ⚠️ Tool Usage Priority
+
+**CRITICAL: Always use specialized tools first. Never jump to `executeScript` as first choice.**
+
+#### For Clicking/Interaction
+1. ✅ **`click()`** - PRIMARY tool for all clicks
+   - Works correctly with React/Vue/Angular synthetic events
+   - Handles button clicks, link navigation, form submissions
+2. ✅ **`findElementsByText()` + action** - When selector is unknown, find by text
+3. ⚠️ **`executeScript()`** - LAST RESORT, only if above failed
+
+#### For Filling Forms
+1. ✅ **`type()`** - PRIMARY tool for all text input
+   - Properly updates React hooks, Vue reactive data
+   - Auto-clears field before typing (configurable)
+2. ⚠️ **`executeScript()`** - LAST RESORT, only if above failed
+
+#### For Reading Page State
+1. ✅ **`analyzePage()`** - PRIMARY tool for reading page content
+   - Gets forms, inputs, buttons, links with current values
+   - Use `refresh: true` after interactions to see updated state
+   - Efficient: 2-5k tokens vs screenshot 15-25k
+2. ✅ **`findElementsByText()`** - Find specific elements by visible text
+3. ✅ **`getElement()`** - Get HTML of specific element
+4. ⚠️ **`executeScript()`** - LAST RESORT, only if above failed
+
+**Why specialized tools matter:**
+- ✅ Trigger proper browser events (click, input, change)
+- ✅ Work with React/Vue/Angular synthetic event systems
+- ✅ Update framework state correctly (React hooks, Vue reactivity)
+- ✅ Handle animations, navigation, and async updates
+- ❌ `executeScript` bypasses framework events and may fail silently
 
 ### AI-Powered Tools
 
@@ -228,6 +261,40 @@ Scroll page to bring element into view.
   - `behavior` (optional): "auto" or "smooth"
 - **Use case**: Lazy loading, sticky elements, visibility checks
 - **Returns**: Final scroll position
+
+#### selectOption
+Select option in dropdown (HTML select elements). Automatically detected by analyzePage with all available options.
+- **Parameters**:
+  - `selector` (required): CSS selector for select element
+  - `value` (optional): Option value attribute (priority 1)
+  - `text` (optional): Option text content (priority 2)
+  - `index` (optional): Option index, 0-based (priority 3)
+- **Use case**: Form dropdowns, filtering, selection menus
+- **Returns**: Selected option details (value, text, index)
+- **Selection priority**: If multiple parameters specified, tries value → text → index
+- **AI Integration**: Use `analyzePage` to see all available options with their values, text, and indices
+
+#### drag
+Drag element by mouse (click-hold-move-release). Simulates real mouse drag, not scrollbar scrolling.
+- **Parameters**:
+  - `selector` (required): CSS selector for element to drag
+  - `direction` (required): 'up', 'down', 'left', 'right', 'up-left', 'up-right', 'down-left', 'down-right'
+  - `distance` (optional): Distance in pixels (default: 100)
+  - `duration` (optional): Drag duration in milliseconds (default: 500)
+- **Use case**: Interactive maps (Google Maps, Leaflet), Gantt charts, SVG diagrams, canvas elements, sliders, drag-to-pan interfaces
+- **How it works**: Moves mouse to element center, presses mouse button, drags to target position, releases button
+- **NOT for**: Standard overflow scrollbars (use `scrollTo` or `scrollHorizontal` instead)
+- **Returns**: Start/end mouse positions and drag delta
+
+#### scrollHorizontal
+Scroll element horizontally (for tables, carousels, wide content).
+- **Parameters**:
+  - `selector` (required): CSS selector for element to scroll
+  - `direction` (required): 'left' or 'right'
+  - `amount` (required): Number of pixels to scroll, or 'full' to scroll to the end
+  - `behavior` (optional): 'auto' or 'smooth' (default: 'auto')
+- **Use case**: Wide tables, image carousels, horizontally scrollable containers
+- **Returns**: Scroll state (position, total width, visible width, scroll availability)
 
 ### 3. Inspection Tools
 
@@ -471,6 +538,27 @@ Extract complete color palette with usage statistics.
   - Usage count
   - Usage examples (where the color is used)
   - Sorted by usage frequency
+
+#### convertFigmaToCode ⭐ NEW
+Convert Figma designs to React/Tailwind code with AI assistance.
+- **Parameters**:
+  - `figmaToken` (optional): Figma API token
+  - `fileKey` (required): Figma file key
+  - `nodeId` (required): Frame/component ID (formats: '123:456' or '123-456')
+  - `framework` (optional): 'react', 'react-typescript', or 'html' (default: 'react')
+  - `includeComments` (optional): Include code comments (default: true)
+- **Use case**: Rapid prototyping, design-to-code workflow, implementing Figma designs
+- **How it works**:
+  1. Fetches design structure (layout, colors, typography, spacing)
+  2. Gets rendered design image at 2x resolution
+  3. Returns AI-optimized instructions with simplified JSON structure
+  4. AI generates clean React/Tailwind code matching the design
+- **Returns**: Formatted instruction prompt containing:
+  - Design image reference
+  - Simplified JSON structure with layout, styling, text properties
+  - Framework-specific guidelines (React components, TypeScript types, Tailwind classes)
+  - Quality requirements (semantic HTML, accessibility, accurate spacing)
+- **Best for**: UI components, landing pages, card designs, navigation bars
 
 #### getFigmaFrame
 Export and download a Figma frame as PNG/JPG image with automatic compression.
@@ -997,9 +1085,9 @@ Each tool definition is sent to the AI in every request, consuming context token
 | `debug` | Debugging & network | `getConsoleLogs`, `listNetworkRequests`, `getNetworkRequest`, `filterNetworkRequests` (4) |
 | `advanced` | Advanced automation & AI | `executeScript`, `setStyles`, `setViewport`, `getViewport`, `navigateTo`, `smartFindElement`, `analyzePage`, `getAllInteractiveElements`, `findElementsByText` (9) |
 | `recorder` | Scenario recording | `enableRecorder`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`, `appendScenarioToFile`, `generatePageObject` (9) |
-| `figma` | Figma integration | `getFigmaFrame`, `compareFigmaToElement`, `getFigmaSpecs`, `parseFigmaUrl`, `listFigmaPages`, `searchFigmaFrames`, `getFigmaComponents`, `getFigmaStyles`, `getFigmaColorPalette` (9) |
+| `figma` | Figma integration | `getFigmaFrame`, `compareFigmaToElement`, `getFigmaSpecs`, `parseFigmaUrl`, `listFigmaPages`, `searchFigmaFrames`, `getFigmaComponents`, `getFigmaStyles`, `getFigmaColorPalette`, `convertFigmaToCode` (10) |
 
-**Total:** 43 tools across 7 groups
+**Total:** 44 tools across 7 groups
 
 **Configuration:**
 

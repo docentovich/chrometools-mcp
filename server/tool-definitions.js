@@ -28,7 +28,7 @@ export const toolDefinitions = [
       },
       {
         name: "click",
-        description: "Click element. Waits for animations. Optional screenshot parameter.",
+        description: "PRIMARY tool for clicking elements. Works correctly with React/Vue/Angular synthetic events. DO NOT use executeScript for clicks - use this tool instead. Waits for animations and navigation.",
         inputSchema: {
           type: "object",
           properties: {
@@ -42,7 +42,7 @@ export const toolDefinitions = [
       },
       {
         name: "type",
-        description: "Type text into input field. Optional clear and typing delay.",
+        description: "PRIMARY tool for filling input fields. Works correctly with React/Vue/Angular state management. DO NOT use executeScript for typing - use this tool instead. Automatically updates framework state (React hooks, Vue reactive data).",
         inputSchema: {
           type: "object",
           properties: {
@@ -159,7 +159,7 @@ export const toolDefinitions = [
       },
       {
         name: "executeScript",
-        description: "Execute JavaScript. Use only when specialized tools insufficient. Prefer analyzePage or findElementsByText.",
+        description: "⚠️ LAST RESORT tool - use ONLY when ALL specialized tools failed. NEVER use for: clicking (use click), typing (use type), reading page (use analyzePage), finding elements (use findElementsByText). May break React/Vue/Angular synthetic events. ALWAYS try specialized tools first.",
         inputSchema: {
           type: "object",
           properties: {
@@ -229,6 +229,48 @@ export const toolDefinitions = [
             selector: { type: "string", description: "CSS selector" },
           },
           required: ["selector"],
+        },
+      },
+      {
+        name: "selectOption",
+        description: "Select option in dropdown. Works with HTML select elements. Specify value, text, or index to choose option.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for select element" },
+            value: { type: "string", description: "Option value attribute (priority 1)" },
+            text: { type: "string", description: "Option text content (priority 2)" },
+            index: { type: "number", description: "Option index, 0-based (priority 3)" },
+          },
+          required: ["selector"],
+        },
+      },
+      {
+        name: "drag",
+        description: "Drag element by mouse (click-hold-move-release). Simulates real mouse drag in any direction. Works with interactive maps, Gantt charts, SVG diagrams, canvas, sliders. Does NOT work with standard overflow scrollbars - use scrollTo/scrollHorizontal instead.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for element to drag" },
+            direction: { type: "string", enum: ["up", "down", "left", "right", "up-left", "up-right", "down-left", "down-right"], description: "Drag direction" },
+            distance: { type: "number", description: "Distance in pixels (default: 100)" },
+            duration: { type: "number", description: "Drag duration in ms (default: 500)" },
+          },
+          required: ["selector", "direction"],
+        },
+      },
+      {
+        name: "scrollHorizontal",
+        description: "Scroll element horizontally. For tables, carousels, and horizontally scrollable containers. Can scroll by pixels or to the end.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: { type: "string", description: "CSS selector for element to scroll" },
+            direction: { type: "string", enum: ["left", "right"], description: "Scroll direction" },
+            amount: { description: "Pixels to scroll or 'full' for end" },
+            behavior: { type: "string", enum: ["auto", "smooth"], description: "Scroll behavior (default: auto)" },
+          },
+          required: ["selector", "direction", "amount"],
         },
       },
       {
@@ -404,6 +446,21 @@ export const toolDefinitions = [
         },
       },
       {
+        name: "convertFigmaToCode",
+        description: "Convert Figma design to React/Tailwind code. Fetches node structure and rendered image, returns simplified design data with AI instructions for generating clean, semantic code. Focuses on React components with Tailwind CSS styling.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            figmaToken: { type: "string", description: "API token (optional)" },
+            fileKey: { type: "string", description: "File key" },
+            nodeId: { type: "string", description: "Frame/component ID (formats: '123:456' or '123-456')" },
+            framework: { type: "string", enum: ["react", "react-typescript", "html"], description: "Target framework (default: react)" },
+            includeComments: { type: "boolean", description: "Include comments (default: true)" },
+          },
+          required: ["fileKey", "nodeId"],
+        },
+      },
+      {
         name: "smartFindElement",
         description: "Find elements with natural language. Returns ranked candidates. Prefer analyzePage for better performance.",
         inputSchema: {
@@ -429,7 +486,7 @@ export const toolDefinitions = [
       },
       {
         name: "analyzePage",
-        description: "Get page state: forms, inputs, buttons, links with values. Use refresh:true after interactions. Cached per URL. 2-5k tokens vs screenshot 15-25k. Set includeAll:true to get ALL page elements (useful for layout work and styling non-interactive elements).",
+        description: "PRIMARY tool for reading page state (forms, inputs, buttons, links, values). Use this INSTEAD of executeScript for reading page content. Use refresh:true after clicks/submissions to see updated state. Efficient: 2-5k tokens vs screenshot 15-25k. includeAll:true gets ALL elements including non-interactive.",
         inputSchema: {
           type: "object",
           properties: {
@@ -450,7 +507,7 @@ export const toolDefinitions = [
       },
       {
         name: "findElementsByText",
-        description: "Find elements by text. Returns elements with selectors. Optional actions on first match.",
+        description: "Find elements by visible text content and get their selectors. Use this INSTEAD of executeScript when you need to find elements. Returns working selectors that can be used with click/type tools. Can optionally perform actions directly.",
         inputSchema: {
           type: "object",
           properties: {
