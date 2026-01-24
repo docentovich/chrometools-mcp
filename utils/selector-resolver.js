@@ -6,8 +6,19 @@
 /**
  * Global registry for Page Object element IDs
  * Maps element IDs to their selectors
+ * Use window.__ELEMENT_REGISTRY__ in browser for persistence across page.evaluate calls
  */
-const elementRegistry = new Map();
+let elementRegistry;
+if (typeof window !== 'undefined') {
+  // Browser context - use global registry
+  if (!window.__ELEMENT_REGISTRY__) {
+    window.__ELEMENT_REGISTRY__ = new Map();
+  }
+  elementRegistry = window.__ELEMENT_REGISTRY__;
+} else {
+  // Node.js context
+  elementRegistry = new Map();
+}
 
 /**
  * Register element from Page Object
@@ -158,4 +169,18 @@ if (typeof module !== 'undefined' && module.exports) {
     isPageObjectId,
     elementRegistry
   };
+}
+
+// Export for browser context (global scope)
+if (typeof window !== 'undefined') {
+  window.registerElement = registerElement;
+  window.registerElements = registerElements;
+  window.clearRegistry = clearRegistry;
+  window.resolveSelector = resolveSelector;
+  window.findElement = findElement;
+  window.findElements = findElements;
+  window.getElementInfo = getElementInfo;
+  window.getRegisteredIds = getRegisteredIds;
+  window.getRegistryStats = getRegistryStats;
+  window.isPageObjectId = isPageObjectId;
 }
