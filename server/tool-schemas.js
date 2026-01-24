@@ -249,6 +249,9 @@ export const SmartFindElementSchema = z.object({
 export const AnalyzePageSchema = z.object({
   refresh: z.boolean().optional().describe("Force refresh of cached analysis (default: false)"),
   includeAll: z.boolean().optional().describe("Include all elements on page, not just interactive ones (default: false). Useful for layout work and finding non-interactive elements to style."),
+  generateIds: z.boolean().optional().describe("Generate unique IDs for all elements and return in APOM format (default: false for backward compatibility, will be true in v3.0.0)"),
+  registerElements: z.boolean().optional().describe("Automatically register elements in selector resolver (default: true when generateIds is true)"),
+  groupBy: z.enum(['type', 'flat']).optional().describe("Group elements by type or return flat structure (default: 'type')"),
 });
 
 export const GetAllInteractiveElementsSchema = z.object({

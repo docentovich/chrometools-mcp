@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - WIP
+
+### Added (APOM Foundation)
+- **Agent Page Object Model (APOM) Support** - `analyzePage` now supports APOM format
+  - New parameter: `generateIds: true` - Generate unique IDs for all elements
+  - New parameter: `registerElements: true` - Auto-register elements in selector resolver
+  - New parameter: `groupBy: 'type' | 'flat'` - Control element grouping
+  - Returns structured model with `pageId`, `elements`, `groups`, `metadata`
+  - Each element gets unique ID (e.g., `input_0`, `button_1`, `form_0`)
+  - Elements automatically registered for use with click/type/etc. tools
+  - **Backward compatible**: Without `generateIds`, returns legacy format
+
+- **New POM Modules**
+  - `pom/element-id-generator.js` - Unique ID generation (testid > id > semantic path)
+  - `pom/apom-converter.js` - Convert analyzePage to APOM format
+
 ## [2.6.0] - 2026-01-25
 
 ### Added

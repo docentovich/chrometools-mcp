@@ -185,6 +185,9 @@ Get current page state and structure. Returns complete map of forms (with values
 - **Parameters**:
   - `refresh` (optional): Force refresh cache to get CURRENT state after changes (default: false)
   - `includeAll` (optional): Include ALL page elements, not just interactive ones (default: false). Useful for layout work - find any element, get its selector, then use `getComputedCss` or `setStyles` on it.
+  - `generateIds` (optional): Generate unique IDs and return **APOM format** (default: false, will be true in v3.0.0) ⭐ **NEW - APOM**
+  - `registerElements` (optional): Auto-register elements for ID-based usage (default: true when generateIds is true) ⭐ **NEW - APOM**
+  - `groupBy` (optional): 'type' or 'flat' - how to group elements (default: 'type') ⭐ **NEW - APOM**
 - **Why better than screenshot**:
   - Shows actual data (form values, validation errors) not just visual
   - Uses 2-5k tokens vs screenshot 15-25k tokens
@@ -192,10 +195,17 @@ Get current page state and structure. Returns complete map of forms (with values
   - **Detects UI frameworks** (MUI, Ant Design, Chakra, Bootstrap, Vuetify, Semantic UI) ⭐ **NEW**
   - **Extracts dropdown options** from both native `<select>` and custom UI components ⭐ **NEW**
 - **Returns**:
-  - By default: Complete map of forms (with current values), inputs, buttons, links, navigation with selectors
-  - **Each element includes `uiFramework` info** (name, version, component type) ⭐ **NEW**
-  - **Select elements include `options` array** with value, text, index, selected, disabled, group ⭐ **NEW**
-  - With `includeAll: true`: Also includes `allElements` array with ALL visible page elements (divs, spans, headings, etc.) - each with selector, tag, text, classes, id
+  - **Legacy format** (default, `generateIds: false`): Complete map of forms (with current values), inputs, buttons, links, navigation with selectors
+    - **Each element includes `uiFramework` info** (name, version, component type) ⭐ **NEW**
+    - **Select elements include `options` array** with value, text, index, selected, disabled, group ⭐ **NEW**
+    - With `includeAll: true`: Also includes `allElements` array with ALL visible page elements (divs, spans, headings, etc.) - each with selector, tag, text, classes, id
+  - **APOM format** (`generateIds: true`): Structured Page Object Model ⭐ **NEW - Foundation for v3.0.0**
+    - `pageId` - Unique page identifier for validation
+    - `elements` - Object with all elements keyed by unique ID (e.g., `input_0`, `button_1`)
+    - `groups` - Elements grouped by type (forms, inputs, buttons, links)
+    - `metadata` - Total elements count, interactive count, form count
+    - Elements automatically registered - use IDs with `click`, `type`, etc.
+    - Example: After `analyzePage({ generateIds: true })`, use `click({ selector: "button_0" })` instead of CSS selectors
 - **Example workflow**:
   1. `openBrowser({ url: "..." })`
   2. `analyzePage()` ← Initial analysis

@@ -98,6 +98,12 @@ const uiFrameworkDetector = readFileSync(path.join(__dirname, 'utils', 'ui-frame
 // Load selector resolver utilities
 const selectorResolver = readFileSync(path.join(__dirname, 'utils', 'selector-resolver.js'), 'utf-8');
 
+// Load element ID generator utilities
+const elementIdGenerator = readFileSync(path.join(__dirname, 'pom', 'element-id-generator.js'), 'utf-8');
+
+// Load APOM converter utilities
+const apomConverter = readFileSync(path.join(__dirname, 'pom', 'apom-converter.js'), 'utf-8');
+
 // Base storage directory in user's home folder
 const BASE_STORAGE_DIR = path.join(homedir(), '.config', 'chrometools-mcp');
 const GLOBAL_INDEX_PATH = path.join(BASE_STORAGE_DIR, 'index.json');
@@ -1967,16 +1973,14 @@ Start coding now.`;
       const page = await getLastOpenPage();
       const pageUrl = page.url();
 
+      let analysis;
+      let fromCache = false;
+
       // Check cache
       if (!validatedArgs.refresh && pageAnalysisCache.has(pageUrl)) {
-        const cached = pageAnalysisCache.get(pageUrl);
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({ ...cached, fromCache: true }, null, 2)
-          }]
-        };
-      }
+        analysis = pageAnalysisCache.get(pageUrl);
+        fromCache = true;
+      } else {
 
       // Perform comprehensive analysis
       const analysis = await page.evaluate((includeAll, utilsCode, uiDetectorCode, selectorResolverCode) => {
@@ -2186,10 +2190,52 @@ Start coding now.`;
         return result;
       }, validatedArgs.includeAll || false, elementFinderUtils, uiFrameworkDetector, selectorResolver);
 
-      // Cache the result
-      pageAnalysisCache.set(pageUrl, analysis);
+        // Cache the result
+        pageAnalysisCache.set(pageUrl, analysis);
+      }
 
-      // Add hints
+      // Convert to APOM format if requested
+      if (validatedArgs.generateIds) {
+        const apomResult = await page.evaluate((analysisData, apomConverterCode, selectorResolverCode) => {
+          console.log('[APOM] Starting conversion...');
+
+          // Inject utilities
+          eval(apomConverterCode);
+          eval(selectorResolverCode);
+
+          console.log('[APOM] convertToAPOM available:', typeof convertToAPOM);
+
+          // Convert to APOM format
+          const apomData = convertToAPOM(analysisData, {
+            registerElements: true,
+            groupBy: 'type'
+          });
+
+          console.log('[APOM] Conversion complete, elements:', Object.keys(apomData.elements).length);
+
+          // Register elements in selector resolver
+          const elementsArray = Object.values(apomData.elements).map(el => ({
+            id: el.id,
+            selector: el.selector,
+            metadata: { type: el.type }
+          }));
+
+          if (typeof registerElements !== 'undefined') {
+            registerElements(elementsArray);
+          }
+
+          return apomData;
+        }, analysis, apomConverter, selectorResolver);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(apomResult, null, 2)
+          }]
+        };
+      }
+
+      // Legacy format (default for backward compatibility)
       const hints = {
         summary: `Found ${analysis.forms.length} forms, ${analysis.buttons.length} buttons, ${analysis.inputs.length} inputs, ${analysis.links.length} links`,
         suggestion: analysis.forms.length > 0
