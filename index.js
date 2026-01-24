@@ -1983,7 +1983,7 @@ Start coding now.`;
       } else {
 
       // Perform comprehensive analysis
-      const analysis = await page.evaluate((includeAll, utilsCode, uiDetectorCode, selectorResolverCode) => {
+      analysis = await page.evaluate((includeAll, utilsCode, uiDetectorCode, selectorResolverCode) => {
         // Inject utilities
         eval(utilsCode);
         eval(uiDetectorCode);
