@@ -92,6 +92,12 @@ const __dirname = dirname(__filename);
 // Load element finder utilities
 const elementFinderUtils = readFileSync(path.join(__dirname, 'element-finder-utils.js'), 'utf-8');
 
+// Load UI framework detector utilities
+const uiFrameworkDetector = readFileSync(path.join(__dirname, 'utils', 'ui-framework-detector.js'), 'utf-8');
+
+// Load selector resolver utilities
+const selectorResolver = readFileSync(path.join(__dirname, 'utils', 'selector-resolver.js'), 'utf-8');
+
 // Base storage directory in user's home folder
 const BASE_STORAGE_DIR = path.join(homedir(), '.config', 'chrometools-mcp');
 const GLOBAL_INDEX_PATH = path.join(BASE_STORAGE_DIR, 'index.json');
@@ -272,6 +278,26 @@ async function executeToolInternal(name, args) {
       };
     }
 
+    /**
+     * Helper: Resolve selector (ID or CSS selector)
+     * Injects selector-resolver and resolves element identifier
+     */
+    async function resolveSelector(page, identifier) {
+      return await page.evaluate((id, selectorResolverCode) => {
+        // Inject selector resolver if not already loaded
+        if (typeof resolveSelector === 'undefined') {
+          eval(selectorResolverCode);
+        }
+
+        const resolved = resolveSelector(id);
+        return {
+          selector: resolved.selector,
+          isPageObjectId: resolved.isPageObjectId,
+          found: document.querySelector(resolved.selector) !== null
+        };
+      }, identifier, selectorResolver);
+    }
+
     if (name === "click") {
       const validatedArgs = schemas.ClickSchema.parse(args);
       const page = await getLastOpenPage();
@@ -279,7 +305,13 @@ async function executeToolInternal(name, args) {
 
       // Wrap operation in timeout
       const clickOperation = async () => {
-        const element = await page.$(validatedArgs.selector);
+        // Resolve selector (supports both ID and CSS selector)
+        const resolved = await resolveSelector(page, validatedArgs.selector);
+        if (!resolved.found) {
+          throw new Error(`Element not found: ${validatedArgs.selector}${resolved.isPageObjectId ? ' (Page Object ID)' : ' (CSS selector)'}`);
+        }
+
+        const element = await page.$(resolved.selector);
         if (!element) {
           throw new Error(`Element not found: ${validatedArgs.selector}`);
         }
@@ -324,7 +356,13 @@ async function executeToolInternal(name, args) {
       const validatedArgs = schemas.TypeSchema.parse(args);
       const page = await getLastOpenPage();
 
-      const element = await page.$(validatedArgs.selector);
+      // Resolve selector (supports both ID and CSS selector)
+      const resolved = await resolveSelector(page, validatedArgs.selector);
+      if (!resolved.found) {
+        throw new Error(`Element not found: ${validatedArgs.selector}${resolved.isPageObjectId ? ' (Page Object ID)' : ' (CSS selector)'}`);
+      }
+
+      const element = await page.$(resolved.selector);
       if (!element) {
         throw new Error(`Element not found: ${validatedArgs.selector}`);
       }
@@ -913,6 +951,12 @@ async function executeToolInternal(name, args) {
       const validatedArgs = schemas.SelectOptionSchema.parse(args);
       const page = await getLastOpenPage();
 
+      // Resolve selector (supports both ID and CSS selector)
+      const resolved = await resolveSelector(page, validatedArgs.selector);
+      if (!resolved.found) {
+        throw new Error(`Element not found: ${validatedArgs.selector}${resolved.isPageObjectId ? ' (Page Object ID)' : ' (CSS selector)'}`);
+      }
+
       // Select option with priority: value > text > index
       const result = await page.evaluate((selector, value, text, index) => {
         const selectElement = document.querySelector(selector);
@@ -962,7 +1006,7 @@ async function executeToolInternal(name, args) {
           selectedText: selectedOption.textContent.trim(),
           selectedIndex: selectElement.selectedIndex
         };
-      }, validatedArgs.selector, validatedArgs.value, validatedArgs.text, validatedArgs.index);
+      }, resolved.selector, validatedArgs.value, validatedArgs.text, validatedArgs.index);
 
       if (!result.success) {
         throw new Error(result.error);
@@ -1935,9 +1979,11 @@ Start coding now.`;
       }
 
       // Perform comprehensive analysis
-      const analysis = await page.evaluate((includeAll, utilsCode) => {
+      const analysis = await page.evaluate((includeAll, utilsCode, uiDetectorCode, selectorResolverCode) => {
         // Inject utilities
         eval(utilsCode);
+        eval(uiDetectorCode);
+        eval(selectorResolverCode);
 
         const result = {
           url: window.location.href,
@@ -1984,17 +2030,19 @@ Start coding now.`;
 
             // Add select-specific information
             if (field.tagName === 'SELECT') {
-              fieldData.options = Array.from(field.options).map((opt, idx) => ({
-                value: opt.value,
-                text: opt.textContent.trim(),
-                index: idx,
-                selected: opt.selected,
-                disabled: opt.disabled
-              }));
-              fieldData.selectedIndex = field.selectedIndex;
-              fieldData.selectedValue = field.value;
-              fieldData.selectedText = field.options[field.selectedIndex]?.textContent.trim() || null;
+              // Use UI framework detector to extract options
+              const selectData = extractSelectOptions(field);
+              if (selectData) {
+                fieldData.options = selectData.options;
+                fieldData.selectedIndex = selectData.selectedIndex;
+                fieldData.selectedValue = selectData.selectedValue;
+                fieldData.selectedText = selectData.selectedText;
+                fieldData.multiple = selectData.multiple;
+              }
             }
+
+            // Detect UI framework for all fields
+            fieldData.uiFramework = detectUIFramework(field);
 
             formData.fields.push(fieldData);
           });
@@ -2037,17 +2085,19 @@ Start coding now.`;
 
           // Add select-specific information
           if (input.tagName === 'SELECT') {
-            inputData.options = Array.from(input.options).map((opt, idx) => ({
-              value: opt.value,
-              text: opt.textContent.trim(),
-              index: idx,
-              selected: opt.selected,
-              disabled: opt.disabled
-            }));
-            inputData.selectedIndex = input.selectedIndex;
-            inputData.selectedValue = input.value;
-            inputData.selectedText = input.options[input.selectedIndex]?.textContent.trim() || null;
+            // Use UI framework detector to extract options
+            const selectData = extractSelectOptions(input);
+            if (selectData) {
+              inputData.options = selectData.options;
+              inputData.selectedIndex = selectData.selectedIndex;
+              inputData.selectedValue = selectData.selectedValue;
+              inputData.selectedText = selectData.selectedText;
+              inputData.multiple = selectData.multiple;
+            }
           }
+
+          // Detect UI framework for all inputs
+          inputData.uiFramework = detectUIFramework(input);
 
           result.inputs.push(inputData);
         });
@@ -2134,7 +2184,7 @@ Start coding now.`;
         }
 
         return result;
-      }, validatedArgs.includeAll || false, elementFinderUtils);
+      }, validatedArgs.includeAll || false, elementFinderUtils, uiFrameworkDetector, selectorResolver);
 
       // Cache the result
       pageAnalysisCache.set(pageUrl, analysis);
@@ -2861,6 +2911,50 @@ Start coding now.`;
           isError: true
         };
       }
+    }
+
+    if (name === "registerPageObject") {
+      const validatedArgs = schemas.RegisterPageObjectSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      // Register elements in page context
+      const result = await page.evaluate((elements, clearExisting, selectorResolverCode) => {
+        // Inject selector resolver if not already loaded
+        if (typeof registerElements === 'undefined') {
+          eval(selectorResolverCode);
+        }
+
+        // Clear existing registry if requested
+        if (clearExisting && typeof clearRegistry !== 'undefined') {
+          clearRegistry();
+        }
+
+        // Register all elements
+        if (typeof registerElements !== 'undefined') {
+          registerElements(elements);
+          return {
+            success: true,
+            registered: elements.length,
+            message: `Successfully registered ${elements.length} elements from Page Object`
+          };
+        } else {
+          return {
+            success: false,
+            error: 'Failed to load selector resolver'
+          };
+        }
+      }, validatedArgs.elements, validatedArgs.clearExisting || false, selectorResolver);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ...result,
+            hint: 'You can now use element IDs (e.g., "login_email_input") in click, type, selectOption and other tools instead of CSS selectors'
+          }, null, 2)
+        }],
+        isError: !result.success
+      };
     }
 
     return {

@@ -324,3 +324,12 @@ export const GeneratePageObjectSchema = z.object({
   includeComments: z.boolean().optional().describe("Include descriptive comments in generated code (default: true)"),
   groupElements: z.boolean().optional().describe("Group elements by page sections (default: true)")
 });
+
+export const RegisterPageObjectSchema = z.object({
+  elements: z.array(z.object({
+    id: z.string().describe("Unique element ID for Page Object"),
+    selector: z.string().describe("CSS selector for the element"),
+    metadata: z.record(z.any()).optional().describe("Optional metadata (type, label, options, etc.)")
+  })).describe("Array of elements to register from Page Object"),
+  clearExisting: z.boolean().optional().describe("Clear existing registry before registering (default: false)")
+});

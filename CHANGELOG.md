@@ -2,6 +2,62 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.0] - 2026-01-25
+
+### Added
+- **UI Framework Detection** - Automatic detection of UI component libraries (MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI)
+  - New utility: `utils/ui-framework-detector.js`
+  - Detects framework name, version, and component type for each element
+  - Integrated into `analyzePage` - all elements now include `uiFramework` field
+  - Extracts options from both native `<select>` and custom framework dropdowns
+
+- **Enhanced Select/Dropdown Options Extraction** - Smart extraction of dropdown options from various UI libraries
+  - Native HTML `<select>` with `<optgroup>` support
+  - Material-UI (MUI) Select components
+  - Ant Design Select components
+  - Chakra UI, Bootstrap, Vuetify, Semantic UI dropdowns
+  - Options include: value, text, index, selected, disabled, group
+  - Handles cases where options aren't rendered until dropdown opens (with informative notes)
+
+- **Page Object ID Support** - Use element IDs instead of CSS selectors
+  - New utility: `utils/selector-resolver.js` - Registry for Page Object element IDs
+  - New tool: `registerPageObject` - Register elements from Page Object for use with IDs
+  - **Backward compatible**: All interaction tools (click, type, selectOption, hover, etc.) now accept BOTH:
+    - Page Object IDs (e.g., `"login_email_input"`)
+    - CSS selectors (e.g., `"input[name='email']"`)
+  - Element registry persists in page context between tool calls
+
+- **`registerPageObject` tool** - Register Page Object elements for ID-based interaction
+  - Parameters:
+    - `elements` (required) - Array of {id, selector, metadata}
+    - `clearExisting` (optional) - Clear registry before registering
+  - Enables using meaningful IDs instead of fragile CSS selectors
+  - Example: After registering, use `click("login_submit_button")` instead of `click("button[type='submit']")`
+
+- **Enhanced Page Object Generation** - Page Objects now include comprehensive element information
+  - Each element gets unique ID: `{name}_{timestamp}_{random}`
+  - Select elements include full options array with groups
+  - UI framework detection for all elements
+  - Metadata includes: type, label, placeholder, required, validation hints
+
+### Changed
+- **`analyzePage` enhanced with UI framework detection**
+  - All form fields and inputs now include `uiFramework` field
+  - Select elements use smart extraction: works with both vanilla HTML and UI frameworks
+  - Better handling of MUI, Ant Design, and other component libraries
+
+- **All interaction tools now support dual selector mode**
+  - Tools affected: `click`, `type`, `selectOption`, `hover`, `scrollTo`, `drag`, `setStyles`
+  - Automatically resolves Page Object IDs to CSS selectors
+  - Error messages indicate whether identifier was Page Object ID or CSS selector
+  - No breaking changes - existing CSS selector usage works unchanged
+
+### Technical Details
+- Selector resolution happens in page context using injected `selector-resolver.js`
+- UI framework detection uses class names, data attributes, and DOM structure analysis
+- Element registry stored in browser page context (survives navigation within same page)
+- New helper function `resolveSelector(page, identifier)` in `index.js`
+
 ## [2.5.0] - 2026-01-21
 
 ### Added

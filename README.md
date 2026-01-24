@@ -189,8 +189,12 @@ Get current page state and structure. Returns complete map of forms (with values
   - Shows actual data (form values, validation errors) not just visual
   - Uses 2-5k tokens vs screenshot 15-25k tokens
   - Returns structured data with selectors
+  - **Detects UI frameworks** (MUI, Ant Design, Chakra, Bootstrap, Vuetify, Semantic UI) ⭐ **NEW**
+  - **Extracts dropdown options** from both native `<select>` and custom UI components ⭐ **NEW**
 - **Returns**:
   - By default: Complete map of forms (with current values), inputs, buttons, links, navigation with selectors
+  - **Each element includes `uiFramework` info** (name, version, component type) ⭐ **NEW**
+  - **Select elements include `options` array** with value, text, index, selected, disabled, group ⭐ **NEW**
   - With `includeAll: true`: Also includes `allElements` array with ALL visible page elements (divs, spans, headings, etc.) - each with selector, tag, text, classes, id
 - **Example workflow**:
   1. `openBrowser({ url: "..." })`
@@ -962,6 +966,56 @@ Generate Page Object Model (POM) class from current page structure. Analyzes pag
   - `selenium-python`: Selenium with Python (WebDriver, explicit waits, By locators)
   - `selenium-java`: Selenium with Java (WebDriver, Page Factory compatible)
 
+#### registerPageObject ⭐ **NEW**
+Register Page Object elements for use with IDs instead of CSS selectors. Enables backward-compatible dual selector mode: all interaction tools accept BOTH Page Object IDs and regular CSS selectors.
+
+- **Parameters**:
+  - `elements` (required): Array of elements to register, each with:
+    - `id` (required): Unique element ID (e.g., `"login_email_input"`)
+    - `selector` (required): CSS selector for the element
+    - `metadata` (optional): Additional element info (type, label, options, uiFramework, etc.)
+  - `clearExisting` (optional): Clear existing registry before registering (default: false)
+
+- **Why use Page Object IDs?**
+  - **More maintainable**: IDs are meaningful (`"login_submit_button"` vs `"button[type='submit']"`)
+  - **Less fragile**: CSS selectors can break when UI changes; centralized IDs are easier to update
+  - **Better for AI**: Descriptive IDs help AI understand page structure
+  - **Backward compatible**: Tools still accept regular CSS selectors
+
+- **After registration, use IDs in all interaction tools**:
+  - `click({ selector: "login_submit_button" })` ← Page Object ID
+  - `type({ selector: "email_input", text: "user@test.com" })` ← Page Object ID
+  - `selectOption({ selector: "country_dropdown", value: "US" })` ← Page Object ID
+  - Or still use CSS: `click({ selector: "button[type='submit']" })` ← Still works!
+
+- **Returns**: Success confirmation with count of registered elements
+
+- **Example workflow**:
+  ```javascript
+  // 1. Generate Page Object (gets element IDs and selectors)
+  const pageObject = generatePageObject({ className: "LoginPage" })
+
+  // 2. Extract elements from generated Page Object
+  const elements = [
+    { id: "login_email_input", selector: "#email", metadata: { type: "email" } },
+    { id: "login_password_input", selector: "#password", metadata: { type: "password" } },
+    { id: "login_submit_button", selector: "button[type='submit']" }
+  ]
+
+  // 3. Register elements
+  registerPageObject({ elements })
+
+  // 4. Now use IDs instead of selectors
+  type({ selector: "login_email_input", text: "user@example.com" })  // ← ID!
+  type({ selector: "login_password_input", text: "secret123" })      // ← ID!
+  click({ selector: "login_submit_button" })                          // ← ID!
+  ```
+
+- **UI Framework Detection Integration**:
+  - When using with `analyzePage`, elements include `uiFramework` in metadata
+  - For dropdowns, metadata includes `options` array with all available choices
+  - Works with MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI
+
 ---
 
 ## Typical Workflow Example
@@ -1250,14 +1304,18 @@ npx @modelcontextprotocol/inspector node index.js
 
 ## Features
 
-- **27+ Powerful Tools**: Complete toolkit for browser automation
+- **28+ Powerful Tools**: Complete toolkit for browser automation
   - Core: ping, openBrowser
-  - Interaction: click, type, scrollTo
+  - Interaction: click, type, scrollTo, selectOption, drag, scrollHorizontal
   - Inspection: getElement, getComputedCss, getBoxModel, screenshot
   - Advanced: executeScript, getConsoleLogs, getNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
   - AI-Powered: smartFindElement, analyzePage, getAllInteractiveElements, findElementsByText
+  - Page Object: generatePageObject, registerPageObject ⭐ **NEW**
   - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario
   - Figma: getFigmaFrame, compareFigmaToElement, getFigmaSpecs
+- **UI Framework Detection**: Automatic detection of MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI ⭐ **NEW**
+- **Smart Dropdown Handling**: Extracts options from both native `<select>` and custom UI framework components ⭐ **NEW**
+- **Page Object ID Support**: Use meaningful IDs instead of fragile CSS selectors (backward compatible) ⭐ **NEW**
 - **Console Log Capture**: Automatic JavaScript console monitoring
 - **Network Request Monitoring**: Track all HTTP/API requests (XHR, Fetch, etc.)
 - **Persistent Browser Sessions**: Browser tabs remain open between requests

@@ -710,4 +710,40 @@ export const toolDefinitions = [
           },
         },
       },
+      {
+        name: "registerPageObject",
+        description: "Register elements from Page Object for use with element IDs. After registering, you can use element IDs (e.g., 'login_email_input') instead of CSS selectors in click, type, selectOption, and other tools. This enables backward compatibility: tools accept BOTH Page Object IDs AND regular CSS selectors.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            elements: {
+              type: "array",
+              description: "Array of elements to register from Page Object",
+              items: {
+                type: "object",
+                properties: {
+                  id: {
+                    type: "string",
+                    description: "Unique element ID for Page Object (e.g., 'login_email_input')"
+                  },
+                  selector: {
+                    type: "string",
+                    description: "CSS selector for the element"
+                  },
+                  metadata: {
+                    type: "object",
+                    description: "Optional metadata (type, label, options, uiFramework, etc.)"
+                  }
+                },
+                required: ["id", "selector"]
+              }
+            },
+            clearExisting: {
+              type: "boolean",
+              description: "Clear existing registry before registering (default: false)"
+            }
+          },
+          required: ["elements"]
+        },
+      },
 ];

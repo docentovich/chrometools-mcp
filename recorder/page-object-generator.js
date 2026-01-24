@@ -192,6 +192,7 @@ async function analyzePage(page) {
       }
 
       const elementInfo = {
+        id: `${generateElementName(el)}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Unique ID for Page Object
         tag: el.tagName.toLowerCase(),
         type: el.type || 'element',
         selector: generateSelector(el),
@@ -214,6 +215,21 @@ async function analyzePage(page) {
           height: rect.height
         }
       };
+
+      // Add select options if element is a select
+      if (el.tagName === 'SELECT') {
+        elementInfo.options = Array.from(el.options).map((opt, idx) => ({
+          value: opt.value,
+          text: opt.textContent.trim(),
+          index: idx,
+          selected: opt.selected,
+          disabled: opt.disabled,
+          group: opt.parentElement.tagName === 'OPTGROUP' ? opt.parentElement.label : null
+        }));
+        elementInfo.selectedIndex = el.selectedIndex;
+        elementInfo.selectedValue = el.value;
+        elementInfo.selectedText = el.options[el.selectedIndex]?.textContent.trim() || null;
+      }
 
       elements.push(elementInfo);
     });
