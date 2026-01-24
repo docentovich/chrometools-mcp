@@ -2,19 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - 2026-01-25 (APOM Foundation Complete) ✅
+## [Unreleased] - 2026-01-25 (APOM is Now Default) 🔄
+
+### 🔄 BREAKING CHANGE
+- **`analyzePage` now returns APOM format by default**
+  - Previous default was legacy format, now APOM is default
+  - Use `useLegacyFormat: true` to get old format if needed
+  - Migration: `analyzePage()` now returns APOM instead of legacy
+  - Rationale: APOM is superior - provides unique IDs, better structure, automatic registration
 
 ### Added
-- **🎉 Agent Page Object Model (APOM) - Fully Implemented and Tested**
-  - `analyzePage({ generateIds: true })` returns structured APOM format
-  - New parameter: `generateIds` - Generate unique IDs for all elements (default: false)
-  - New parameter: `registerElements` - Auto-register elements (default: true when generateIds)
-  - New parameter: `groupBy: 'type' | 'flat'` - Control element grouping
+- **🎉 Agent Page Object Model (APOM) - Now Default Format**
+  - `analyzePage()` returns structured APOM format (no parameters needed!)
+  - New parameter: `useLegacyFormat` - Return old format (default: false)
+  - Parameter: `registerElements` - Auto-register elements (default: true)
+  - Parameter: `groupBy: 'type' | 'flat'` - Control element grouping
   - Returns: `{ pageId, url, title, timestamp, elements, groups, metadata }`
   - Each element gets unique ID: `input_0`, `button_1`, `form_0`, `radio_0`, `checkbox_0`
   - Elements automatically registered in persistent `window.__ELEMENT_REGISTRY__`
   - **Use IDs instead of CSS selectors**: `type({ selector: "input_0", text: "..." })`
-  - **Backward compatible**: Without `generateIds`, returns legacy format
+  - **Backward compatible**: Set `useLegacyFormat: true` for old format
   - **Tested**: Fully functional with real-world forms
 
 - **New POM Modules**

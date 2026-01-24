@@ -486,14 +486,14 @@ export const toolDefinitions = [
       },
       {
         name: "analyzePage",
-        description: "PRIMARY tool for reading page state (forms, inputs, buttons, links, values). Use this INSTEAD of executeScript for reading page content. Use refresh:true after clicks/submissions to see updated state. Efficient: 2-5k tokens vs screenshot 15-25k. includeAll:true gets ALL elements including non-interactive. generateIds:true returns APOM format with unique IDs (use this for Agent Page Object Model).",
+        description: "PRIMARY tool for reading page state. Returns APOM (Agent Page Object Model) format by default with unique element IDs. Use element IDs with click/type tools instead of CSS selectors. Use refresh:true after clicks/submissions to see updated state. Efficient: 2-5k tokens vs screenshot 15-25k. Set useLegacyFormat:true for old format.",
         inputSchema: {
           type: "object",
           properties: {
             refresh: { type: "boolean", description: "Refresh cache (default: false)" },
             includeAll: { type: "boolean", description: "Include all elements on page, not just interactive ones (default: false)" },
-            generateIds: { type: "boolean", description: "Generate unique IDs and return APOM format (default: false, will be true in v3.0.0)" },
-            registerElements: { type: "boolean", description: "Auto-register elements in selector resolver (default: true when generateIds is true)" },
+            useLegacyFormat: { type: "boolean", description: "Return legacy format instead of APOM (default: false - APOM is now default)" },
+            registerElements: { type: "boolean", description: "Auto-register elements in selector resolver (default: true)" },
             groupBy: { type: "string", description: "Group elements: 'type' or 'flat' (default: 'type')", enum: ["type", "flat"] },
           },
         },

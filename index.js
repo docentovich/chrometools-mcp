@@ -2194,26 +2194,37 @@ Start coding now.`;
         pageAnalysisCache.set(pageUrl, analysis);
       }
 
-      // Convert to APOM format if requested
-      if (validatedArgs.generateIds) {
-        const apomResult = await page.evaluate((analysisData, apomConverterCode, selectorResolverCode) => {
-          console.log('[APOM] Starting conversion...');
+      // Return legacy format if explicitly requested
+      if (validatedArgs.useLegacyFormat) {
+        const hints = {
+          summary: `Found ${analysis.forms.length} forms, ${analysis.buttons.length} buttons, ${analysis.inputs.length} inputs, ${analysis.links.length} links`,
+          suggestion: analysis.forms.length > 0
+            ? `Start with form: ${analysis.forms[0].selector}`
+            : 'No forms found on this page',
+        };
 
-          // Inject utilities
-          eval(apomConverterCode);
-          eval(selectorResolverCode);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ ...analysis, hints }, null, 2)
+          }]
+        };
+      }
 
-          console.log('[APOM] convertToAPOM available:', typeof convertToAPOM);
+      // APOM format (default)
+      const apomResult = await page.evaluate((analysisData, apomConverterCode, selectorResolverCode, shouldRegister) => {
+        // Inject utilities
+        eval(apomConverterCode);
+        eval(selectorResolverCode);
 
-          // Convert to APOM format
-          const apomData = convertToAPOM(analysisData, {
-            registerElements: true,
-            groupBy: 'type'
-          });
+        // Convert to APOM format
+        const apomData = convertToAPOM(analysisData, {
+          registerElements: shouldRegister,
+          groupBy: 'type'
+        });
 
-          console.log('[APOM] Conversion complete, elements:', Object.keys(apomData.elements).length);
-
-          // Register elements in selector resolver
+        // Register elements in selector resolver if requested
+        if (shouldRegister) {
           const elementsArray = Object.values(apomData.elements).map(el => ({
             id: el.id,
             selector: el.selector,
@@ -2223,30 +2234,15 @@ Start coding now.`;
           if (typeof registerElements !== 'undefined') {
             registerElements(elementsArray);
           }
+        }
 
-          return apomData;
-        }, analysis, apomConverter, selectorResolver);
-
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify(apomResult, null, 2)
-          }]
-        };
-      }
-
-      // Legacy format (default for backward compatibility)
-      const hints = {
-        summary: `Found ${analysis.forms.length} forms, ${analysis.buttons.length} buttons, ${analysis.inputs.length} inputs, ${analysis.links.length} links`,
-        suggestion: analysis.forms.length > 0
-          ? `Start with form: ${analysis.forms[0].selector}`
-          : 'No forms found on this page',
-      };
+        return apomData;
+      }, analysis, apomConverter, selectorResolver, validatedArgs.registerElements !== false);
 
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ ...analysis, hints }, null, 2)
+          text: JSON.stringify(apomResult, null, 2)
         }]
       };
     }
