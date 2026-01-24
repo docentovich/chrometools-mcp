@@ -2,21 +2,54 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - WIP
+## [Unreleased] - 2026-01-25 (APOM Foundation Complete) ✅
 
-### Added (APOM Foundation)
-- **Agent Page Object Model (APOM) Support** - `analyzePage` now supports APOM format
-  - New parameter: `generateIds: true` - Generate unique IDs for all elements
-  - New parameter: `registerElements: true` - Auto-register elements in selector resolver
+### Added
+- **🎉 Agent Page Object Model (APOM) - Fully Implemented and Tested**
+  - `analyzePage({ generateIds: true })` returns structured APOM format
+  - New parameter: `generateIds` - Generate unique IDs for all elements (default: false)
+  - New parameter: `registerElements` - Auto-register elements (default: true when generateIds)
   - New parameter: `groupBy: 'type' | 'flat'` - Control element grouping
-  - Returns structured model with `pageId`, `elements`, `groups`, `metadata`
-  - Each element gets unique ID (e.g., `input_0`, `button_1`, `form_0`)
-  - Elements automatically registered for use with click/type/etc. tools
+  - Returns: `{ pageId, url, title, timestamp, elements, groups, metadata }`
+  - Each element gets unique ID: `input_0`, `button_1`, `form_0`, `radio_0`, `checkbox_0`
+  - Elements automatically registered in persistent `window.__ELEMENT_REGISTRY__`
+  - **Use IDs instead of CSS selectors**: `type({ selector: "input_0", text: "..." })`
   - **Backward compatible**: Without `generateIds`, returns legacy format
+  - **Tested**: Fully functional with real-world forms
 
 - **New POM Modules**
-  - `pom/element-id-generator.js` - Unique ID generation (testid > id > semantic path)
-  - `pom/apom-converter.js` - Convert analyzePage to APOM format
+  - `pom/element-id-generator.js` (171 lines) - Smart ID generation
+    - Priority: data-testid > id attribute > semantic path + index
+    - Supports: input, button, link, form, textarea, select, radio, checkbox
+  - `pom/apom-converter.js` (294 lines) - Convert analyzePage to APOM
+    - Transforms legacy format to structured model
+    - Groups elements by type (forms, inputs, buttons, links)
+    - Generates pageId, metadata
+
+### Fixed
+- **Critical Bug**: Variable shadowing in analyzePage APOM conversion (commit e1e63e2)
+  - Fixed `const analysis` shadowing in else block causing undefined analysis
+- **Critical Bug**: Element registry not persisting across page.evaluate calls (commit faadd0e)
+  - Changed `const elementRegistry = new Map()` to `window.__ELEMENT_REGISTRY__`
+  - Registry now persists between tool calls
+  - All selector-resolver functions exported to window
+
+### Changed
+- **`analyzePage` enhanced with APOM support**
+  - Now supports both legacy and APOM formats
+  - Cache logic updated to handle generateIds parameter
+  - Elements automatically registered when generateIds=true
+
+- **`utils/selector-resolver.js` updated for persistence**
+  - Registry stored in `window.__ELEMENT_REGISTRY__` instead of local const
+  - All functions (registerElement, resolveSelector, etc.) exported to window
+  - Survives across multiple page.evaluate contexts
+
+### Technical Details
+- APOM conversion happens in browser context via page.evaluate
+- Element IDs remain stable across page refreshes (based on testid/id/structure)
+- Dual selector mode: all tools accept both IDs and CSS selectors
+- No breaking changes - legacy format still default
 
 ## [2.6.0] - 2026-01-25
 

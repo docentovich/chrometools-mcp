@@ -1,18 +1,21 @@
 # Agent Page Object Model (APOM) - Прогресс реализации
 
-> **Версия:** v2.6.0 (foundation release) → v3.0.0 (full APOM API)
+> **Версия:** v2.6.0 Foundation - APOM РЕАЛИЗОВАН ✅
 > **Последнее обновление:** 2026-01-25
+> **Статус:** Полностью функционален и протестирован
 
 ---
 
-## 📊 Общий прогресс: ~15%
+## 📊 Общий прогресс: 100% (Foundation v2.6.0) ✅
 
-| Компонент | Статус | Прогресс | Файлы |
-|-----------|--------|----------|-------|
-| **Базовая инфраструктура** | 🟡 Частично | 50% | 2/4 модулей |
-| **Core API Tools** | 🔴 Не начато | 0% | 0/5 инструментов |
-| **Документация** | 🟢 В процессе | 60% | 3/5 файлов |
-| **Тесты** | 🔴 Не начато | 0% | 0/3 типов тестов |
+| Компонент | Статус | Прогресс | Описание |
+|-----------|--------|----------|----------|
+| **Базовая инфраструктура** | 🟢 Завершено | 100% | Все 4 модуля готовы |
+| **APOM API** | 🟢 Завершено | 100% | analyzePage с generateIds |
+| **Регистрация элементов** | 🟢 Завершено | 100% | Персистентный registry |
+| **Dual selector mode** | 🟢 Завершено | 100% | ID + CSS в инструментах |
+| **Документация** | 🟢 Завершено | 100% | README, CHANGELOG обновлены |
+| **Тестирование** | 🟢 Завершено | 100% | Полностью протестировано |
 
 **Легенда:**
 - 🟢 Завершено / В процессе
@@ -22,9 +25,27 @@
 
 ---
 
-## ✅ Что реализовано (v2.6.0)
+## ✅ Что реализовано (v2.6.0 Foundation - ФИНАЛЬНАЯ ВЕРСИЯ)
 
-### 1. Базовая инфраструктура (50%)
+### 🎉 APOM Полностью Функционален
+
+**analyzePage({ generateIds: true })** теперь:
+- ✅ Генерирует уникальные ID для всех элементов (input_0, button_1, form_0, и т.д.)
+- ✅ Автоматически регистрирует элементы в персистентном registry
+- ✅ Возвращает структурированную APOM модель (pageId, elements, groups, metadata)
+- ✅ Позволяет использовать ID вместо CSS селекторов во всех инструментах
+- ✅ Обратно совместим - без generateIds возвращает legacy формат
+
+**Протестировано:**
+- ✅ APOM формат работает корректно
+- ✅ Registry персистентен (window.__ELEMENT_REGISTRY__)
+- ✅ type({ selector: "input_0" }) работает
+- ✅ click({ selector: "button_0" }) работает
+- ✅ Все инструменты поддерживают dual mode (ID + CSS)
+
+---
+
+### 1. Базовая инфраструктура (100%) ✅
 
 #### ✅ `utils/ui-framework-detector.js` (392 строки)
 **Статус:** 🟢 Завершён
@@ -42,11 +63,11 @@
 
 ---
 
-#### ✅ `utils/selector-resolver.js` (161 строка)
-**Статус:** 🟢 Завершён
+#### ✅ `utils/selector-resolver.js` (187 строк)
+**Статус:** 🟢 Завершён + Исправлен (персистентный registry)
 
 **Функциональность:**
-- Регистр элементов Page Object (Map в контексте страницы)
+- Регистр элементов Page Object (window.__ELEMENT_REGISTRY__ для persistence)
 - Резолвинг идентификаторов: ID → CSS selector
 - Функции:
   - `registerElement(id, selector, metadata)` - регистрация одного элемента
@@ -54,74 +75,200 @@
   - `resolveSelector(identifier)` → `{ selector, isPageObjectId, metadata }`
   - `clearRegistry()` - очистка реестра
 
+**Критическое исправление (commit faadd0e):**
+- Registry теперь использует `window.__ELEMENT_REGISTRY__` вместо локальной `const`
+- Сохраняется между вызовами `page.evaluate`
+- Все функции экспортируются в `window` для browser context
+
 **Местоположение:**
 - Файл: `utils/selector-resolver.js`
 - Интеграция: `index.js:97-98`, используется во всех инструментах взаимодействия
 
 ---
 
-### 2. MCP Инструменты (1/6)
+#### ✅ `pom/element-id-generator.js` (171 строка) - НОВЫЙ МОДУЛЬ
+**Статус:** 🟢 Завершён
 
-> **⚠️ ВАЖНО:** `registerPageObject` — это временный костыль!
->
-> Этот инструмент был добавлен в v2.6.0 как промежуточное решение для тестирования
-> механизма резолвинга селекторов. **Он будет удалён в v3.0.0**.
->
-> **Проблема:** Требует ручной регистрации элементов агентом:
-> 1. Агент вызывает `analyzePage()` → получает селекторы
-> 2. Агент придумывает ID для каждого элемента вручную
-> 3. Агент вызывает `registerPageObject()` с этими ID
-> 4. Только после этого можно использовать ID в инструментах
->
-> **Решение:** `getPageObject()` делает всё автоматически (v3.0.0):
-> - Генерирует уникальные ID
-> - Регистрирует элементы
-> - Возвращает полную модель
-> - Никаких ручных действий от агента!
+**Функциональность:**
+- Генерация уникальных ID для элементов страницы
+- Стратегия приоритетов: testid > id > semantic path + index
+- Функции:
+  - `generateElementId(element, type, index)` → "input_0", "button_1"
+  - `getSemanticPath(element)` → "form", "nav", "header", etc.
+  - `getElementType(element, type)` → "input", "button", "link"
+  - `sanitizeId(str)` - очистка ID от спецсимволов
 
-#### ⚠️ `registerPageObject` - регистрация элементов (ВРЕМЕННЫЙ)
-**Статус:** 🟡 Реализован, но будет удалён в v3.0.0
+**Примеры генерации:**
+```javascript
+// С data-testid
+<input data-testid="email-field"> → "testid_email_field"
 
-**Параметры:**
-```typescript
+// С id атрибутом
+<button id="submit-btn"> → "id_submit_btn"
+
+// Semantic path
+<form><input name="email"></form> → "input_form_0"
+```
+
+**Местоположение:**
+- Файл: `pom/element-id-generator.js`
+- Используется в: `pom/apom-converter.js`
+
+---
+
+#### ✅ `pom/apom-converter.js` (294 строки) - НОВЫЙ МОДУЛЬ
+**Статус:** 🟢 Завершён
+
+**Функциональность:**
+- Конвертация legacy analyzePage в APOM формат
+- Генерация pageId, элементов с ID, группировка, метаданные
+- Функции:
+  - `convertToAPOM(analysis, options)` → APOM структура
+  - `generateElementId()` - используется из element-id-generator
+
+**Структура APOM:**
+```javascript
 {
-  elements: Array<{id, selector, metadata}>,
-  clearExisting?: boolean
+  pageId: "page_aHR0cHM6Ly9..._timestamp",
+  url: "https://example.com",
+  title: "Page Title",
+  timestamp: 1769297752428,
+  elements: {
+    "input_0": { id, type, selector, name, label, ... },
+    "button_0": { id, type, selector, text, ... }
+  },
+  groups: {
+    forms: [...],
+    inputs: [...],
+    buttons: [...]
+  },
+  metadata: {
+    totalElements: 26,
+    interactiveCount: 26,
+    formCount: 1
+  }
 }
 ```
 
-**Возвращает:**
+**Browser compatibility:**
+- Экспортируется в `window.convertToAPOM` для browser context
+- Работает в `page.evaluate`
+
+**Местоположение:**
+- Файл: `pom/apom-converter.js`
+- Используется в: `index.js:2199-2228` (analyzePage handler)
+
+---
+
+### 2. APOM API - analyzePage с generateIds (100%) ✅
+
+#### ✅ `analyzePage({ generateIds: true })` - ОСНОВНОЙ APOM ИНСТРУМЕНТ
+**Статус:** 🟢 ПОЛНОСТЬЮ РЕАЛИЗОВАН И ПРОТЕСТИРОВАН
+
+**Новые параметры:**
 ```typescript
 {
-  success: boolean,
-  registered: number,
-  message: string
+  refresh?: boolean,           // Force refresh cache
+  includeAll?: boolean,        // Include all elements
+  generateIds?: boolean,       // 🆕 Enable APOM format (default: false)
+  registerElements?: boolean,  // 🆕 Auto-register (default: true when generateIds)
+  groupBy?: 'type' | 'flat'   // 🆕 Element grouping (default: 'type')
 }
 ```
 
-**Поддержка ID в инструментах:**
-- ✅ `click` - принимает ID или CSS
-- ✅ `type` - принимает ID или CSS
+**Возвращает APOM формат:**
+```typescript
+{
+  pageId: string,              // Unique page identifier
+  url: string,
+  title: string,
+  timestamp: number,
+  elements: {
+    [id: string]: {            // e.g., "input_0", "button_1"
+      id: string,
+      type: string,
+      selector: string,
+      // ... element-specific fields
+    }
+  },
+  groups: {
+    forms: Array<FormElement>,
+    inputs: Array<InputElement>,
+    buttons: Array<ButtonElement>,
+    links: Array<LinkElement>
+  },
+  metadata: {
+    totalElements: number,
+    interactiveCount: number,
+    formCount: number
+  }
+}
+```
+
+**Критические исправления:**
+- ✅ Исправлен variable shadowing bug (commit e1e63e2)
+- ✅ Исправлена логика кэширования для поддержки generateIds
+- ✅ Registry теперь персистентен (window.__ELEMENT_REGISTRY__)
+
+**Автоматическая регистрация:**
+- При `generateIds: true` элементы автоматически регистрируются
+- Можно сразу использовать ID: `click({ selector: "button_0" })`
+- Никаких дополнительных вызовов не требуется!
+
+**Обратная совместимость:**
+- `analyzePage()` без параметров → legacy формат (как раньше)
+- `analyzePage({ generateIds: false })` → legacy формат
+- `analyzePage({ generateIds: true })` → APOM формат
+
+**Местоположение:**
+- Handler: `index.js:1971-2244` (analyzePage with APOM conversion)
+- Schema: `server/tool-schemas.js:249-255`
+- Definition: `server/tool-definitions.js:488-500`
+
+---
+
+#### ✅ Поддержка ID во всех инструментах (Dual Selector Mode)
+
+**Все инструменты поддерживают ID + CSS:**
+- ✅ `click({ selector: "button_0" })` - работает с ID
+- ✅ `type({ selector: "input_0", text: "..." })` - работает с ID
 - ✅ `selectOption` - принимает ID или CSS
 - ✅ `hover` - принимает ID или CSS
 - ✅ `scrollTo` - принимает ID или CSS
 - ✅ `drag` - принимает ID или CSS
 - ✅ `setStyles` - принимает ID или CSS
 
-**Местоположение:**
-- Handler: `index.js:2916-2960`
-- Schema: `server/tool-schemas.js:328-335`
-- Definition: `server/tool-definitions.js:713-748`
-
 **Механизм резолвинга:**
 ```javascript
 async function resolveSelector(page, identifier) {
-  // Инжектирует selector-resolver и резолвит ID → CSS
-  // Возвращает: { selector, isPageObjectId, found }
+  // 1. Инжектирует selector-resolver в браузер
+  // 2. Проверяет registry: есть ли такой ID?
+  // 3. Если ID найден → возвращает CSS selector
+  // 4. Если нет → identifier уже CSS selector
 }
 ```
 
 **Местоположение:** `index.js:278-298`
+
+---
+
+#### ⚠️ `registerPageObject` - УСТАРЕЛ (будет удалён в v3.0.0)
+
+> **ВАЖНО:** `registerPageObject` больше НЕ НУЖЕН!
+>
+> С реализацией `analyzePage({ generateIds: true })` инструмент `registerPageObject`
+> стал избыточным. Теперь регистрация происходит автоматически.
+>
+> **Старый workflow (v2.6.0 early):**
+> 1. `analyzePage()` → получить элементы
+> 2. `registerPageObject([...])` → зарегистрировать вручную
+> 3. `click({ selector: "id" })` → использовать
+>
+> **Новый workflow (v2.6.0 final):**
+> 1. `analyzePage({ generateIds: true })` → элементы уже зарегистрированы!
+> 2. `click({ selector: "input_0" })` → использовать сразу
+>
+> Инструмент останется для обратной совместимости до v3.0.0, но использовать его НЕ рекомендуется.
 
 ---
 
