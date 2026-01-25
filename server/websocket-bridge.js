@@ -7,8 +7,10 @@
 import { WebSocketServer } from 'ws';
 import { saveScenario, listScenarios } from '../recorder/scenario-storage.js';
 import { urlToProjectId } from '../utils/url-to-project.js';
+import net from 'net';
 
-const WS_PORT = 9223;
+const WS_PORT_START = 9223;
+const WS_PORT_END = 9227;
 
 // State
 let wss = null;
@@ -42,16 +44,47 @@ function debugLog(...args) {
 }
 
 /**
+ * Check if port is available
+ */
+async function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close();
+      resolve(true);
+    });
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+/**
+ * Find available port in range
+ */
+async function findAvailablePort() {
+  for (let port = WS_PORT_START; port <= WS_PORT_END; port++) {
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+  }
+  throw new Error(`No available ports in range ${WS_PORT_START}-${WS_PORT_END}`);
+}
+
+
+/**
  * Start WebSocket server
  */
-export function startWebSocketServer() {
+export async function startWebSocketServer() {
   if (isRunning) {
     debugLog('WebSocket server already running');
     return;
   }
 
   try {
-    wss = new WebSocketServer({ port: WS_PORT });
+    // Find available port
+    const port = await findAvailablePort();
+
+    wss = new WebSocketServer({ port });
 
     wss.on('connection', (ws) => {
       debugLog('Extension connected');
@@ -80,16 +113,18 @@ export function startWebSocketServer() {
 
     wss.on('error', (error) => {
       if (error.code === 'EADDRINUSE') {
-        debugLog(`Port ${WS_PORT} is already in use`);
+        debugLog(`Port ${port} is already in use`);
       } else {
         debugLog('WebSocket server error:', error.message);
       }
     });
 
     isRunning = true;
-    debugLog(`WebSocket server listening on port ${WS_PORT}`);
+    console.error(`[chrometools-mcp] WebSocket server listening on port ${port}`);
+    debugLog(`WebSocket server listening on port ${port}`);
 
   } catch (error) {
+    console.error('[chrometools-mcp] Failed to start WebSocket server:', error.message);
     debugLog('Failed to start WebSocket server:', error.message);
   }
 }

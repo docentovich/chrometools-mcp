@@ -8,14 +8,15 @@
  * - Message routing between content scripts and MCP
  */
 
-const WS_PORT = 9223;
-const WS_URL = `ws://localhost:${WS_PORT}`;
+const WS_PORT_START = 9223;
+const WS_PORT_END = 9227;
 const RECONNECT_INTERVAL = 3000;
+const INSTANCES_SCAN_INTERVAL = 20000; // 20 seconds
 
 // State
-let wsConnection = null;
-let isConnected = false;
+const wsConnections = new Map(); // port -> WebSocket
 const tabsState = new Map(); // tabId -> {url, title, active, windowId}
+let scanTimer = null;
 
 // Recorder state (persisted in storage)
 let recorderState = {
@@ -33,22 +34,100 @@ let recorderState = {
 };
 
 // ============================================
-// WebSocket Connection
+// WebSocket Connection - Multi-Instance Support
 // ============================================
 
-function connectToMCP() {
-  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-    return;
+/**
+ * Scan for active MCP instances by testing ports
+ * Tries to connect to each port in range to discover running servers
+ */
+async function scanForMCPInstances() {
+  try {
+    const discoveredPorts = new Set();
+
+    // Test each port in range
+    for (let port = WS_PORT_START; port <= WS_PORT_END; port++) {
+      const isAvailable = await testPortConnection(port);
+      if (isAvailable) {
+        discoveredPorts.add(port);
+      }
+    }
+
+    console.log(`[ChromeTools] Found ${discoveredPorts.size} MCP instance(s) on ports: ${Array.from(discoveredPorts).join(', ')}`);
+
+    // Get current connected ports
+    const currentPorts = new Set(wsConnections.keys());
+
+    // Disconnect from instances that no longer exist
+    for (const port of currentPorts) {
+      if (!discoveredPorts.has(port)) {
+        console.log(`[ChromeTools] Instance on port ${port} no longer exists, disconnecting`);
+        disconnectFromPort(port);
+      }
+    }
+
+    // Connect to new instances
+    for (const port of discoveredPorts) {
+      if (!wsConnections.has(port)) {
+        connectToPort(port);
+      }
+    }
+
+    // Update extension icon
+    updateIcon(wsConnections.size > 0);
+
+  } catch (error) {
+    console.error('[ChromeTools] Failed to scan for instances:', error);
+  }
+}
+
+/**
+ * Test if MCP server is running on given port
+ */
+async function testPortConnection(port) {
+  return new Promise((resolve) => {
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+
+      const timeout = setTimeout(() => {
+        ws.close();
+        resolve(false);
+      }, 1000); // 1 second timeout
+
+      ws.onopen = () => {
+        clearTimeout(timeout);
+        ws.close();
+        resolve(true);
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timeout);
+        resolve(false);
+      };
+    } catch (error) {
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * Connect to MCP server on specific port
+ */
+function connectToPort(port) {
+  if (wsConnections.has(port)) {
+    const existing = wsConnections.get(port);
+    if (existing.readyState === WebSocket.OPEN) {
+      return;
+    }
   }
 
   try {
-    wsConnection = new WebSocket(WS_URL);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
 
-    wsConnection.onopen = () => {
-      console.log('[ChromeTools] Connected to MCP server');
-      isConnected = true;
+    ws.onopen = () => {
+      console.log(`[ChromeTools] Connected to MCP server on port ${port}`);
+      wsConnections.set(port, ws);
 
-      debugger;
       // Send current state of all tabs
       syncAllTabs();
 
@@ -56,46 +135,83 @@ function connectToMCP() {
       updateIcon(true);
     };
 
-    wsConnection.onmessage = (event) => {
+    ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
-        handleMCPMessage(message);
+        handleMCPMessage(message, port);
       } catch (error) {
-        console.error('[ChromeTools] Failed to parse message:', error);
+        console.error(`[ChromeTools] Failed to parse message from port ${port}:`, error);
       }
     };
 
-    wsConnection.onclose = () => {
-      console.log('[ChromeTools] Disconnected from MCP server');
-      isConnected = false;
-      wsConnection = null;
-      updateIcon(false);
-
-      // Attempt reconnection
-      setTimeout(connectToMCP, RECONNECT_INTERVAL);
+    ws.onclose = () => {
+      console.log(`[ChromeTools] Disconnected from MCP server on port ${port}`);
+      wsConnections.delete(port);
+      updateIcon(wsConnections.size > 0);
     };
 
-    wsConnection.onerror = (error) => {
-      console.error('[ChromeTools] WebSocket error:', error);
-      isConnected = false;
+    ws.onerror = (error) => {
+      console.error(`[ChromeTools] WebSocket error on port ${port}:`, error);
     };
 
   } catch (error) {
-    console.error('[ChromeTools] Failed to connect:', error);
-    setTimeout(connectToMCP, RECONNECT_INTERVAL);
+    console.error(`[ChromeTools] Failed to connect to port ${port}:`, error);
   }
 }
 
+/**
+ * Disconnect from specific port
+ */
+function disconnectFromPort(port) {
+  const ws = wsConnections.get(port);
+  if (ws) {
+    ws.close();
+    wsConnections.delete(port);
+  }
+}
+
+/**
+ * Send message to all connected MCP servers (broadcast)
+ */
 function sendToMCP(message) {
-  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-    wsConnection.send(JSON.stringify(message));
-    return true;
+  let sent = false;
+  for (const [port, ws] of wsConnections) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(message));
+      sent = true;
+    }
   }
-  return false;
+  return sent;
 }
 
-function handleMCPMessage(message) {
-  console.log('[ChromeTools] Received from MCP:', message.type);
+/**
+ * Start periodic scanning for MCP instances
+ */
+function startInstanceScanning() {
+  // Initial scan
+  scanForMCPInstances();
+
+  // Periodic scan every 20 seconds
+  if (scanTimer) {
+    clearInterval(scanTimer);
+  }
+  scanTimer = setInterval(scanForMCPInstances, INSTANCES_SCAN_INTERVAL);
+
+  console.log('[ChromeTools] Started periodic instance scanning (every 20s)');
+}
+
+/**
+ * Stop periodic scanning
+ */
+function stopInstanceScanning() {
+  if (scanTimer) {
+    clearInterval(scanTimer);
+    scanTimer = null;
+  }
+}
+
+function handleMCPMessage(message, port) {
+  console.log(`[ChromeTools] Received from MCP (port ${port}):`, message.type);
 
   switch (message.type) {
     case 'tabs_request':
@@ -464,7 +580,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         isPaused: recorderState.isPaused,
         actions: recorderState.actions,
         metadata: recorderState.metadata,
-        isConnected,
+        isConnected: wsConnections.size > 0,
+        connectedInstances: wsConnections.size,
         // Provide scenario metadata for popup state restoration
         scenarioName: recorderState.metadata?.name || '',
         scenarioDescription: recorderState.metadata?.description || '',
@@ -487,7 +604,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case 'GET_CONNECTION_STATUS':
-      sendResponse({ isConnected });
+      sendResponse({
+        isConnected: wsConnections.size > 0,
+        connectedInstances: wsConnections.size
+      });
       break;
 
     default:
@@ -575,8 +695,8 @@ async function initialize() {
   // Load persisted recorder state
   await loadRecorderState();
 
-  // Connect to MCP server
-  connectToMCP();
+  // Start scanning for MCP instances and connect to all found
+  startInstanceScanning();
 
   // Initial tab sync
   syncAllTabs();
@@ -587,9 +707,9 @@ async function initialize() {
 // Start
 initialize();
 
-// Keepalive ping
+// Keepalive ping to all connections
 setInterval(() => {
-  if (isConnected) {
+  if (wsConnections.size > 0) {
     sendToMCP({ type: 'ping' });
   }
 }, 30000);

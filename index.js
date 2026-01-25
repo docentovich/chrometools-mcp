@@ -3126,8 +3126,7 @@ async function main() {
   }
 
   // Start WebSocket server for Chrome Extension communication
-  startWebSocketServer();
-  console.error("[chrometools-mcp] WebSocket bridge started on port 9223");
+  await startWebSocketServer();
 
   // Register handler for syncing active tab when user switches tabs
   setActiveTabSyncHandler(connectToTabByUrl);

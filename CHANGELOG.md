@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.3] - 2026-01-25
+
+### Added
+- **Multi-instance MCP server support** via dynamic port allocation
+  - MCP server automatically finds available port from range 9223-9227
+  - Chrome Extension scans for running MCP instances every 20 seconds (port scanning)
+  - Extension connects to multiple MCP servers simultaneously (broadcast pattern)
+  - Enables multiple AI clients (Claude Desktop, Telegram bot, etc.) to work in parallel
+  - Graceful handling of ungraceful shutdowns (kill -9) via WebSocket.onclose
+
+### Changed
+- **Auto-sync active tab when user switches tabs manually**
+  - MCP server now syncs Puppeteer's `lastPage` when extension reports `tab_activated`
+  - Callback pattern avoids circular dependencies between websocket-bridge and page-manager
+  - MCP commands automatically target the user's currently active tab
+
+### Fixed
+- **Input recording deduplication** in Chrome Extension
+  - Extension now records only final text value after blur/Enter or 1.5s pause
+  - Eliminated intermediate keystroke recordings (e.g., "test" → "test1" recorded as one action)
+  - Improved debouncing with `inputStartValues` tracking
+
 ## [3.0.2] - 2026-01-25
 
 ### Added
