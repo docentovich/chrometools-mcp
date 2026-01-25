@@ -48,6 +48,9 @@ import {generatePageObject} from './recorder/page-object-generator.js';
 
 // Import Code Generators
 import {PlaywrightTypeScriptGenerator} from './utils/code-generators/playwright-typescript.js';
+
+// Import Input Models
+import { getInputModel } from './models/index.js';
 import {PlaywrightPythonGenerator} from './utils/code-generators/playwright-python.js';
 import {SeleniumPythonGenerator} from './utils/code-generators/selenium-python.js';
 import {SeleniumJavaGenerator} from './utils/code-generators/selenium-java.js';
@@ -101,8 +104,11 @@ const selectorResolver = readFileSync(path.join(__dirname, 'utils', 'selector-re
 // Load element ID generator utilities
 const elementIdGenerator = readFileSync(path.join(__dirname, 'pom', 'element-id-generator.js'), 'utf-8');
 
-// Load APOM converter utilities
+// Load APOM converter utilities (legacy - flat structure)
 const apomConverter = readFileSync(path.join(__dirname, 'pom', 'apom-converter.js'), 'utf-8');
+
+// Load APOM Tree converter utilities (v2 - tree structure with positioning)
+const apomTreeConverter = readFileSync(path.join(__dirname, 'pom', 'apom-tree-converter.js'), 'utf-8');
 
 // Base storage directory in user's home folder
 const BASE_STORAGE_DIR = path.join(homedir(), '.config', 'chrometools-mcp');
@@ -311,22 +317,25 @@ async function executeToolInternal(name, args) {
 
       // Wrap operation in timeout
       const clickOperation = async () => {
-        // Resolve selector (supports both ID and CSS selector)
-        const resolved = await resolveSelector(page, validatedArgs.selector);
+        // Get identifier (id or selector)
+        const identifier = validatedArgs.id || validatedArgs.selector;
+
+        // Resolve selector (supports both APOM ID and CSS selector)
+        const resolved = await resolveSelector(page, identifier);
         if (!resolved.found) {
-          throw new Error(`Element not found: ${validatedArgs.selector}${resolved.isPageObjectId ? ' (Page Object ID)' : ' (CSS selector)'}`);
+          throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
         }
 
         const element = await page.$(resolved.selector);
         if (!element) {
-          throw new Error(`Element not found: ${validatedArgs.selector}`);
+          throw new Error(`Element not found: ${identifier}`);
         }
 
         await element.click();
         await new Promise(resolve => setTimeout(resolve, validatedArgs.waitAfter || 1500));
 
         // Generate AI hints after click
-        const hints = await generateClickHints(page, validatedArgs.selector);
+        const hints = await generateClickHints(page, identifier);
 
         let hintsText = '\n\n** AI HINTS **';
         if (hints.modalOpened) hintsText += '\nModal opened - interact with it or close';
@@ -338,7 +347,7 @@ async function executeToolInternal(name, args) {
         }
 
         const content = [
-          { type: "text", text: `Clicked: ${validatedArgs.selector}${hintsText}` }
+          { type: "text", text: `Clicked: ${identifier}${hintsText}` }
         ];
 
         // Only add screenshot if requested
@@ -362,28 +371,33 @@ async function executeToolInternal(name, args) {
       const validatedArgs = schemas.TypeSchema.parse(args);
       const page = await getLastOpenPage();
 
-      // Resolve selector (supports both ID and CSS selector)
-      const resolved = await resolveSelector(page, validatedArgs.selector);
+      // Get identifier (id or selector)
+      const identifier = validatedArgs.id || validatedArgs.selector;
+
+      // Resolve selector (supports both APOM ID and CSS selector)
+      const resolved = await resolveSelector(page, identifier);
       if (!resolved.found) {
-        throw new Error(`Element not found: ${validatedArgs.selector}${resolved.isPageObjectId ? ' (Page Object ID)' : ' (CSS selector)'}`);
+        throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
       }
 
       const element = await page.$(resolved.selector);
       if (!element) {
-        throw new Error(`Element not found: ${validatedArgs.selector}`);
+        throw new Error(`Element not found: ${identifier}`);
       }
 
-      const clearFirst = validatedArgs.clearFirst !== undefined ? validatedArgs.clearFirst : true;
-      if (clearFirst) {
-        await element.click({ clickCount: 3 });
-        await page.keyboard.press('Backspace');
-      }
+      // Use input model to handle the element appropriately
+      const model = await getInputModel(element, page);
+      const options = {
+        delay: validatedArgs.delay || 0,
+        clearFirst: validatedArgs.clearFirst !== undefined ? validatedArgs.clearFirst : true,
+      };
 
-      await element.type(validatedArgs.text, { delay: validatedArgs.delay || 0 });
+      await model.setValue(validatedArgs.text, options);
+      const description = model.getActionDescription(validatedArgs.text, identifier);
 
       return {
         content: [
-          { type: "text", text: `Typed "${validatedArgs.text}" into ${validatedArgs.selector}` }
+          { type: "text", text: description }
         ],
       };
     }
@@ -937,9 +951,18 @@ async function executeToolInternal(name, args) {
       const validatedArgs = schemas.HoverSchema.parse(args);
       const page = await getLastOpenPage();
 
-      const element = await page.$(validatedArgs.selector);
+      // Get identifier (id or selector)
+      const identifier = validatedArgs.id || validatedArgs.selector;
+
+      // Resolve selector (supports both APOM ID and CSS selector)
+      const resolved = await resolveSelector(page, identifier);
+      if (!resolved.found) {
+        throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
+      }
+
+      const element = await page.$(resolved.selector);
       if (!element) {
-        throw new Error(`Element not found: ${validatedArgs.selector}`);
+        throw new Error(`Element not found: ${identifier}`);
       }
 
       await element.hover();
@@ -948,7 +971,7 @@ async function executeToolInternal(name, args) {
       return {
         content: [{
           type: "text",
-          text: `Hovered over: ${validatedArgs.selector}`
+          text: `Hovered over: ${identifier}`
         }],
       };
     }
@@ -957,10 +980,13 @@ async function executeToolInternal(name, args) {
       const validatedArgs = schemas.SelectOptionSchema.parse(args);
       const page = await getLastOpenPage();
 
-      // Resolve selector (supports both ID and CSS selector)
-      const resolved = await resolveSelector(page, validatedArgs.selector);
+      // Get identifier (id or selector)
+      const identifier = validatedArgs.id || validatedArgs.selector;
+
+      // Resolve selector (supports both APOM ID and CSS selector)
+      const resolved = await resolveSelector(page, identifier);
       if (!resolved.found) {
-        throw new Error(`Element not found: ${validatedArgs.selector}${resolved.isPageObjectId ? ' (Page Object ID)' : ' (CSS selector)'}`);
+        throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
       }
 
       // Select option with priority: value > text > index
@@ -1021,7 +1047,7 @@ async function executeToolInternal(name, args) {
       return {
         content: [{
           type: "text",
-          text: `Selected option in ${validatedArgs.selector}:\n` +
+          text: `Selected option in ${identifier}:\n` +
                 `  Value: ${result.selectedValue}\n` +
                 `  Text: ${result.selectedText}\n` +
                 `  Index: ${result.selectedIndex}`
@@ -1973,263 +1999,40 @@ Start coding now.`;
       const page = await getLastOpenPage();
       const pageUrl = page.url();
 
-      let analysis;
-      let fromCache = false;
-
-      // Check cache
-      if (!validatedArgs.refresh && pageAnalysisCache.has(pageUrl)) {
-        analysis = pageAnalysisCache.get(pageUrl);
-        fromCache = true;
-      } else {
-
-      // Perform comprehensive analysis
-      analysis = await page.evaluate((includeAll, utilsCode, uiDetectorCode, selectorResolverCode) => {
+      // APOM Tree format (default) - v2 with tree structure and positioning
+      const apomResult = await page.evaluate((apomTreeConverterCode, selectorResolverCode, shouldRegister, includeAll) => {
         // Inject utilities
-        eval(utilsCode);
-        eval(uiDetectorCode);
+        eval(apomTreeConverterCode);
         eval(selectorResolverCode);
 
-        const result = {
-          url: window.location.href,
-          title: document.title,
-          forms: [],
-          interactiveElements: [],
-          inputs: [],
-          buttons: [],
-          links: [],
-          navigation: [],
-        };
-
-        // Add allElements array if includeAll is true
-        if (includeAll) {
-          result.allElements = [];
-        }
-
-        // Analyze forms
-        document.querySelectorAll('form').forEach((form, idx) => {
-          const formData = {
-            selector: form.id ? `#${form.id}` : `form:nth-of-type(${idx + 1})`,
-            action: form.action,
-            method: form.method,
-            fields: [],
-            submitButton: null,
-          };
-
-          // Find fields
-          form.querySelectorAll('input, textarea, select').forEach(field => {
-            if (field.type === 'submit' || field.type === 'button') return;
-
-            const fieldData = {
-              selector: getUniqueSelectorInPage(field),
-              type: field.type || (field.tagName === 'SELECT' ? 'select' : 'text'),
-              name: field.name,
-              id: field.id,
-              placeholder: field.placeholder,
-              label: (() => {
-                const label = field.labels && field.labels[0];
-                return label ? label.textContent.trim() : null;
-              })(),
-              required: field.required,
-            };
-
-            // Add select-specific information
-            if (field.tagName === 'SELECT') {
-              // Use UI framework detector to extract options
-              const selectData = extractSelectOptions(field);
-              if (selectData) {
-                fieldData.options = selectData.options;
-                fieldData.selectedIndex = selectData.selectedIndex;
-                fieldData.selectedValue = selectData.selectedValue;
-                fieldData.selectedText = selectData.selectedText;
-                fieldData.multiple = selectData.multiple;
-              }
-            }
-
-            // Detect UI framework for all fields
-            fieldData.uiFramework = detectUIFramework(field);
-
-            formData.fields.push(fieldData);
-          });
-
-          // Find submit button
-          const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
-          if (submitBtn) {
-            formData.submitButton = {
-              selector: getUniqueSelectorInPage(submitBtn),
-              text: submitBtn.textContent || submitBtn.value,
-            };
-          }
-
-          result.forms.push(formData);
-        });
-
-        // All buttons
-        document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"]').forEach(btn => {
-          if (btn.offsetWidth === 0 && btn.offsetHeight === 0) return; // Skip hidden
-
-          result.buttons.push({
-            selector: getUniqueSelectorInPage(btn),
-            text: (btn.textContent || btn.value || '').trim().substring(0, 50),
-            type: btn.type || 'button',
-            inForm: btn.closest('form') !== null,
-          });
-        });
-
-        // All inputs
-        document.querySelectorAll('input, textarea, select').forEach(input => {
-          if (input.type === 'submit' || input.type === 'button' || input.type === 'hidden') return;
-          if (input.offsetWidth === 0 && input.offsetHeight === 0) return;
-
-          const inputData = {
-            selector: getUniqueSelectorInPage(input),
-            type: input.type || (input.tagName === 'SELECT' ? 'select' : 'text'),
-            name: input.name,
-            placeholder: input.placeholder,
-          };
-
-          // Add select-specific information
-          if (input.tagName === 'SELECT') {
-            // Use UI framework detector to extract options
-            const selectData = extractSelectOptions(input);
-            if (selectData) {
-              inputData.options = selectData.options;
-              inputData.selectedIndex = selectData.selectedIndex;
-              inputData.selectedValue = selectData.selectedValue;
-              inputData.selectedText = selectData.selectedText;
-              inputData.multiple = selectData.multiple;
-            }
-          }
-
-          // Detect UI framework for all inputs
-          inputData.uiFramework = detectUIFramework(input);
-
-          result.inputs.push(inputData);
-        });
-
-        // All links
-        document.querySelectorAll('a[href]').forEach(link => {
-          if (link.offsetWidth === 0 && link.offsetHeight === 0) return;
-
-          const text = link.textContent.trim().substring(0, 50);
-          if (!text) return;
-
-          result.links.push({
-            selector: getUniqueSelectorInPage(link),
-            text,
-            href: link.href,
-          });
-        });
-
-        // Navigation elements
-        document.querySelectorAll('nav a, [role="navigation"] a').forEach(link => {
-          result.navigation.push({
-            selector: getUniqueSelectorInPage(link),
-            text: link.textContent.trim().substring(0, 50),
-            href: link.href,
-          });
-        });
-
-        // Interactive elements summary
-        document.querySelectorAll('button, a, input, select, textarea, [onclick], [role="button"]').forEach(el => {
-          if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
-
-          const text = (el.textContent || el.value || el.getAttribute('aria-label') || '').trim();
-          if (!text) return;
-
-          result.interactiveElements.push({
-            selector: getUniqueSelectorInPage(el),
-            type: el.tagName.toLowerCase(),
-            text: text.substring(0, 50),
-          });
-        });
-
-        // Collect all elements if requested
-        if (includeAll) {
-          const skipTags = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'META', 'LINK', 'HEAD', 'TITLE'];
-
-          document.querySelectorAll('body *').forEach(el => {
-            if (skipTags.includes(el.tagName)) return;
-
-            // Skip elements with no dimensions (hidden)
-            if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
-
-            // Get text content (own text, not children)
-            let ownText = '';
-            for (const node of el.childNodes) {
-              if (node.nodeType === Node.TEXT_NODE) {
-                ownText += node.textContent;
-              }
-            }
-            ownText = ownText.trim();
-
-            result.allElements.push({
-              selector: getUniqueSelectorInPage(el),
-              tag: el.tagName.toLowerCase(),
-              text: ownText.substring(0, 100),
-              classes: (() => {
-                // Handle both string className (HTML) and SVGAnimatedString (SVG)
-                if (!el.className) return [];
-                if (typeof el.className === 'string') {
-                  return el.className.split(' ').filter(c => c);
-                }
-                // SVG elements have className.baseVal
-                if (el.className.baseVal) {
-                  return el.className.baseVal.split(' ').filter(c => c);
-                }
-                return [];
-              })(),
-              id: el.id || null,
-              attributes: {
-                role: el.getAttribute('role') || null,
-                'aria-label': el.getAttribute('aria-label') || null,
-              }
-            });
-          });
-        }
-
-        return result;
-      }, validatedArgs.includeAll || false, elementFinderUtils, uiFrameworkDetector, selectorResolver);
-
-        // Cache the result
-        pageAnalysisCache.set(pageUrl, analysis);
-      }
-
-      // Return legacy format if explicitly requested
-      if (validatedArgs.useLegacyFormat) {
-        const hints = {
-          summary: `Found ${analysis.forms.length} forms, ${analysis.buttons.length} buttons, ${analysis.inputs.length} inputs, ${analysis.links.length} links`,
-          suggestion: analysis.forms.length > 0
-            ? `Start with form: ${analysis.forms[0].selector}`
-            : 'No forms found on this page',
-        };
-
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({ ...analysis, hints }, null, 2)
-          }]
-        };
-      }
-
-      // APOM format (default)
-      const apomResult = await page.evaluate((analysisData, apomConverterCode, selectorResolverCode, shouldRegister) => {
-        // Inject utilities
-        eval(apomConverterCode);
-        eval(selectorResolverCode);
-
-        // Convert to APOM format
-        const apomData = convertToAPOM(analysisData, {
-          registerElements: shouldRegister,
-          groupBy: 'type'
-        });
+        // Build APOM tree
+        // interactiveOnly = !includeAll (if includeAll is true, we want ALL elements)
+        const apomData = buildAPOMTree(!includeAll);
 
         // Register elements in selector resolver if requested
         if (shouldRegister) {
-          const elementsArray = Object.values(apomData.elements).map(el => ({
-            id: el.id,
-            selector: el.selector,
-            metadata: { type: el.type }
-          }));
+          // Flatten tree to get all elements for registration
+          const elementsArray = [];
+
+          function collectElements(node) {
+            if (!node) return;
+
+            elementsArray.push({
+              id: node.id,
+              selector: node.selector,
+              metadata: {
+                type: node.type,
+                tag: node.tag,
+                position: node.position
+              }
+            });
+
+            if (node.children) {
+              node.children.forEach(child => collectElements(child));
+            }
+          }
+
+          collectElements(apomData.tree);
 
           if (typeof registerElements !== 'undefined') {
             registerElements(elementsArray);
@@ -2237,12 +2040,96 @@ Start coding now.`;
         }
 
         return apomData;
-      }, analysis, apomConverter, selectorResolver, validatedArgs.registerElements !== false);
+      }, apomTreeConverter, selectorResolver, validatedArgs.registerElements !== false, validatedArgs.includeAll || false);
 
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(apomResult, null, 2)
+          text: JSON.stringify(apomResult)
+        }]
+      };
+    }
+
+    if (name === "getElementByApomId") {
+      const validatedArgs = schemas.GetElementByApomIdSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const result = await page.evaluate((elementId, selectorResolverCode) => {
+        // Inject selector resolver if not loaded
+        if (typeof resolveSelector === 'undefined') {
+          eval(selectorResolverCode);
+        }
+
+        // Resolve APOM ID to selector
+        const resolved = resolveSelector(elementId);
+
+        if (!resolved.isPageObjectId) {
+          return {
+            success: false,
+            error: `Element ID "${elementId}" is not registered. Did you call analyzePage first?`,
+            hint: "Use analyzePage to register all elements, or provide a valid APOM ID"
+          };
+        }
+
+        const element = document.querySelector(resolved.selector);
+
+        if (!element) {
+          return {
+            success: false,
+            error: `Element with ID "${elementId}" was found in registry but not in DOM`,
+            selector: resolved.selector
+          };
+        }
+
+        // Get element details
+        const rect = element.getBoundingClientRect();
+        const computedStyle = window.getComputedStyle(element);
+
+        return {
+          success: true,
+          id: elementId,
+          selector: resolved.selector,
+          tag: element.tagName.toLowerCase(),
+          type: resolved.metadata.type || 'unknown',
+          bounds: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            left: rect.left
+          },
+          position: resolved.metadata.position || null,
+          visible: element.offsetWidth > 0 && element.offsetHeight > 0,
+          text: element.textContent?.trim() || '',
+          value: element.value || null,
+          attributes: {
+            id: element.id || null,
+            class: element.className || null,
+            name: element.getAttribute('name') || null,
+            placeholder: element.getAttribute('placeholder') || null,
+            disabled: element.hasAttribute('disabled'),
+            required: element.hasAttribute('required'),
+            readonly: element.hasAttribute('readonly'),
+            href: element.getAttribute('href') || null,
+            src: element.getAttribute('src') || null
+          },
+          computed: {
+            display: computedStyle.display,
+            visibility: computedStyle.visibility,
+            opacity: computedStyle.opacity,
+            zIndex: computedStyle.zIndex,
+            position: computedStyle.position
+          }
+        };
+      }, validatedArgs.id, selectorResolver);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
         }]
       };
     }
@@ -2953,50 +2840,6 @@ Start coding now.`;
           isError: true
         };
       }
-    }
-
-    if (name === "registerPageObject") {
-      const validatedArgs = schemas.RegisterPageObjectSchema.parse(args);
-      const page = await getLastOpenPage();
-
-      // Register elements in page context
-      const result = await page.evaluate((elements, clearExisting, selectorResolverCode) => {
-        // Inject selector resolver if not already loaded
-        if (typeof registerElements === 'undefined') {
-          eval(selectorResolverCode);
-        }
-
-        // Clear existing registry if requested
-        if (clearExisting && typeof clearRegistry !== 'undefined') {
-          clearRegistry();
-        }
-
-        // Register all elements
-        if (typeof registerElements !== 'undefined') {
-          registerElements(elements);
-          return {
-            success: true,
-            registered: elements.length,
-            message: `Successfully registered ${elements.length} elements from Page Object`
-          };
-        } else {
-          return {
-            success: false,
-            error: 'Failed to load selector resolver'
-          };
-        }
-      }, validatedArgs.elements, validatedArgs.clearExisting || false, selectorResolver);
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            ...result,
-            hint: 'You can now use element IDs (e.g., "login_email_input") in click, type, selectOption and other tools instead of CSS selectors'
-          }, null, 2)
-        }],
-        isError: !result.success
-      };
     }
 
     return {

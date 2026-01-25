@@ -28,30 +28,31 @@ export const toolDefinitions = [
       },
       {
         name: "click",
-        description: "PRIMARY tool for clicking elements. Works correctly with React/Vue/Angular synthetic events. DO NOT use executeScript for clicks - use this tool instead. Waits for animations and navigation.",
+        description: "PRIMARY tool for clicking elements. Accepts APOM ID (e.g., 'button_45') from analyzePage OR CSS selector. Works correctly with React/Vue/Angular synthetic events. DO NOT use executeScript for clicks - use this tool instead. Waits for animations and navigation.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector" },
+            id: { type: "string", description: "APOM element ID from analyzePage (e.g., 'button_45'). Either id or selector required." },
+            selector: { type: "string", description: "CSS selector (e.g., '.submit-btn'). Either id or selector required." },
             waitAfter: { type: "number", description: "Wait ms (default: 1500)" },
             screenshot: { type: "boolean", description: "Screenshot (default: false)" },
             timeout: { type: "number", description: "Max wait ms (default: 30000)" },
           },
-          required: ["selector"],
         },
       },
       {
         name: "type",
-        description: "PRIMARY tool for filling input fields. Works correctly with React/Vue/Angular state management. DO NOT use executeScript for typing - use this tool instead. Automatically updates framework state (React hooks, Vue reactive data).",
+        description: "PRIMARY tool for filling input fields. Accepts APOM ID (e.g., 'input_20') from analyzePage OR CSS selector. Works correctly with React/Vue/Angular state management. DO NOT use executeScript for typing - use this tool instead. Automatically updates framework state (React hooks, Vue reactive data).",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector" },
+            id: { type: "string", description: "APOM element ID from analyzePage (e.g., 'input_20'). Either id or selector required." },
+            selector: { type: "string", description: "CSS selector (e.g., '#email'). Either id or selector required." },
             text: { type: "string", description: "Text to type" },
             delay: { type: "number", description: "Keystroke delay ms (default: 0)" },
             clearFirst: { type: "boolean", description: "Clear first (default: true)" },
           },
-          required: ["selector", "text"],
+          required: ["text"],
         },
       },
       {
@@ -222,27 +223,27 @@ export const toolDefinitions = [
       },
       {
         name: "hover",
-        description: "Hover over element. For testing hover effects, tooltips, and CSS :hover states.",
+        description: "Hover over element. Accepts APOM ID from analyzePage OR CSS selector. For testing hover effects, tooltips, and CSS :hover states.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector" },
+            id: { type: "string", description: "APOM element ID from analyzePage. Either id or selector required." },
+            selector: { type: "string", description: "CSS selector. Either id or selector required." },
           },
-          required: ["selector"],
         },
       },
       {
         name: "selectOption",
-        description: "Select option in dropdown. Works with HTML select elements. Specify value, text, or index to choose option.",
+        description: "Select option in dropdown. Accepts APOM ID from analyzePage OR CSS selector. Works with HTML select elements. Specify value, text, or index to choose option.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector for select element" },
+            id: { type: "string", description: "APOM element ID from analyzePage for select element. Either id or selector required." },
+            selector: { type: "string", description: "CSS selector for select element. Either id or selector required." },
             value: { type: "string", description: "Option value attribute (priority 1)" },
             text: { type: "string", description: "Option text content (priority 2)" },
             index: { type: "number", description: "Option index, 0-based (priority 3)" },
           },
-          required: ["selector"],
         },
       },
       {
@@ -499,6 +500,17 @@ export const toolDefinitions = [
         },
       },
       {
+        name: "getElementByApomId",
+        description: "Get detailed information about element by its APOM ID from analyzePage. Returns full element details including bounds, position, attributes, computed styles. Use this to inspect specific elements without re-analyzing entire page.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "APOM element ID (e.g., 'input_20', 'button_45') from analyzePage result" },
+          },
+          required: ["id"],
+        },
+      },
+      {
         name: "getAllInteractiveElements",
         description: "Get all interactive elements with selectors. For understanding available actions.",
         inputSchema: {
@@ -711,42 +723,6 @@ export const toolDefinitions = [
               description: "Group elements by page sections (default: true)"
             },
           },
-        },
-      },
-      {
-        name: "registerPageObject",
-        description: "Register elements from Page Object for use with element IDs. After registering, you can use element IDs (e.g., 'login_email_input') instead of CSS selectors in click, type, selectOption, and other tools. This enables backward compatibility: tools accept BOTH Page Object IDs AND regular CSS selectors.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            elements: {
-              type: "array",
-              description: "Array of elements to register from Page Object",
-              items: {
-                type: "object",
-                properties: {
-                  id: {
-                    type: "string",
-                    description: "Unique element ID for Page Object (e.g., 'login_email_input')"
-                  },
-                  selector: {
-                    type: "string",
-                    description: "CSS selector for the element"
-                  },
-                  metadata: {
-                    type: "object",
-                    description: "Optional metadata (type, label, options, uiFramework, etc.)"
-                  }
-                },
-                required: ["id", "selector"]
-              }
-            },
-            clearExisting: {
-              type: "boolean",
-              description: "Clear existing registry before registering (default: false)"
-            }
-          },
-          required: ["elements"]
         },
       },
 ];

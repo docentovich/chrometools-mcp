@@ -16,17 +16,23 @@ export const OpenBrowserSchema = z.object({
 });
 
 export const ClickSchema = z.object({
-  selector: z.string().describe("CSS selector for element to click"),
+  id: z.string().optional().describe("APOM element ID from analyzePage (e.g., 'button_45', 'link_7'). Mutually exclusive with selector."),
+  selector: z.string().optional().describe("CSS selector for element to click. Mutually exclusive with id."),
   waitAfter: z.number().optional().describe("Milliseconds to wait after click (default: 1500)"),
   screenshot: z.boolean().optional().describe("Capture screenshot after click (default: false for performance)"),
   timeout: z.number().optional().describe("Maximum time to wait for operation in ms (default: 30000)"),
+}).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
+  message: "Either 'id' or 'selector' must be provided, but not both"
 });
 
 export const TypeSchema = z.object({
-  selector: z.string().describe("CSS selector for input element"),
+  id: z.string().optional().describe("APOM element ID from analyzePage (e.g., 'input_20', 'input_33'). Mutually exclusive with selector."),
+  selector: z.string().optional().describe("CSS selector for input element. Mutually exclusive with id."),
   text: z.string().describe("Text to type"),
   delay: z.number().optional().describe("Delay between keystrokes in ms (default: 0)"),
   clearFirst: z.boolean().optional().describe("Clear field before typing (default: true)"),
+}).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
+  message: "Either 'id' or 'selector' must be provided, but not both"
 });
 
 export const GetElementSchema = z.object({
@@ -34,14 +40,20 @@ export const GetElementSchema = z.object({
 });
 
 export const HoverSchema = z.object({
-  selector: z.string().describe("CSS selector for element to hover"),
+  id: z.string().optional().describe("APOM element ID from analyzePage. Mutually exclusive with selector."),
+  selector: z.string().optional().describe("CSS selector for element to hover. Mutually exclusive with id."),
+}).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
+  message: "Either 'id' or 'selector' must be provided, but not both"
 });
 
 export const SelectOptionSchema = z.object({
-  selector: z.string().describe("CSS selector for select element"),
+  id: z.string().optional().describe("APOM element ID from analyzePage for select element. Mutually exclusive with selector."),
+  selector: z.string().optional().describe("CSS selector for select element. Mutually exclusive with id."),
   value: z.string().optional().describe("Value of option to select (option's value attribute)"),
   text: z.string().optional().describe("Text content of option to select"),
   index: z.number().min(0).optional().describe("Index of option to select (0-based)"),
+}).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
+  message: "Either 'id' or 'selector' must be provided, but not both"
 });
 
 export const DragSchema = z.object({
@@ -254,6 +266,10 @@ export const AnalyzePageSchema = z.object({
   groupBy: z.enum(['type', 'flat']).optional().describe("Group elements by type or return flat structure (default: 'type')"),
 });
 
+export const GetElementByApomIdSchema = z.object({
+  id: z.string().describe("APOM element ID (e.g., 'input_20', 'button_45') from analyzePage result"),
+});
+
 export const GetAllInteractiveElementsSchema = z.object({
   includeHidden: z.boolean().optional().describe("Include hidden elements (default: false)"),
 });
@@ -328,11 +344,3 @@ export const GeneratePageObjectSchema = z.object({
   groupElements: z.boolean().optional().describe("Group elements by page sections (default: true)")
 });
 
-export const RegisterPageObjectSchema = z.object({
-  elements: z.array(z.object({
-    id: z.string().describe("Unique element ID for Page Object"),
-    selector: z.string().describe("CSS selector for the element"),
-    metadata: z.record(z.any()).optional().describe("Optional metadata (type, label, options, etc.)")
-  })).describe("Array of elements to register from Page Object"),
-  clearExisting: z.boolean().optional().describe("Clear existing registry before registering (default: false)")
-});
