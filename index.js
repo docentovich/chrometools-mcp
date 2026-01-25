@@ -32,7 +32,8 @@ import {
     pageAnalysisCache,
     getAndClearNewTabEvents,
     getAllPages,
-    switchToPage
+    switchToPage,
+    connectToTabByUrl
 } from './browser/page-manager.js';
 
 // Import image processing utilities
@@ -3004,6 +3005,9 @@ Start coding now.`;
       if (isExtensionConnected()) {
         const tab = switchTabViaExtension(validatedArgs.tab);
         if (tab) {
+          // Also connect Puppeteer to this tab for analyzePage etc.
+          const page = await connectToTabByUrl(tab.url);
+
           return {
             content: [{
               type: 'text',
@@ -3014,7 +3018,8 @@ Start coding now.`;
                   title: tab.title
                 },
                 message: `Switched to tab: ${tab.title || tab.url}`,
-                source: 'extension'
+                source: 'extension',
+                puppeteerConnected: !!page
               }, null, 2)
             }]
           };

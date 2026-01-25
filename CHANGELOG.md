@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.1] - 2026-01-25
+
+### Fixed
+- **Multi-tab support** - Fixed extension-based tab switching
+  - `switchTab` now uses Chrome Extension for reliable tab switching
+  - Auto-connects Puppeteer to switched tab (fixes `analyzePage` after tab switch)
+  - `puppeteerConnected: true` in response confirms Puppeteer sync
+
 ## [3.0.0] - 2026-01-25
 
 ### BREAKING CHANGES

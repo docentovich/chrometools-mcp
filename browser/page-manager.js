@@ -416,3 +416,36 @@ export async function switchToPage(identifier) {
 
   return targetPage;
 }
+
+/**
+ * Connect Puppeteer to a tab by URL (finds existing browser page)
+ * Used when switching tabs via extension - need to sync Puppeteer
+ * @param {string} url - URL of the tab to connect to
+ * @returns {Promise<Page|null>} - The page or null if not found
+ */
+export async function connectToTabByUrl(url) {
+  const browser = await getBrowser();
+  const allPages = await browser.pages();
+
+  // Find page matching URL
+  for (const page of allPages) {
+    try {
+      const pageUrl = page.url();
+      if (pageUrl === url || pageUrl.includes(url) || url.includes(pageUrl)) {
+        // Setup monitoring if not already done
+        if (!openPages.has(url)) {
+          await setupNewPage(page, 'extension-switch');
+          openPages.set(url, page);
+        }
+        lastPage = page;
+        debugLog(`Connected Puppeteer to tab: ${url}`);
+        return page;
+      }
+    } catch (error) {
+      debugLog('Error checking page URL:', error.message);
+    }
+  }
+
+  debugLog(`No browser page found for URL: ${url}`);
+  return null;
+}
