@@ -48,6 +48,7 @@ function connectToMCP() {
       console.log('[ChromeTools] Connected to MCP server');
       isConnected = true;
 
+      debugger;
       // Send current state of all tabs
       syncAllTabs();
 

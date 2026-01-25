@@ -21,6 +21,17 @@ export const extensionTabs = new Map();
 // Callbacks for tab events
 const tabEventCallbacks = [];
 
+// Handler for syncing active tab (set by page-manager to avoid circular imports)
+let activeTabSyncHandler = null;
+
+/**
+ * Set handler for syncing active tab to Puppeteer's lastPage
+ * Called by page-manager during initialization
+ */
+export function setActiveTabSyncHandler(handler) {
+  activeTabSyncHandler = handler;
+}
+
 /**
  * Debug log helper
  */
@@ -112,6 +123,16 @@ async function handleExtensionMessage(ws, message) {
       }
       debugLog(`Synced ${extensionTabs.size} tabs`);
       notifyTabCallbacks('sync', null);
+
+      // Sync Puppeteer's lastPage to the currently active tab
+      if (activeTabSyncHandler) {
+        const activeTab = message.payload?.tabs?.find(tab => tab.active);
+        if (activeTab && activeTab.url) {
+          activeTabSyncHandler(activeTab.url).catch(err => {
+            debugLog(`Failed to sync lastPage on tabs_sync: ${err.message}`);
+          });
+        }
+      }
       break;
 
     case 'tab_created':
@@ -133,6 +154,16 @@ async function handleExtensionMessage(ws, message) {
       }
       debugLog(`Tab activated: ${message.payload.tabId}`);
       notifyTabCallbacks('activated', message.payload);
+
+      // Sync Puppeteer's lastPage to match the user's active tab
+      if (activeTabSyncHandler) {
+        const activatedTab = extensionTabs.get(message.payload.tabId);
+        if (activatedTab && activatedTab.url) {
+          activeTabSyncHandler(activatedTab.url).catch(err => {
+            debugLog(`Failed to sync lastPage to activated tab: ${err.message}`);
+          });
+        }
+      }
       break;
 
     case 'tab_updated':

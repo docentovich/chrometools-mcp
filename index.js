@@ -20,7 +20,8 @@ import {
   isExtensionConnected,
   getTabsFromExtension,
   getActiveTabFromExtension,
-  switchTabViaExtension
+  switchTabViaExtension,
+  setActiveTabSyncHandler
 } from './server/websocket-bridge.js';
 
 // Import page management utilities
@@ -3127,6 +3128,9 @@ async function main() {
   // Start WebSocket server for Chrome Extension communication
   startWebSocketServer();
   console.error("[chrometools-mcp] WebSocket bridge started on port 9223");
+
+  // Register handler for syncing active tab when user switches tabs
+  setActiveTabSyncHandler(connectToTabByUrl);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
