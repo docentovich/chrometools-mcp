@@ -19,6 +19,7 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
+- [Multi-Instance Support](#multi-instance-support) ⭐ **NEW** - Run multiple MCP servers simultaneously
 - [WSL Setup Guide](#wsl-setup-guide) → [Full WSL Guide](WSL_SETUP.md)
 - [Development](#development)
 - [Features](#features)
@@ -1451,6 +1452,12 @@ npx @modelcontextprotocol/inspector node index.js
 - **Console Log Capture**: Automatic JavaScript console monitoring
 - **Network Request Monitoring**: Track all HTTP/API requests (XHR, Fetch, etc.)
 - **Persistent Browser Sessions**: Browser tabs remain open between requests
+- **Multi-Instance Support**: Run multiple MCP servers simultaneously with automatic discovery ⭐ **NEW**
+  - Dynamic port allocation (9223-9227)
+  - Chrome Extension port scanning every 20s
+  - Broadcast pattern for parallel AI clients
+  - Graceful handling of ungraceful shutdowns
+- **Auto-Sync Active Tab**: MCP server automatically syncs to user's currently active tab ⭐ **NEW**
 - **Visual Browser (GUI Mode)**: See automation in real-time
 - **Cross-platform**: Works on Windows/WSL, Linux, macOS
 - **Simple Installation**: One command with npx
@@ -1458,9 +1465,136 @@ npx @modelcontextprotocol/inspector node index.js
 - **AI-Friendly**: Detailed descriptions optimized for AI agents
 - **Responsive Testing**: Built-in viewport control for mobile/tablet/desktop
 
+## Multi-Instance Support
+
+⭐ **NEW**: Run multiple MCP servers simultaneously and control Chrome from different AI clients in parallel.
+
+### Overview
+
+ChromeTools MCP supports running multiple server instances that share the same Chrome browser. This enables:
+
+- **Multiple AI clients** working with the same browser (Claude Desktop, Telegram bot, custom scripts)
+- **Automatic discovery** of running instances via port scanning
+- **Parallel workflows** without conflicts or manual coordination
+- **Resilient connections** that survive process crashes and restarts
+
+### How It Works
+
+```
+┌─────────────────┐      ┌─────────────────┐
+│ Claude Desktop  │      │ Telegram Bot    │
+│   MCP Client    │      │   MCP Client    │
+└────────┬────────┘      └────────┬────────┘
+         │                        │
+         ↓                        ↓
+    ┌────────┐              ┌────────┐
+    │ Port   │              │ Port   │
+    │ 9223   │              │ 9224   │
+    └────┬───┘              └───┬────┘
+         │                      │
+         └──────────┬───────────┘
+                    ↓
+         ┌────────────────────┐
+         │ Chrome Extension   │
+         │  (broadcasts to    │
+         │   all instances)   │
+         └────────────────────┘
+                    ↓
+         ┌────────────────────┐
+         │   Chrome Browser   │
+         └────────────────────┘
+```
+
+### Architecture
+
+**1. Dynamic Port Allocation**
+- MCP servers automatically find free ports in range 9223-9227
+- No manual configuration needed
+- Each instance runs on its own port
+
+**2. Chrome Extension Port Scanning**
+- Scans for active MCP servers every 20 seconds
+- Tests each port (9223-9227) for WebSocket availability
+- Automatically connects to discovered instances
+- Automatically disconnects from dead instances
+
+**3. Broadcast Pattern**
+- Extension maintains multiple WebSocket connections (Map<port, WebSocket>)
+- Tab events (created, updated, activated, closed) → broadcast to ALL servers
+- Each MCP server sees the same browser state
+- Commands from any server execute in the shared browser
+
+**4. Graceful Error Handling**
+- WebSocket.onclose automatically handles disconnections
+- Ungraceful shutdowns (kill -9) detected within 20 seconds
+- No stale state or zombie connections
+- Extension continues working with remaining instances
+
+### Use Cases
+
+**Parallel AI Workflows**
+```bash
+# Terminal 1: Claude Desktop with chrometools-mcp
+# Working on form automation
+
+# Terminal 2: Telegram bot with chrometools-mcp
+# Monitoring page changes and debugging
+
+# Both see the same tabs, both can control Chrome
+```
+
+**Development + Production**
+```bash
+# Local development MCP instance (port 9223)
+# Production monitoring instance (port 9224)
+# Both connected to the same browser for testing
+```
+
+**Multi-User Collaboration**
+```bash
+# Different team members with their own AI clients
+# All controlling the same browser session
+# Extension broadcasts state to everyone
+```
+
+### Configuration
+
+No special configuration needed! Just run multiple instances:
+
+```bash
+# Terminal 1
+npx -y chrometools-mcp
+
+# Terminal 2
+npx -y chrometools-mcp
+
+# Extension automatically discovers both
+```
+
+### Technical Details
+
+**Port Range:** 9223-9227 (5 simultaneous instances max)
+
+**Scan Interval:** 20 seconds
+
+**Connection Test:** WebSocket connection attempt with 1 second timeout
+
+**Tab Sync:** Active tab automatically syncs to all MCP servers when user switches tabs
+
+**State Consistency:** All instances share the same `extensionTabs` state via broadcast
+
+### Limitations
+
+- Maximum 5 simultaneous instances (port range 9223-9227)
+- 20 second discovery latency for new instances
+- All instances must have Chrome Extension installed
+- Tab events broadcast to all (no per-instance filtering)
+
 ## Architecture
 
 - Uses Puppeteer for Chrome automation
 - MCP Server SDK for protocol implementation
 - Zod for schema validation
 - Stdio transport for communication
+- WebSocket bridge for Chrome Extension communication
+- Multi-instance support via dynamic port allocation (9223-9227)
