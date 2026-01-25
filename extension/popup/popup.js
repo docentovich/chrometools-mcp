@@ -29,6 +29,7 @@ const elements = {
   btnPause: document.getElementById('btn-pause'),
   btnStop: document.getElementById('btn-stop'),
   btnClear: document.getElementById('btn-clear'),
+  btnReset: document.getElementById('btn-reset'),
 
   // Tabs list
   tabsList: document.getElementById('tabs-list')
@@ -39,7 +40,10 @@ let currentState = {
   isRecording: false,
   isPaused: false,
   actions: [],
-  isConnected: false
+  isConnected: false,
+  scenarioName: '',
+  scenarioDescription: '',
+  scenarioTags: []
 };
 
 // ============================================
@@ -80,7 +84,10 @@ async function loadState() {
       isRecording: response.isRecording || false,
       isPaused: response.isPaused || false,
       actions: response.actions || [],
-      isConnected: response.isConnected || false
+      isConnected: response.isConnected || false,
+      scenarioName: response.scenarioName || '',
+      scenarioDescription: response.scenarioDescription || '',
+      scenarioTags: response.scenarioTags || []
     };
     updateUI();
   } catch (error) {
@@ -135,6 +142,7 @@ function updateUI() {
     elements.btnPause.classList.remove('hidden');
     elements.btnStop.classList.remove('hidden');
     elements.btnClear.classList.remove('hidden');
+    elements.btnReset.classList.remove('hidden');
 
     // Update pause button text
     if (currentState.isPaused) {
@@ -147,6 +155,7 @@ function updateUI() {
     elements.btnPause.classList.add('hidden');
     elements.btnStop.classList.add('hidden');
     elements.btnClear.classList.add('hidden');
+    elements.btnReset.classList.add('hidden');
   }
 
   // Disable start if not connected or no name
@@ -196,6 +205,8 @@ function escapeHtml(text) {
 
 elements.btnStart.addEventListener('click', async () => {
   const name = elements.scenarioName.value.trim();
+  const description = elements.scenarioDesc.value.trim();
+  const tags = elements.scenarioTags.value.split(',').map(t => t.trim()).filter(Boolean);
 
   if (!name) {
     elements.scenarioName.focus();
@@ -211,14 +222,18 @@ elements.btnStart.addEventListener('click', async () => {
       type: 'START_RECORDING',
       options: {
         name,
-        description: elements.scenarioDesc.value.trim(),
-        tags: elements.scenarioTags.value.split(',').map(t => t.trim()).filter(Boolean)
+        description,
+        tags
       }
     });
 
+    // Save metadata in state for later use
     currentState.isRecording = true;
     currentState.isPaused = false;
     currentState.actions = [];
+    currentState.scenarioName = name;
+    currentState.scenarioDescription = description;
+    currentState.scenarioTags = tags;
     updateUI();
   } catch (error) {
     console.error('Failed to start recording:', error);
@@ -237,7 +252,8 @@ elements.btnPause.addEventListener('click', async () => {
 });
 
 elements.btnStop.addEventListener('click', async () => {
-  const name = elements.scenarioName.value.trim();
+  // Use saved scenario name from state (form is hidden during recording)
+  const name = currentState.scenarioName || elements.scenarioName.value.trim();
 
   if (!name) {
     alert('Please enter a scenario name');
@@ -249,12 +265,12 @@ elements.btnStop.addEventListener('click', async () => {
       type: 'SAVE_SCENARIO',
       scenario: {
         name,
-        description: elements.scenarioDesc.value.trim(),
-        tags: elements.scenarioTags.value.split(',').map(t => t.trim()).filter(Boolean)
+        description: currentState.scenarioDescription || elements.scenarioDesc.value.trim(),
+        tags: currentState.scenarioTags.length > 0 ? currentState.scenarioTags : elements.scenarioTags.value.split(',').map(t => t.trim()).filter(Boolean)
       }
     });
 
-    // Reset form
+    // Reset form and state
     elements.scenarioName.value = '';
     elements.scenarioDesc.value = '';
     elements.scenarioTags.value = '';
@@ -262,10 +278,16 @@ elements.btnStop.addEventListener('click', async () => {
     currentState.isRecording = false;
     currentState.isPaused = false;
     currentState.actions = [];
+    currentState.scenarioName = '';
+    currentState.scenarioDescription = '';
+    currentState.scenarioTags = [];
     updateUI();
 
     // Show success message
     alert('Scenario saved successfully!');
+
+    // Force reload state from background to ensure sync
+    await loadState();
   } catch (error) {
     console.error('Failed to save scenario:', error);
     alert('Failed to save scenario: ' + error.message);
@@ -281,6 +303,32 @@ elements.btnClear.addEventListener('click', async () => {
     updateUI();
   } catch (error) {
     console.error('Failed to clear actions:', error);
+  }
+});
+
+elements.btnReset.addEventListener('click', async () => {
+  if (!confirm('Force reset recording? All recorded actions will be lost.')) return;
+
+  try {
+    await chrome.runtime.sendMessage({ type: 'FORCE_RESET' });
+
+    // Reset local state
+    currentState.isRecording = false;
+    currentState.isPaused = false;
+    currentState.actions = [];
+    currentState.scenarioName = '';
+    currentState.scenarioDescription = '';
+    currentState.scenarioTags = [];
+
+    // Reset form
+    elements.scenarioName.value = '';
+    elements.scenarioDesc.value = '';
+    elements.scenarioTags.value = '';
+
+    updateUI();
+  } catch (error) {
+    console.error('Failed to reset:', error);
+    alert('Failed to reset: ' + error.message);
   }
 });
 

@@ -445,13 +445,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: true });
       break;
 
+    case 'FORCE_RESET':
+      // Force reset all recording state
+      recorderState.isRecording = false;
+      recorderState.isPaused = false;
+      recorderState.actions = [];
+      recorderState.secrets = {};
+      recorderState.metadata = null;
+      recorderState.entryUrl = null;
+      saveRecorderState();
+      sendResponse({ success: true, message: 'Recording state reset' });
+      break;
+
     case 'GET_STATE':
       sendResponse({
         isRecording: recorderState.isRecording,
         isPaused: recorderState.isPaused,
         actions: recorderState.actions,
         metadata: recorderState.metadata,
-        isConnected
+        isConnected,
+        // Provide scenario metadata for popup state restoration
+        scenarioName: recorderState.metadata?.name || '',
+        scenarioDescription: recorderState.metadata?.description || '',
+        scenarioTags: recorderState.metadata?.tags || []
       });
       break;
 

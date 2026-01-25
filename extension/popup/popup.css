@@ -293,6 +293,16 @@ body {
   background: #f3f4f6;
 }
 
+.btn-reset {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.btn-reset:hover {
+  background: #fee2e2;
+}
+
 /* Actions Preview */
 .actions-preview {
   margin-top: 16px;
