@@ -275,6 +275,36 @@ export function isExtensionConnected() {
 }
 
 /**
+ * Switch to tab by index or URL pattern via extension
+ * @param {number|string} tabIdentifier - Tab index or URL pattern
+ * @returns {object|null} - Tab info or null if not found
+ */
+export function switchTabViaExtension(tabIdentifier) {
+  const tabs = Array.from(extensionTabs.values());
+
+  let targetTab = null;
+
+  if (typeof tabIdentifier === 'number') {
+    // Find by index
+    targetTab = tabs[tabIdentifier];
+  } else if (typeof tabIdentifier === 'string') {
+    // Find by URL pattern (partial match)
+    targetTab = tabs.find(t => t.url.toLowerCase().includes(tabIdentifier.toLowerCase()));
+  }
+
+  if (targetTab) {
+    // Send switch command to extension
+    sendToExtension({
+      type: 'switch_tab',
+      payload: { tabId: targetTab.tabId }
+    });
+    return targetTab;
+  }
+
+  return null;
+}
+
+/**
  * Register callback for tab events
  */
 export function onTabEvent(callback) {

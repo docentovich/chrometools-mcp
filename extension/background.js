@@ -9,7 +9,7 @@
  */
 
 const WS_PORT = 9223;
-const WS_URL = `ws://localhost:${WS_PORT}/chrometools`;
+const WS_URL = `ws://localhost:${WS_PORT}`;
 const RECONNECT_INTERVAL = 3000;
 
 // State
@@ -143,6 +143,24 @@ function handleMCPMessage(message) {
 
     case 'pong':
       // Keepalive response
+      break;
+
+    case 'switch_tab':
+      // MCP requests to switch to a specific tab
+      console.log('[ChromeTools] switch_tab received:', message.payload);
+      if (message.payload?.tabId) {
+        chrome.tabs.update(message.payload.tabId, { active: true }, (tab) => {
+          if (chrome.runtime.lastError) {
+            console.error('[ChromeTools] Failed to switch tab:', chrome.runtime.lastError);
+          } else if (tab) {
+            // Also focus the window containing this tab
+            chrome.windows.update(tab.windowId, { focused: true });
+            console.log('[ChromeTools] Switched to tab:', tab.id, tab.url);
+          }
+        });
+      } else {
+        console.error('[ChromeTools] switch_tab: no tabId in payload');
+      }
       break;
 
     default:

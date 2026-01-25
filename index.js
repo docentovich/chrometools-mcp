@@ -19,7 +19,8 @@ import {
   startWebSocketServer,
   isExtensionConnected,
   getTabsFromExtension,
-  getActiveTabFromExtension
+  getActiveTabFromExtension,
+  switchTabViaExtension
 } from './server/websocket-bridge.js';
 
 // Import page management utilities
@@ -2947,17 +2948,40 @@ Start coding now.`;
 
     // Tab management tools
     if (name === "listTabs") {
-      const pages = await getAllPages();
-      const newTabEvts = getAndClearNewTabEvents();
+      // Prefer extension tabs if connected (sees ALL tabs including manually opened)
+      let tabs = [];
+      let source = 'puppeteer';
 
-      const result = {
-        tabs: pages.map((p, index) => ({
+      if (isExtensionConnected()) {
+        const extTabs = getTabsFromExtension();
+        if (extTabs.length > 0) {
+          tabs = extTabs.map((t, index) => ({
+            index,
+            url: t.url,
+            title: t.title,
+            isActive: t.active
+          }));
+          source = 'extension';
+        }
+      }
+
+      // Fallback to Puppeteer if extension not connected or has no tabs
+      if (tabs.length === 0) {
+        const pages = await getAllPages();
+        tabs = pages.map((p, index) => ({
           index,
           url: p.url,
           title: p.title,
           isActive: p.isActive
-        })),
-        totalCount: pages.length
+        }));
+      }
+
+      const newTabEvts = getAndClearNewTabEvents();
+
+      const result = {
+        tabs,
+        totalCount: tabs.length,
+        source
       };
 
       // Include new tab notifications if any
@@ -2975,6 +2999,29 @@ Start coding now.`;
 
     if (name === "switchTab") {
       const validatedArgs = schemas.SwitchTabSchema.parse(args);
+
+      // Try extension first if connected
+      if (isExtensionConnected()) {
+        const tab = switchTabViaExtension(validatedArgs.tab);
+        if (tab) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                switchedTo: {
+                  url: tab.url,
+                  title: tab.title
+                },
+                message: `Switched to tab: ${tab.title || tab.url}`,
+                source: 'extension'
+              }, null, 2)
+            }]
+          };
+        }
+      }
+
+      // Fallback to Puppeteer
       const page = await switchToPage(validatedArgs.tab);
 
       const url = page.url();
@@ -2989,7 +3036,8 @@ Start coding now.`;
               url,
               title
             },
-            message: `Switched to tab: ${title || url}`
+            message: `Switched to tab: ${title || url}`,
+            source: 'puppeteer'
           }, null, 2)
         }]
       };

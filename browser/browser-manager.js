@@ -12,9 +12,9 @@ import { fileURLToPath } from 'url';
 import { getChromePath, getTempDir, isWSL, CHROME_DEBUG_PORT } from '../utils/platform-utils.js';
 import { handleNewTab, openPages, lastPage } from './page-manager.js';
 
-// Get extension path
+// Get extension path (use forward slashes for Chrome on Windows)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const EXTENSION_PATH = path.join(__dirname, '..', 'extension');
+const EXTENSION_PATH = path.join(__dirname, '..', 'extension').replace(/\\/g, '/');
 
 // Global browser instance (persists between requests)
 let browserPromise = null;
@@ -130,7 +130,6 @@ export async function getBrowser() {
           `--user-data-dir=${userDataDir}`,
           // Auto-load ChromeTools extension
           `--load-extension=${EXTENSION_PATH}`,
-          `--disable-extensions-except=${EXTENSION_PATH}`,
         ];
 
         debugLog("Extension path:", EXTENSION_PATH);
