@@ -5,7 +5,7 @@
  */
 
 import { getBrowser } from './browser-manager.js';
-import { injectRecorder } from '../recorder/recorder-script.js';
+// Note: injectRecorder removed - now using Chrome Extension for recording
 
 /**
  * Debug log helper (only logs to stderr when DEBUG=1)
@@ -21,6 +21,9 @@ function debugLog(...args) {
 export const openPages = new Map();
 export let lastPage = null;
 
+// New tab events queue - for notifying AI about new tabs
+export const newTabEvents = [];
+
 // Console logs storage
 export const consoleLogs = [];
 
@@ -29,9 +32,6 @@ export const networkRequests = [];
 
 // Page analysis cache
 export const pageAnalysisCache = new Map();
-
-// Track pages with recorder injected
-export const pagesWithRecorder = new WeakSet();
 
 // Track pages with network monitoring to prevent duplicate setup
 const pagesWithNetworkMonitoring = new WeakSet();
@@ -126,60 +126,7 @@ export async function setupNetworkMonitoring(page) {
   });
 }
 
-/**
- * Setup recorder auto-reinjection on navigation
- * @param {Page} page - Puppeteer page instance
- */
-export async function setupRecorderAutoReinjection(page) {
-  let reinjectionTimeout = null;
-  let lastUrl = null;
-
-  // Handle navigation events (form submits, link clicks, history API)
-  page.on('framenavigated', async (frame) => {
-    // Only handle main frame navigation
-    if (frame !== page.mainFrame()) return;
-
-    // Get current URL
-    const currentUrl = frame.url();
-
-    // Skip if URL hasn't changed (prevents duplicate injections on same page)
-    if (currentUrl === lastUrl) {
-      return;
-    }
-    lastUrl = currentUrl;
-
-    // Clear any pending reinjection
-    if (reinjectionTimeout) {
-      clearTimeout(reinjectionTimeout);
-    }
-
-    // Debounce reinjection (wait 100ms for navigation to settle)
-    reinjectionTimeout = setTimeout(async () => {
-      // Check if this page had recorder before
-      if (pagesWithRecorder.has(page)) {
-        try {
-          // Project ID will be determined from URL in browser context
-          await injectRecorder(page);
-        } catch (error) {
-          debugLog('Failed to re-inject recorder:', error.message);
-        }
-      }
-    }, 100);
-  });
-
-  // Handle page reloads (F5, Ctrl+R) - use 'load' event
-  page.on('load', async () => {
-    // Check if this page had recorder before
-    if (pagesWithRecorder.has(page)) {
-      try {
-        // Project ID will be determined from URL in browser context
-        await injectRecorder(page);
-      } catch (error) {
-        debugLog('Failed to re-inject recorder after reload:', error.message);
-      }
-    }
-  });
-}
+// Note: setupRecorderAutoReinjection removed - Chrome Extension handles recording now
 
 /**
  * Get or create page for URL
@@ -238,9 +185,6 @@ export async function getOrCreatePage(url) {
   // Setup network monitoring with auto-reinitialization on navigation
   await setupNetworkMonitoring(page);
 
-  // Setup recorder auto-reinjection on navigation
-  setupRecorderAutoReinjection(page);
-
   await page.goto(url, { waitUntil: 'networkidle2' });
   openPages.set(url, page);
   lastPage = page;
@@ -279,13 +223,6 @@ export async function getLastOpenPage() {
     throw new Error('No page is currently open. Use openBrowser first to open a page.');
   }
 
-  // Setup recorder auto-reinjection if not already set up
-  // Check if page already has navigation listener
-  const listenerCount = lastPage.listenerCount('framenavigated');
-  if (listenerCount === 0) {
-    setupRecorderAutoReinjection(lastPage);
-  }
-
   return lastPage;
 }
 
@@ -295,4 +232,187 @@ export async function getLastOpenPage() {
  */
 export function setLastPage(page) {
   lastPage = page;
+}
+
+/**
+ * Setup a new page with all monitoring (console, network, recorder)
+ * Used for both explicitly created pages and auto-detected new tabs
+ * @param {Page} page - Puppeteer page instance
+ * @param {string} [source='manual'] - How the page was created ('manual', 'popup', 'newTab')
+ * @returns {Promise<void>}
+ */
+export async function setupNewPage(page, source = 'manual') {
+  // Set up console log capture
+  try {
+    const client = await page.target().createCDPSession();
+    await client.send('Runtime.enable');
+    await client.send('Log.enable');
+
+    client.on('Runtime.consoleAPICalled', (event) => {
+      const timestamp = new Date().toISOString();
+      const args = event.args.map(arg => {
+        if (arg.value !== undefined) return arg.value;
+        if (arg.description) return arg.description;
+        return String(arg);
+      });
+
+      consoleLogs.push({
+        type: event.type,
+        timestamp,
+        message: args.join(' '),
+        stackTrace: event.stackTrace
+      });
+    });
+
+    client.on('Log.entryAdded', (event) => {
+      const entry = event.entry;
+      consoleLogs.push({
+        type: entry.level,
+        timestamp: new Date(entry.timestamp).toISOString(),
+        message: entry.text,
+        source: entry.source,
+        url: entry.url,
+        lineNumber: entry.lineNumber
+      });
+    });
+  } catch (error) {
+    debugLog('Failed to setup console capture for new page:', error.message);
+  }
+
+  // Setup network monitoring
+  await setupNetworkMonitoring(page);
+
+  debugLog(`New page setup complete (source: ${source})`);
+}
+
+/**
+ * Handle a newly detected tab (from targetcreated event)
+ * @param {Page} page - New Puppeteer page
+ * @param {string} openerUrl - URL of the page that opened this tab
+ */
+export async function handleNewTab(page, openerUrl) {
+  const timestamp = new Date().toISOString();
+
+  // Wait for the page to have a URL (initial about:blank -> actual URL)
+  let url = page.url();
+  let attempts = 0;
+  while ((url === 'about:blank' || url === '') && attempts < 20) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    url = page.url();
+    attempts++;
+  }
+
+  debugLog(`New tab detected: ${url} (opened from: ${openerUrl})`);
+
+  // Setup monitoring on the new page
+  await setupNewPage(page, 'newTab');
+
+  // Register the page
+  if (url && url !== 'about:blank') {
+    openPages.set(url, page);
+  }
+
+  // Make it the active page
+  lastPage = page;
+
+  // Add event to queue for AI notification
+  newTabEvents.push({
+    timestamp,
+    url,
+    openerUrl,
+    title: await page.title().catch(() => ''),
+  });
+
+  // Bring the new tab to front
+  try {
+    await page.bringToFront();
+  } catch (error) {
+    debugLog('Failed to bring new tab to front:', error.message);
+  }
+}
+
+/**
+ * Get and clear new tab events (for AI notification)
+ * @returns {Array} - Array of new tab events
+ */
+export function getAndClearNewTabEvents() {
+  const events = [...newTabEvents];
+  newTabEvents.length = 0;
+  return events;
+}
+
+/**
+ * Get all open pages as array with metadata
+ * @returns {Promise<Array>} - Array of page info objects
+ */
+export async function getAllPages() {
+  const pages = [];
+
+  for (const [url, page] of openPages.entries()) {
+    if (!page.isClosed()) {
+      try {
+        const title = await page.title().catch(() => '');
+        const currentUrl = page.url();
+        pages.push({
+          url: currentUrl,
+          originalUrl: url,
+          title,
+          isActive: page === lastPage,
+        });
+      } catch (error) {
+        // Page might be in invalid state, skip it
+        debugLog('Error getting page info:', error.message);
+      }
+    } else {
+      // Clean up closed pages
+      openPages.delete(url);
+    }
+  }
+
+  return pages;
+}
+
+/**
+ * Switch to a page by URL or index
+ * @param {string|number} identifier - URL (partial match) or index
+ * @returns {Promise<Page>} - The switched-to page
+ */
+export async function switchToPage(identifier) {
+  const pages = await getAllPages();
+
+  if (pages.length === 0) {
+    throw new Error('No pages are currently open.');
+  }
+
+  let targetPage = null;
+
+  if (typeof identifier === 'number') {
+    // Switch by index
+    if (identifier < 0 || identifier >= pages.length) {
+      throw new Error(`Invalid tab index: ${identifier}. Valid range: 0-${pages.length - 1}`);
+    }
+    const targetUrl = pages[identifier].originalUrl;
+    targetPage = openPages.get(targetUrl);
+  } else {
+    // Switch by URL (partial match)
+    const matchingPage = pages.find(p =>
+      p.url.includes(identifier) || p.originalUrl.includes(identifier)
+    );
+    if (!matchingPage) {
+      throw new Error(`No page found matching: ${identifier}`);
+    }
+    targetPage = openPages.get(matchingPage.originalUrl);
+  }
+
+  if (!targetPage || targetPage.isClosed()) {
+    throw new Error('Target page is not available.');
+  }
+
+  // Make it the active page
+  lastPage = targetPage;
+
+  // Bring to front
+  await targetPage.bringToFront();
+
+  return targetPage;
 }

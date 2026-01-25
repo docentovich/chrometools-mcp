@@ -7,11 +7,21 @@
 import puppeteer from 'puppeteer';
 import { spawn } from 'child_process';
 import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { getChromePath, getTempDir, isWSL, CHROME_DEBUG_PORT } from '../utils/platform-utils.js';
+import { handleNewTab, openPages, lastPage } from './page-manager.js';
+
+// Get extension path
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const EXTENSION_PATH = path.join(__dirname, '..', 'extension');
 
 // Global browser instance (persists between requests)
 let browserPromise = null;
 let chromeProcess = null;
+
+// Track pages we've already seen to avoid double-handling
+const knownTargets = new WeakSet();
 
 /**
  * Debug log helper (only logs to stderr when DEBUG=1)
@@ -97,6 +107,9 @@ export async function getBrowser() {
             browserPromise = null;
           });
 
+          // Set up new tab tracking
+          setupNewTabTracking(browser);
+
           return browser;
         } catch (connectError) {
           debugLog("No existing Chrome found, launching new instance...");
@@ -109,12 +122,20 @@ export async function getBrowser() {
         debugLog("Chrome path:", chromePath);
         debugLog("User data dir:", userDataDir);
 
-        chromeProcess = spawn(chromePath, [
+        // Build Chrome launch arguments
+        const chromeArgs = [
           `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
           '--no-first-run',
           '--no-default-browser-check',
           `--user-data-dir=${userDataDir}`,
-        ], {
+          // Auto-load ChromeTools extension
+          `--load-extension=${EXTENSION_PATH}`,
+          `--disable-extensions-except=${EXTENSION_PATH}`,
+        ];
+
+        debugLog("Extension path:", EXTENSION_PATH);
+
+        chromeProcess = spawn(chromePath, chromeArgs, {
           detached: true,
           stdio: 'ignore',
         });
@@ -140,6 +161,9 @@ export async function getBrowser() {
           debugLog("Browser disconnected");
           browserPromise = null;
         });
+
+        // Set up new tab tracking
+        setupNewTabTracking(browser);
 
         return browser;
       } catch (error) {
@@ -187,6 +211,61 @@ This requires an X server to display the browser GUI.
   }
 
   return await browserPromise;
+}
+
+/**
+ * Setup tracking for new tabs opened via window.open, target="_blank", etc.
+ * @param {Browser} browser - Puppeteer browser instance
+ */
+function setupNewTabTracking(browser) {
+  browser.on('targetcreated', async (target) => {
+    // Only handle page targets (not service workers, etc.)
+    if (target.type() !== 'page') {
+      return;
+    }
+
+    // Skip if we've already processed this target
+    if (knownTargets.has(target)) {
+      return;
+    }
+    knownTargets.add(target);
+
+    try {
+      const page = await target.page();
+      if (!page) {
+        return;
+      }
+
+      // Check if this page is already tracked (created via getOrCreatePage)
+      const currentUrl = page.url();
+      for (const [url, trackedPage] of openPages.entries()) {
+        if (trackedPage === page) {
+          debugLog('Page already tracked, skipping:', url);
+          return;
+        }
+      }
+
+      // Get opener URL if available
+      const opener = target.opener();
+      let openerUrl = '';
+      if (opener) {
+        try {
+          const openerPage = await opener.page();
+          openerUrl = openerPage ? openerPage.url() : '';
+        } catch (e) {
+          // Opener might not be available
+        }
+      }
+
+      // Handle the new tab
+      await handleNewTab(page, openerUrl);
+
+    } catch (error) {
+      debugLog('Error handling new tab:', error.message);
+    }
+  });
+
+  debugLog('New tab tracking enabled');
 }
 
 /**

@@ -2,6 +2,96 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.0] - 2026-01-25
+
+### BREAKING CHANGES
+- **Chrome Extension for Recording** - Scenario recording now requires Chrome Extension
+  - Old HTML-injection recorder (`injectRecorder`) removed
+  - Extension auto-loads when Chrome is started by chrometools-mcp
+  - Recording controlled via Extension popup (click CT icon in toolbar)
+
+### Added
+- **ChromeTools Chrome Extension** (`extension/` folder)
+  - Full tab tracking via Chrome tabs API (catches ALL new tabs including Ctrl+T, context menu)
+  - Scenario recording via content script (works across all domains)
+  - Popup UI for recording control
+  - WebSocket connection to MCP server for real-time communication
+
+- **WebSocket Bridge** (`server/websocket-bridge.js`)
+  - Bidirectional communication between Extension and MCP server
+  - Port 9223 (CHROME_DEBUG_PORT + 1)
+  - Tab state sync, recorder commands, scenario save/list
+
+- **Auto-load Extension** - Chrome launched with `--load-extension` flag
+  - Extension automatically installed when Chrome starts
+  - No manual installation required
+
+### Changed
+- `enableRecorder` tool now checks Extension connection status instead of injecting HTML
+- Tab tracking improved: Extension provides complete tab list including manually opened tabs
+- Recording state persisted in `chrome.storage.local` (survives cross-domain navigation)
+
+### Removed
+- `recorder-script.js` HTML injection functionality (still exists for reference)
+- `pagesWithRecorder` tracking (Extension handles this now)
+- `setupRecorderAutoReinjection` function (Extension handles this now)
+
+## [2.9.0] - 2026-01-25
+
+### Added
+- **Automatic new tab detection** - Tracks tabs opened via `window.open()`, `target="_blank"`, or user actions
+  - New tabs automatically become the active page
+  - Network monitoring, console capture, and recorder auto-injection enabled on new tabs
+  - New tab events queued for AI notification via `listTabs`
+
+- **`listTabs` tool** - List all open browser tabs
+  - Returns: `{ tabs: [{ index, url, title, isActive }], totalCount }`
+  - Includes `newTabsDetected` array when new tabs were opened since last check
+  - Use tab index with `switchTab` to change active tab
+
+- **`switchTab` tool** - Switch between browser tabs
+  - Parameters: `tab` - Tab index (number) or URL pattern (string, partial match)
+  - Makes the specified tab active for subsequent commands
+  - Returns: `{ success, switchedTo: { url, title } }`
+
+### Changed
+- `openPages` Map now tracks all tabs including those opened externally
+- Browser `targetcreated` event handler added for automatic tab tracking
+
+## [2.8.0] - 2026-01-25
+
+### Added
+- **`getElementByApomId` tool** - Get detailed element information by APOM ID
+  - Parameters: `id` (required) - APOM element ID from analyzePage (e.g., `"input_20"`)
+  - Returns: Full element details including bounds, attributes, computed styles, visibility
+  - Use case: Inspect specific elements without re-analyzing entire page
+
+### Changed
+- **APOM format optimization** - ~82% token reduction
+  - Tree-structured output with hierarchical parent-child relationships
+  - Minified JSON output (no pretty printing)
+  - Parent nodes contain only position info (no bounds/metadata)
+  - Interactive elements retain full details (bounds, type, metadata)
+  - Groups section for radio/checkbox groups with options
+
+- **Separate `id` and `selector` parameters** for click, type, hover, selectOption
+  - **PREFERRED**: Use `id` parameter with APOM ID from analyzePage (e.g., `click({ id: "button_45" })`)
+  - **ALTERNATIVE**: Use `selector` parameter with CSS selector (e.g., `click({ selector: ".submit" })`)
+  - Parameters are mutually exclusive (use one or the other)
+  - Makes API clearer: agent knows exactly what it's passing
+  - Updated tool descriptions with PREFERRED/ALTERNATIVE guidance
+
+### Removed
+- **`registerPageObject` tool** - No longer needed
+  - `analyzePage()` now automatically registers elements with unique IDs
+  - Use APOM IDs directly with click/type/hover/selectOption tools
+  - Simplifies workflow: just call `analyzePage()` and use the returned IDs
+
+### Performance
+- APOM token usage reduced from ~31,000 to ~5,684 tokens on typical pages
+- Tree structure eliminates redundant parent information
+- Minified JSON further reduces output size
+
 ## [2.7.0] - 2026-01-25
 
 ### 🔄 BREAKING CHANGE

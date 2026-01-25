@@ -28,7 +28,7 @@ export const toolDefinitions = [
       },
       {
         name: "click",
-        description: "PRIMARY tool for clicking elements. Accepts APOM ID (e.g., 'button_45') from analyzePage OR CSS selector. Works correctly with React/Vue/Angular synthetic events. DO NOT use executeScript for clicks - use this tool instead. Waits for animations and navigation.",
+        description: "PRIMARY tool for clicking elements. PREFERRED: Use APOM ID (e.g., id: 'button_45') from analyzePage for reliable element targeting. ALTERNATIVE: CSS selector for ad-hoc usage. Works correctly with React/Vue/Angular synthetic events. DO NOT use executeScript for clicks - use this tool instead. Waits for animations and navigation.",
         inputSchema: {
           type: "object",
           properties: {
@@ -42,7 +42,7 @@ export const toolDefinitions = [
       },
       {
         name: "type",
-        description: "PRIMARY tool for filling input fields. Accepts APOM ID (e.g., 'input_20') from analyzePage OR CSS selector. Works correctly with React/Vue/Angular state management. DO NOT use executeScript for typing - use this tool instead. Automatically updates framework state (React hooks, Vue reactive data).",
+        description: "PRIMARY tool for filling input fields. PREFERRED: Use APOM ID (e.g., id: 'input_20') from analyzePage for reliable element targeting. ALTERNATIVE: CSS selector for ad-hoc usage. Works correctly with React/Vue/Angular state management. DO NOT use executeScript for typing - use this tool instead. Automatically updates framework state (React hooks, Vue reactive data).",
         inputSchema: {
           type: "object",
           properties: {
@@ -223,7 +223,7 @@ export const toolDefinitions = [
       },
       {
         name: "hover",
-        description: "Hover over element. Accepts APOM ID from analyzePage OR CSS selector. For testing hover effects, tooltips, and CSS :hover states.",
+        description: "Hover over element. PREFERRED: Use APOM ID from analyzePage. ALTERNATIVE: CSS selector. For testing hover effects, tooltips, and CSS :hover states.",
         inputSchema: {
           type: "object",
           properties: {
@@ -234,7 +234,7 @@ export const toolDefinitions = [
       },
       {
         name: "selectOption",
-        description: "Select option in dropdown. Accepts APOM ID from analyzePage OR CSS selector. Works with HTML select elements. Specify value, text, or index to choose option.",
+        description: "Select option in dropdown. PREFERRED: Use APOM ID from analyzePage. ALTERNATIVE: CSS selector. Works with HTML select elements. Specify value, text, or index to choose option.",
         inputSchema: {
           type: "object",
           properties: {
@@ -564,7 +564,7 @@ export const toolDefinitions = [
       },
       {
         name: "enableRecorder",
-        description: "Inject recorder UI widget. Visual recording with start/stop/save controls. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        description: "Check ChromeTools Extension connection status for scenario recording. Recording is now handled via Chrome Extension popup (click CT icon in Chrome toolbar). Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -740,6 +740,31 @@ export const toolDefinitions = [
               description: "Group elements by page sections (default: true)"
             },
           },
+        },
+      },
+      {
+        name: "listTabs",
+        description: "List all open browser tabs with their URLs, titles, and active status. Use this to see all tabs opened manually or via window.open/target='_blank'. Returns tab index for use with switchTab.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "switchTab",
+        description: "Switch active browser tab by index or URL pattern. After switch, all subsequent commands will target the new active tab. Use listTabs first to see available tabs.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            tab: {
+              oneOf: [
+                { type: "number", minimum: 0, description: "Tab index (0-based)" },
+                { type: "string", description: "URL pattern to match (partial match)" }
+              ],
+              description: "Tab identifier: index number or URL pattern to match"
+            },
+          },
+          required: ["tab"],
         },
       },
 ];

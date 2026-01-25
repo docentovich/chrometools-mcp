@@ -14,6 +14,14 @@ import {homedir} from 'os';
 import {closeBrowser} from './browser/browser-manager.js';
 import {isWSL} from './utils/platform-utils.js';
 
+// Import WebSocket bridge for Chrome Extension communication
+import {
+  startWebSocketServer,
+  isExtensionConnected,
+  getTabsFromExtension,
+  getActiveTabFromExtension
+} from './server/websocket-bridge.js';
+
 // Import page management utilities
 import {
     consoleLogs,
@@ -21,7 +29,9 @@ import {
     getOrCreatePage,
     networkRequests,
     pageAnalysisCache,
-    pagesWithRecorder
+    getAndClearNewTabEvents,
+    getAllPages,
+    switchToPage
 } from './browser/page-manager.js';
 
 // Import image processing utilities
@@ -41,7 +51,7 @@ import {executeElementAction} from './utils/element-actions.js';
 import {generateClickHints, generateNavigationHints} from './utils/hints-generator.js';
 
 // Import Recorder modules
-import {injectRecorder} from './recorder/recorder-script.js';
+// Note: injectRecorder removed - now using Chrome Extension
 import {executeScenario} from './recorder/scenario-executor.js';
 import {deleteScenario, listScenarios, loadScenario, searchScenarios} from './recorder/scenario-storage.js';
 import {generatePageObject} from './recorder/page-object-generator.js';
@@ -2357,27 +2367,33 @@ Start coding now.`;
     }
 
     if (name === "enableRecorder") {
-      // Project ID will be determined from URL in browser context
-      const page = await getLastOpenPage();
-      const result = await injectRecorder(page);
+      // Check if extension is connected
+      const extensionConnected = isExtensionConnected();
 
-      // Track this page as having recorder enabled
-      if (result.success) {
-        pagesWithRecorder.add(page);
+      if (extensionConnected) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: 'ChromeTools Extension is connected. Use the extension popup to start/stop recording. Click the CT icon in Chrome toolbar.',
+              extensionConnected: true
+            }, null, 2)
+          }]
+        };
+      } else {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: 'ChromeTools Extension is not connected. Please ensure the extension is loaded in Chrome.',
+              hint: 'If Chrome was started by chrometools-mcp, the extension should be auto-loaded. Otherwise, load it manually from: extension/ folder',
+              extensionConnected: false
+            }, null, 2)
+          }]
+        };
       }
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify(result.success ? {
-            success: true,
-            message: 'Recorder UI injected into page. Click \'Start\' to begin recording. Scenarios will be organized by website domain in: ~/.config/chrometools-mcp/projects/'
-          } : {
-            success: false,
-            error: result.error
-          }, null, 2)
-        }]
-      };
     }
 
     if (name === "executeScenario") {
@@ -2929,6 +2945,56 @@ Start coding now.`;
       }
     }
 
+    // Tab management tools
+    if (name === "listTabs") {
+      const pages = await getAllPages();
+      const newTabEvts = getAndClearNewTabEvents();
+
+      const result = {
+        tabs: pages.map((p, index) => ({
+          index,
+          url: p.url,
+          title: p.title,
+          isActive: p.isActive
+        })),
+        totalCount: pages.length
+      };
+
+      // Include new tab notifications if any
+      if (newTabEvts.length > 0) {
+        result.newTabsDetected = newTabEvts;
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
+        }]
+      };
+    }
+
+    if (name === "switchTab") {
+      const validatedArgs = schemas.SwitchTabSchema.parse(args);
+      const page = await switchToPage(validatedArgs.tab);
+
+      const url = page.url();
+      const title = await page.title().catch(() => '');
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            switchedTo: {
+              url,
+              title
+            },
+            message: `Switched to tab: ${title || url}`
+          }, null, 2)
+        }]
+      };
+    }
+
     return {
       content: [
         {
@@ -2953,6 +3019,10 @@ async function main() {
     console.error("[chrometools-mcp] WSL environment detected");
     console.error("[chrometools-mcp] GUI mode requires X server (DISPLAY=" + (process.env.DISPLAY || "not set") + ")");
   }
+
+  // Start WebSocket server for Chrome Extension communication
+  startWebSocketServer();
+  console.error("[chrometools-mcp] WebSocket bridge started on port 9223");
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
