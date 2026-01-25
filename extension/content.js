@@ -28,7 +28,8 @@
 
   // Debounce timers
   const inputDebounceTimers = new Map();
-  const lastInputValues = new Map();
+  const lastInputValues = new Map();        // Value when element was last recorded
+  const inputStartValues = new Map();       // Value when user started typing (before any input)
   let scrollDebounceTimer = null;
   let lastHoverTarget = null;
 
@@ -338,46 +339,88 @@
     const timerId = inputDebounceTimers.get(element);
     if (timerId) clearTimeout(timerId);
 
+    // Capture the START value when user begins typing in this element
+    // This value stays the same until we actually record the action
+    if (!inputStartValues.has(element)) {
+      inputStartValues.set(element, lastInputValues.get(element) || '');
+    }
+
+    // Set up debounce timer - this is a FALLBACK, not the primary mechanism
+    // Primary recording happens on blur/Enter (see handleBlur and handleKeyDown)
     inputDebounceTimers.set(element, setTimeout(() => {
-      const value = element.value;
-      const previousValue = lastInputValues.get(element) || '';
+      flushInputValue(element);
+    }, 1500)); // Longer debounce - prefer blur/Enter
+  }
 
-      if (value === previousValue) return;
-      if (!isElementVisible(element)) return;
+  function flushInputValue(element) {
+    // Clear any pending timer
+    const timerId = inputDebounceTimers.get(element);
+    if (timerId) {
+      clearTimeout(timerId);
+      inputDebounceTimers.delete(element);
+    }
 
-      const selector = generateSelector(element);
-      const secretInfo = isSecretField(element);
+    // Get the value from when user started typing
+    const startValue = inputStartValues.get(element);
+    if (startValue === undefined) return; // No input session in progress
 
-      let recordedValue = value;
-      let paramName = null;
+    const finalValue = element.value;
 
-      if (secretInfo.isSecret) {
-        paramName = generateParamName(secretInfo.fieldType, element);
-        recordedValue = `{{${paramName}}}`;
+    // Only record if value actually changed
+    if (finalValue === startValue) {
+      inputStartValues.delete(element);
+      return;
+    }
 
-        // Register secret with background
-        chrome.runtime.sendMessage({
-          type: 'REGISTER_SECRET',
-          paramName,
-          value
-        });
-      }
+    if (!isElementVisible(element)) {
+      inputStartValues.delete(element);
+      return;
+    }
 
-      sendAction({
-        type: 'type',
-        selector,
-        timestamp: Date.now(),
-        data: {
-          text: recordedValue,
-          isSecret: secretInfo.isSecret,
-          paramName,
-          clearFirst: previousValue === ''
-        }
+    const selector = generateSelector(element);
+    const secretInfo = isSecretField(element);
+
+    let recordedValue = finalValue;
+    let paramName = null;
+
+    if (secretInfo.isSecret) {
+      paramName = generateParamName(secretInfo.fieldType, element);
+      recordedValue = `{{${paramName}}}`;
+
+      // Register secret with background
+      chrome.runtime.sendMessage({
+        type: 'REGISTER_SECRET',
+        paramName,
+        value: finalValue
       });
+    }
 
-      lastInputValues.set(element, value);
-      highlightElement(element);
-    }, 500));
+    sendAction({
+      type: 'type',
+      selector,
+      timestamp: Date.now(),
+      data: {
+        text: recordedValue,
+        isSecret: secretInfo.isSecret,
+        paramName,
+        clearFirst: startValue === ''
+      }
+    });
+
+    // Update stored value and clear the start value
+    lastInputValues.set(element, finalValue);
+    inputStartValues.delete(element);
+    highlightElement(element);
+  }
+
+  function handleBlur(e) {
+    if (!isRecording || isPaused) return;
+    if (e.target.closest('#chrometools-recorder-overlay')) return;
+
+    const element = e.target;
+    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+      flushInputValue(element);
+    }
   }
 
   function handleChange(e) {
@@ -439,6 +482,15 @@
   function handleKeyDown(e) {
     if (!isRecording || isPaused) return;
     if (e.target.closest('#chrometools-recorder-overlay')) return;
+
+    const element = e.target;
+
+    // Flush input before Enter/Tab (these typically submit or move to next field)
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+        flushInputValue(element);
+      }
+    }
 
     const specialKeys = ['Enter', 'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace', 'Delete'];
 
@@ -555,6 +607,7 @@
     document.addEventListener('input', handleInput, true);
     document.addEventListener('change', handleChange, true);
     document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('blur', handleBlur, true);
     document.addEventListener('scroll', handleScroll, true);
   }
 
@@ -563,6 +616,7 @@
     document.removeEventListener('input', handleInput, true);
     document.removeEventListener('change', handleChange, true);
     document.removeEventListener('keydown', handleKeyDown, true);
+    document.removeEventListener('blur', handleBlur, true);
     document.removeEventListener('scroll', handleScroll, true);
   }
 
