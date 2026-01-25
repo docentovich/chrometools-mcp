@@ -546,6 +546,23 @@ export const toolDefinitions = [
         },
       },
       {
+        name: "selectFromGroup",
+        description: "Select option(s) from radio or checkbox group by name attribute. For radio groups: selects one option. For checkbox groups: supports multi-select with modes (set/add/remove/toggle). Use 'name' to identify the group, and 'value'/'text' to select by value or label. See groups in analyzePage output for available options.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Name attribute of the radio/checkbox group (e.g., 'size', 'topping')" },
+            value: { type: "string", description: "Single value to select (for radio or single checkbox)" },
+            values: { type: "array", items: { type: "string" }, description: "Multiple values to select (for checkbox group)" },
+            text: { type: "string", description: "Label text to match (alternative to value)" },
+            texts: { type: "array", items: { type: "string" }, description: "Multiple label texts to match (for checkbox group)" },
+            mode: { type: "string", enum: ["set", "add", "remove", "toggle"], description: "For checkboxes: 'set' (replace all), 'add', 'remove', 'toggle' (default: 'set')" },
+            by: { type: "string", enum: ["value", "text", "auto"], description: "Match by value, label text, or auto-detect (default: 'auto')" },
+          },
+          required: ["name"],
+        },
+      },
+      {
         name: "enableRecorder",
         description: "Inject recorder UI widget. Visual recording with start/stop/save controls. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
         inputSchema: {

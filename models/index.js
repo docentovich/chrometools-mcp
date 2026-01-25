@@ -20,6 +20,8 @@ import { RangeInputModel } from './RangeInputModel.js';
 import { SelectModel } from './SelectModel.js';
 import { CheckboxModel } from './CheckboxModel.js';
 import { TextareaModel } from './TextareaModel.js';
+import { RadioGroupModel } from './RadioGroupModel.js';
+import { CheckboxGroupModel } from './CheckboxGroupModel.js';
 
 /**
  * Registry of all input models in priority order.
@@ -115,4 +117,6 @@ export {
   SelectModel,
   CheckboxModel,
   TextareaModel,
+  RadioGroupModel,
+  CheckboxGroupModel,
 };

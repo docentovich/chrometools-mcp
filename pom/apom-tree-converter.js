@@ -43,7 +43,63 @@ function buildAPOMTree(interactiveOnly = true) {
   // Build tree from body
   result.tree = buildNode(document.body, null, 0, []);
 
+  // Collect radio and checkbox groups for easier agent access
+  result.groups = collectInputGroups(result.tree);
+
   return result;
+
+  /**
+   * Collect radio and checkbox groups from the tree
+   */
+  function collectInputGroups(tree) {
+    const radioGroups = {};
+    const checkboxGroups = {};
+
+    function traverse(node) {
+      if (!node) return;
+
+      // Check if this is a radio or checkbox input
+      if (node.type === 'input' && node.metadata) {
+        const { inputType, name, value, label, checked } = node.metadata;
+
+        if (inputType === 'radio' && name) {
+          if (!radioGroups[name]) {
+            radioGroups[name] = { type: 'radio', options: [] };
+          }
+          radioGroups[name].options.push({
+            id: node.id,
+            value: value || '',
+            label: label || value || '',
+            checked: checked || false
+          });
+        }
+
+        if (inputType === 'checkbox' && name) {
+          if (!checkboxGroups[name]) {
+            checkboxGroups[name] = { type: 'checkbox', options: [] };
+          }
+          checkboxGroups[name].options.push({
+            id: node.id,
+            value: value || '',
+            label: label || value || '',
+            checked: checked || false
+          });
+        }
+      }
+
+      // Traverse children
+      if (node.children) {
+        node.children.forEach(child => traverse(child));
+      }
+    }
+
+    traverse(tree);
+
+    return {
+      radio: Object.keys(radioGroups).length > 0 ? radioGroups : undefined,
+      checkbox: Object.keys(checkboxGroups).length > 0 ? checkboxGroups : undefined
+    };
+  }
 
   /**
    * Mark interactive elements and their ancestors
@@ -259,6 +315,26 @@ function buildAPOMTree(interactiveOnly = true) {
     // Input fields
     if (tag === 'input') {
       const inputType = type || 'text';
+
+      // Get label text for radio/checkbox inputs
+      let labelText = null;
+      if (inputType === 'radio' || inputType === 'checkbox') {
+        // Try to find label by: 1) wrapping label, 2) label[for=id], 3) aria-label
+        const parentLabel = element.closest('label');
+        if (parentLabel) {
+          // Get text content excluding the input itself
+          labelText = parentLabel.textContent?.trim() || null;
+        } else if (element.id) {
+          const labelFor = document.querySelector(`label[for="${element.id}"]`);
+          if (labelFor) {
+            labelText = labelFor.textContent?.trim() || null;
+          }
+        }
+        if (!labelText) {
+          labelText = element.getAttribute('aria-label') || null;
+        }
+      }
+
       return {
         type: inputType === 'submit' || inputType === 'button' ? 'button' : 'input',
         isInteractive: true,
@@ -270,6 +346,7 @@ function buildAPOMTree(interactiveOnly = true) {
           disabled: element.disabled || false,
           value: element.value || '',
           checked: element.checked || undefined,
+          label: labelText,
           min: element.min || undefined,
           max: element.max || undefined,
           pattern: element.pattern || undefined

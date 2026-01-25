@@ -50,7 +50,7 @@ import {generatePageObject} from './recorder/page-object-generator.js';
 import {PlaywrightTypeScriptGenerator} from './utils/code-generators/playwright-typescript.js';
 
 // Import Input Models
-import { getInputModel } from './models/index.js';
+import { getInputModel, RadioGroupModel, CheckboxGroupModel } from './models/index.js';
 import {PlaywrightPythonGenerator} from './utils/code-generators/playwright-python.js';
 import {SeleniumPythonGenerator} from './utils/code-generators/selenium-python.js';
 import {SeleniumJavaGenerator} from './utils/code-generators/selenium-java.js';
@@ -1294,20 +1294,36 @@ async function executeToolInternal(name, args) {
 
     if (name === "navigateTo") {
       const validatedArgs = schemas.NavigateToSchema.parse(args);
-      const page = await getLastOpenPage();
 
-      // Navigate to the new URL (always navigate, don't use cache)
-      await page.goto(validatedArgs.url, { waitUntil: validatedArgs.waitUntil || 'networkidle2' });
+      // Auto-open browser if no page is open (instead of throwing error)
+      let page;
+      let browserOpened = false;
+      try {
+        page = await getLastOpenPage();
+      } catch (e) {
+        // No page open - create one automatically
+        page = await getOrCreatePage(validatedArgs.url);
+        browserOpened = true;
+      }
+
+      // Navigate to the new URL (skip if we just created page with this URL)
+      if (!browserOpened) {
+        await page.goto(validatedArgs.url, { waitUntil: validatedArgs.waitUntil || 'networkidle2' });
+      }
 
       const title = await page.title();
 
       // Generate AI hints
       const hints = await generateNavigationHints(page, validatedArgs.url);
 
+      const message = browserOpened
+        ? `Browser opened and navigated to: ${validatedArgs.url}`
+        : `Navigated to: ${validatedArgs.url}`;
+
       return {
         content: [{
           type: "text",
-          text: `Navigated to: ${validatedArgs.url}\nPage title: ${title}\n\n** AI HINTS **\nPage type: ${hints.pageType}\nAvailable actions: ${hints.availableActions.join(', ')}\nSuggested next: ${hints.suggestedNext.join('; ')}`
+          text: `${message}\nPage title: ${title}\n\n** AI HINTS **\nPage type: ${hints.pageType}\nAvailable actions: ${hints.availableActions.join(', ')}\nSuggested next: ${hints.suggestedNext.join('; ')}`
         }],
       };
     }
@@ -2265,6 +2281,77 @@ Start coding now.`;
         content: [{
           type: 'text',
           text: JSON.stringify(response, null, 2)
+        }]
+      };
+    }
+
+    if (name === "selectFromGroup") {
+      const validatedArgs = schemas.SelectFromGroupSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const groupName = validatedArgs.name;
+      const by = validatedArgs.by || 'auto';
+      const mode = validatedArgs.mode || 'set';
+
+      // Determine group type (radio or checkbox)
+      const groupType = await page.evaluate((name) => {
+        const radioInputs = document.querySelectorAll(`input[type="radio"][name="${name}"]`);
+        const checkboxInputs = document.querySelectorAll(`input[type="checkbox"][name="${name}"]`);
+
+        if (radioInputs.length > 0) return 'radio';
+        if (checkboxInputs.length > 0) return 'checkbox';
+        return null;
+      }, groupName);
+
+      if (!groupType) {
+        throw new Error(`No radio or checkbox group found with name "${groupName}"`);
+      }
+
+      let result;
+
+      if (groupType === 'radio') {
+        // Radio group - single selection
+        const model = new RadioGroupModel(groupName, page);
+        const valueToSelect = validatedArgs.value || validatedArgs.text;
+
+        if (!valueToSelect) {
+          throw new Error('Radio group requires "value" or "text" parameter');
+        }
+
+        result = await model.setValue(valueToSelect, { by });
+        result.groupType = 'radio';
+        result.groupName = groupName;
+
+      } else {
+        // Checkbox group - multi selection
+        const model = new CheckboxGroupModel(groupName, page);
+
+        // Collect values to select
+        let valuesToSelect = [];
+        if (validatedArgs.values) {
+          valuesToSelect = validatedArgs.values;
+        } else if (validatedArgs.texts) {
+          valuesToSelect = validatedArgs.texts;
+        } else if (validatedArgs.value) {
+          valuesToSelect = [validatedArgs.value];
+        } else if (validatedArgs.text) {
+          valuesToSelect = [validatedArgs.text];
+        }
+
+        if (valuesToSelect.length === 0) {
+          throw new Error('Checkbox group requires "value", "values", "text", or "texts" parameter');
+        }
+
+        result = await model.setValue(valuesToSelect, { mode, by });
+        result.groupType = 'checkbox';
+        result.groupName = groupName;
+        result.mode = mode;
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
         }]
       };
     }

@@ -8,10 +8,10 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 - [Usage](#usage)
 - [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
 - [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
-- [Available Tools](#available-tools) - **44+ Tools Total**
+- [Available Tools](#available-tools) - **45+ Tools Total**
   - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getAllInteractiveElements, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
-  - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, dragScroll, scrollHorizontal
+  - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
   - [Recorder Tools](#6-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
@@ -280,7 +280,7 @@ Scroll page to bring element into view.
 #### selectOption
 Select option in dropdown (HTML select elements). Automatically detected by analyzePage with all available options.
 - **Parameters**:
-  - `selector` (required): CSS selector for select element
+  - `selector` or `id` (one required): CSS selector or APOM ID for select element
   - `value` (optional): Option value attribute (priority 1)
   - `text` (optional): Option text content (priority 2)
   - `index` (optional): Option index, 0-based (priority 3)
@@ -288,6 +288,38 @@ Select option in dropdown (HTML select elements). Automatically detected by anal
 - **Returns**: Selected option details (value, text, index)
 - **Selection priority**: If multiple parameters specified, tries value → text → index
 - **AI Integration**: Use `analyzePage` to see all available options with their values, text, and indices
+
+#### selectFromGroup ⭐ **NEW**
+Select option(s) from radio or checkbox group by name attribute. Works at abstract group level instead of individual clicks.
+- **Parameters**:
+  - `name` (required): Name attribute of the radio/checkbox group (e.g., 'size', 'toppings')
+  - `value` (optional): Single value to select (for radio or single checkbox)
+  - `values` (optional): Array of values to select (for checkbox group)
+  - `text` (optional): Label text to match (alternative to value)
+  - `texts` (optional): Array of label texts to match (for checkbox group)
+  - `by` (optional): Match by 'value', 'text', or 'auto' (default: 'auto')
+  - `mode` (optional): For checkboxes - 'set' (replace all), 'add', 'remove', 'toggle' (default: 'set')
+- **Use case**: Radio buttons, checkbox groups, form options
+- **Returns**: Result with changes made and current selection state
+- **AI Integration**: Use `analyzePage` to see available groups in `groups` section with all options and labels
+- **Examples**:
+  ```javascript
+  // Radio group - select single option
+  selectFromGroup({ name: "size", value: "large" })
+  selectFromGroup({ name: "size", text: "Extra Large" })
+
+  // Checkbox group - set specific values (uncheck others)
+  selectFromGroup({ name: "toppings", values: ["cheese", "bacon"] })
+
+  // Checkbox group - add to existing selection
+  selectFromGroup({ name: "toppings", values: ["mushrooms"], mode: "add" })
+
+  // Checkbox group - remove specific values
+  selectFromGroup({ name: "toppings", values: ["onions"], mode: "remove" })
+
+  // Checkbox group - toggle values
+  selectFromGroup({ name: "toppings", texts: ["Extra Cheese"], mode: "toggle" })
+  ```
 
 #### drag
 Drag element by mouse (click-hold-move-release). Simulates real mouse drag, not scrollbar scrolling.

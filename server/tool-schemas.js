@@ -290,6 +290,17 @@ export const FindElementsByTextSchema = z.object({
   }).optional().describe("Optional action to perform on the first matching element"),
 });
 
+// Group selection tools
+export const SelectFromGroupSchema = z.object({
+  name: z.string().describe("Name attribute of the radio/checkbox group"),
+  value: z.string().optional().describe("Single value to select (for radio or single checkbox)"),
+  values: z.array(z.string()).optional().describe("Multiple values to select (for checkbox group)"),
+  text: z.string().optional().describe("Label text to match (alternative to value)"),
+  texts: z.array(z.string()).optional().describe("Multiple label texts to match (for checkbox group)"),
+  mode: z.enum(['set', 'add', 'remove', 'toggle']).optional().describe("For checkboxes: 'set' (replace), 'add', 'remove', 'toggle' (default: 'set')"),
+  by: z.enum(['value', 'text', 'auto']).optional().describe("Match by value, text, or auto-detect (default: 'auto')"),
+});
+
 // Recorder tools (schemas created from inline definitions)
 export const EnableRecorderSchema = z.object({
   directory: z.string().optional().describe("Directory to save scenarios (optional, defaults to auto-detected project root)")

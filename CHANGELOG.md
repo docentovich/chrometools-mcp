@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - 2026-01-25 (APOM is Now Default) 🔄
+## [2.7.0] - 2026-01-25
 
 ### 🔄 BREAKING CHANGE
 - **`analyzePage` now returns APOM format by default**
@@ -20,7 +20,7 @@ All notable changes to this project will be documented in this file.
   - Returns: `{ pageId, url, title, timestamp, elements, groups, metadata }`
   - Each element gets unique ID: `input_0`, `button_1`, `form_0`, `radio_0`, `checkbox_0`
   - Elements automatically registered in persistent `window.__ELEMENT_REGISTRY__`
-  - **Use IDs instead of CSS selectors**: `type({ selector: "input_0", text: "..." })`
+  - **Use IDs instead of CSS selectors**: `type({ id: "input_0", text: "..." })`
   - **Backward compatible**: Set `useLegacyFormat: true` for old format
   - **Tested**: Fully functional with real-world forms
 
@@ -33,6 +33,54 @@ All notable changes to this project will be documented in this file.
     - Groups elements by type (forms, inputs, buttons, links)
     - Generates pageId, metadata
 
+- **Input Models Architecture** - Modular input handling system
+  - New `models/` directory with specialized input handlers
+  - `BaseInputModel` - Abstract base class with common interface (setValue, getValue, clear, focus)
+  - `TextInputModel` - Default for text-like inputs (text, email, password, search, tel, url)
+  - `TimeInputModel` - Correct handling for `input[type="time"]` via JavaScript value assignment
+  - `DateInputModel` - Handles date, datetime-local, month, week inputs
+  - `ColorInputModel` - Color picker input handling
+  - `RangeInputModel` - Slider/range input handling
+  - `SelectModel` - HTML `<select>` element handling
+  - `CheckboxModel` - Single checkbox toggle
+  - `TextareaModel` - Multi-line text input
+  - `InputModelFactory` - Factory pattern for selecting appropriate model
+  - Fixes issue where keyboard input didn't work for time inputs (only minutes showed)
+
+- **Radio/Checkbox Group Models** - Abstract group-level operations
+  - `RadioGroupModel` - Select single option from radio group by name, value, or label text
+  - `CheckboxGroupModel` - Multi-select from checkbox group with modes:
+    - `set` - Replace all selections
+    - `add` - Check additional values
+    - `remove` - Uncheck specific values
+    - `toggle` - Flip specific values
+
+- **`selectFromGroup` tool** - New MCP tool for radio/checkbox group selection
+  - Parameters: `name` (required), `value`, `values`, `text`, `texts`, `mode`, `by`
+  - Works with radio groups (single selection) and checkbox groups (multi-selection)
+  - Match by value attribute or label text (`by: 'value' | 'text' | 'auto'`)
+  - Example: `selectFromGroup({ name: "size", value: "large" })`
+  - Example: `selectFromGroup({ name: "toppings", values: ["cheese", "bacon"], mode: "add" })`
+
+- **Radio/Checkbox Groups in `analyzePage`**
+  - APOM output now includes `groups` section with radio and checkbox groups
+  - Each group shows: name, all options with values, labels, checked state
+  - Labels extracted from: parent `<label>`, `<label for="id">`, aria-label attribute
+  - Example output:
+    ```json
+    "groups": {
+      "radio": {
+        "size": {
+          "options": [
+            { "value": "small", "label": "Small", "checked": false },
+            { "value": "large", "label": "Large", "checked": true }
+          ]
+        }
+      },
+      "checkbox": { ... }
+    }
+    ```
+
 ### Fixed
 - **Critical Bug**: Variable shadowing in analyzePage APOM conversion (commit e1e63e2)
   - Fixed `const analysis` shadowing in else block causing undefined analysis
@@ -40,23 +88,38 @@ All notable changes to this project will be documented in this file.
   - Changed `const elementRegistry = new Map()` to `window.__ELEMENT_REGISTRY__`
   - Registry now persists between tool calls
   - All selector-resolver functions exported to window
+- **API Error**: `oneOf` not supported at top level in tool schemas
+  - Removed `oneOf` blocks from click, type, hover, selectOption tool definitions
+  - Both `id` and `selector` parameters now optional with description indicating one is required
+  - Fixes error: `tools.19.custom.input_schema: input_schema does not support oneOf, allOf, or anyOf at the top level`
 
 ### Changed
 - **`analyzePage` enhanced with APOM support**
   - Now supports both legacy and APOM formats
   - Cache logic updated to handle generateIds parameter
   - Elements automatically registered when generateIds=true
+  - Radio/checkbox elements now include label text
 
 - **`utils/selector-resolver.js` updated for persistence**
   - Registry stored in `window.__ELEMENT_REGISTRY__` instead of local const
   - All functions (registerElement, resolveSelector, etc.) exported to window
   - Survives across multiple page.evaluate contexts
 
+- **`navigateTo` auto-opens browser** - No longer throws error when no page is open
+  - Automatically opens browser at specified URL if no page is currently open
+  - Eliminates need to manually call `openBrowser` before navigation
+  - Falls back gracefully with informative message
+
+- **`type` tool uses Input Models** - Automatically selects appropriate model based on input type
+  - Time inputs now correctly set full value (e.g., "18:30" not just "30")
+  - Date inputs work without keyboard simulation issues
+  - All specialized inputs handled by their respective models
+
 ### Technical Details
 - APOM conversion happens in browser context via page.evaluate
 - Element IDs remain stable across page refreshes (based on testid/id/structure)
 - Dual selector mode: all tools accept both IDs and CSS selectors
-- No breaking changes - legacy format still default
+- Input models use JavaScript value assignment with proper event dispatching
 
 ## [2.6.0] - 2026-01-25
 

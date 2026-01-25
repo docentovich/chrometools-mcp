@@ -7,7 +7,7 @@
 export const toolGroups = {
   core: ['ping', 'openBrowser', 'executeScript', 'navigateTo'],
 
-  interaction: ['click', 'type', 'scrollTo', 'waitForElement', 'hover', 'selectOption', 'drag', 'scrollHorizontal'],
+  interaction: ['click', 'type', 'scrollTo', 'waitForElement', 'hover', 'selectOption', 'selectFromGroup', 'drag', 'scrollHorizontal'],
 
   inspection: ['getElement', 'getComputedCss', 'getBoxModel', 'screenshot', 'saveScreenshot'],
 
