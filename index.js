@@ -11,7 +11,7 @@ import {fileURLToPath} from 'url';
 import {homedir} from 'os';
 
 // Import browser and platform utilities
-import {closeBrowser} from './browser/browser-manager.js';
+import {closeBrowser, isConnectedToExistingChrome} from './browser/browser-manager.js';
 import {isWSL} from './utils/platform-utils.js';
 
 // Import WebSocket bridge for Chrome Extension communication
@@ -126,6 +126,30 @@ const apomTreeConverter = readFileSync(path.join(__dirname, 'pom', 'apom-tree-co
 const BASE_STORAGE_DIR = path.join(homedir(), '.config', 'chrometools-mcp');
 const GLOBAL_INDEX_PATH = path.join(BASE_STORAGE_DIR, 'index.json');
 const PROJECTS_DIR = path.join(BASE_STORAGE_DIR, 'projects');
+
+// Extension path for installation instructions
+const EXTENSION_PATH = path.join(__dirname, 'extension');
+
+/**
+ * Generate extension installation instructions for AI agents
+ * @returns {object} Instructions object with steps and hints
+ */
+function getExtensionInstallInstructions() {
+  return {
+    message: 'ChromeTools Extension is NOT connected. Multi-tab features are limited.',
+    reason: 'Extension enables: seeing ALL tabs (including manually opened), reliable tab switching, and scenario recording.',
+    installSteps: [
+      '1. Open Chrome and go to: chrome://extensions/',
+      '2. Enable "Developer mode" toggle (top right)',
+      '3. Click "Load unpacked" button',
+      `4. Select folder: ${EXTENSION_PATH}`,
+      '5. Extension "ChromeTools MCP" should appear in the list',
+      '6. Restart your MCP client (Claude Desktop, etc.) to reconnect'
+    ],
+    alternativeFix: 'Close ALL Chrome windows and restart MCP - extension will auto-load with new Chrome instance.',
+    extensionPath: EXTENSION_PATH
+  };
+}
 
 /**
  * Load global index from ~/.config/chrometools-mcp/index.json
@@ -292,11 +316,21 @@ async function executeToolInternal(name, args) {
       // Generate AI hints
       const hints = await generateNavigationHints(page, validatedArgs.url);
 
+      // Check if extension is connected
+      const extensionConnected = isExtensionConnected();
+      const usedExistingChrome = isConnectedToExistingChrome();
+
+      let extensionNote = '';
+      if (!extensionConnected && usedExistingChrome) {
+        const instructions = getExtensionInstallInstructions();
+        extensionNote = `\n\n⚠️ EXTENSION NOT CONNECTED\nConnected to existing Chrome - extension needs manual installation.\n${instructions.installSteps.join('\n')}\n\nAlternative: ${instructions.alternativeFix}`;
+      }
+
       return {
         content: [
           {
             type: "text",
-            text: `Browser opened successfully!\nURL: ${validatedArgs.url}\nPage title: ${title}\n\nBrowser remains open for interaction.\n\n** AI HINTS **\nPage type: ${hints.pageType}\nAvailable actions: ${hints.availableActions.join(', ')}\nSuggested next: ${hints.suggestedNext.join('; ')}`,
+            text: `Browser opened successfully!\nURL: ${validatedArgs.url}\nPage title: ${title}\n\nBrowser remains open for interaction.\n\n** AI HINTS **\nPage type: ${hints.pageType}\nAvailable actions: ${hints.availableActions.join(', ')}\nSuggested next: ${hints.suggestedNext.join('; ')}${extensionNote}`,
           },
         ],
       };
@@ -2384,14 +2418,15 @@ Start coding now.`;
           }]
         };
       } else {
+        const instructions = getExtensionInstallInstructions();
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
               success: false,
-              error: 'ChromeTools Extension is not connected. Please ensure the extension is loaded in Chrome.',
-              hint: 'If Chrome was started by chrometools-mcp, the extension should be auto-loaded. Otherwise, load it manually from: extension/ folder',
-              extensionConnected: false
+              error: 'ChromeTools Extension is not connected. Recording requires the extension.',
+              extensionConnected: false,
+              ...instructions
             }, null, 2)
           }]
         };
@@ -2978,16 +3013,23 @@ Start coding now.`;
       }
 
       const newTabEvts = getAndClearNewTabEvents();
+      const extensionConnected = isExtensionConnected();
 
       const result = {
         tabs,
         totalCount: tabs.length,
-        source
+        source,
+        extensionConnected
       };
 
       // Include new tab notifications if any
       if (newTabEvts.length > 0) {
         result.newTabsDetected = newTabEvts;
+      }
+
+      // Add installation instructions if extension not connected
+      if (!extensionConnected) {
+        result.extensionNotConnected = getExtensionInstallInstructions();
       }
 
       return {
@@ -3032,18 +3074,27 @@ Start coding now.`;
       const url = page.url();
       const title = await page.title().catch(() => '');
 
+      const result = {
+        success: true,
+        switchedTo: {
+          url,
+          title
+        },
+        message: `Switched to tab: ${title || url}`,
+        source: 'puppeteer',
+        extensionConnected: false
+      };
+
+      // Add note about extension benefits
+      if (!isExtensionConnected()) {
+        result.note = 'Using Puppeteer fallback. Install ChromeTools Extension to see ALL tabs (including manually opened).';
+        result.extensionInstall = getExtensionInstallInstructions();
+      }
+
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
-            success: true,
-            switchedTo: {
-              url,
-              title
-            },
-            message: `Switched to tab: ${title || url}`,
-            source: 'puppeteer'
-          }, null, 2)
+          text: JSON.stringify(result, null, 2)
         }]
       };
     }

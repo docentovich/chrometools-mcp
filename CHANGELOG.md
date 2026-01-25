@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.2] - 2026-01-25
+
+### Added
+- **Extension installation instructions for AI agents**
+  - `listTabs`, `switchTab`, `enableRecorder` now include install steps when extension not connected
+  - `openBrowser` shows warning when connected to existing Chrome (extension needs manual install)
+  - Clear step-by-step instructions with extension path for manual installation
+  - Alternative fix: close all Chrome windows and restart MCP for auto-install
+
+### Changed
+- Improved extension status reporting with `extensionConnected` flag in responses
+
 ## [3.0.1] - 2026-01-25
 
 ### Fixed

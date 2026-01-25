@@ -20,6 +20,9 @@ const EXTENSION_PATH = path.join(__dirname, '..', 'extension').replace(/\\/g, '/
 let browserPromise = null;
 let chromeProcess = null;
 
+// Track if we connected to existing Chrome (extension won't be auto-loaded)
+let connectedToExistingChrome = false;
+
 // Track pages we've already seen to avoid double-handling
 const knownTargets = new WeakSet();
 
@@ -101,10 +104,15 @@ export async function getBrowser() {
           debugLog("Connected to existing Chrome instance");
           debugLog("WebSocket endpoint:", endpoint);
 
+          // Mark that we connected to existing Chrome (extension won't be auto-loaded)
+          connectedToExistingChrome = true;
+          console.error("[chrometools-mcp] Connected to existing Chrome. Extension may need manual installation.");
+
           // Set up disconnect handler to reset browserPromise
           browser.on('disconnected', () => {
             debugLog("Browser disconnected");
             browserPromise = null;
+            connectedToExistingChrome = false;
           });
 
           // Set up new tab tracking
@@ -113,6 +121,7 @@ export async function getBrowser() {
           return browser;
         } catch (connectError) {
           debugLog("No existing Chrome found, launching new instance...");
+          connectedToExistingChrome = false;
         }
 
         // Launch new Chrome with remote debugging enabled
@@ -281,4 +290,22 @@ export async function closeBrowser() {
     }
     browserPromise = null;
   }
+  connectedToExistingChrome = false;
+}
+
+/**
+ * Check if we connected to an existing Chrome instance
+ * (extension won't be auto-loaded in this case)
+ * @returns {boolean}
+ */
+export function isConnectedToExistingChrome() {
+  return connectedToExistingChrome;
+}
+
+/**
+ * Get extension path for manual installation
+ * @returns {string}
+ */
+export function getExtensionPath() {
+  return EXTENSION_PATH;
 }
