@@ -8,13 +8,14 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 - [Usage](#usage)
 - [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
 - [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
-- [Available Tools](#available-tools) - **45+ Tools Total**
-  - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getAllInteractiveElements, findElementsByText
+- [Available Tools](#available-tools) - **46+ Tools Total**
+  - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getElementByApomId, getAllInteractiveElements, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
-  - [Recorder Tools](#6-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
+  - [Tab Management Tools](#5-tab-management-tools) ⭐ **NEW** - listTabs, switchTab
+  - [Recorder Tools](#7-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
@@ -195,13 +196,17 @@ Get current page state and structure. Returns complete map of forms (with values
   - **Detects UI frameworks** (MUI, Ant Design, Chakra, Bootstrap, Vuetify, Semantic UI) ⭐
   - **Extracts dropdown options** from both native `<select>` and custom UI components ⭐
 - **Returns**:
-  - **APOM format** (default): Structured Page Object Model with unique IDs ⭐ **NOW DEFAULT**
-    - `pageId` - Unique page identifier for validation
-    - `elements` - Object with all elements keyed by unique ID (e.g., `input_0`, `button_1`)
-    - `groups` - Elements grouped by type (forms, inputs, buttons, links)
-    - `metadata` - Total elements count, interactive count, form count
-    - Elements automatically registered - use IDs with `click`, `type`, etc.
-    - Example: `analyzePage()` returns APOM, then use `click({ selector: "button_0" })` instead of CSS selectors
+  - **APOM format** (default): Tree-structured Page Object Model with unique IDs ⭐ **NOW DEFAULT**
+    - `tree` - Hierarchical tree of page elements (optimized: ~82% smaller than flat format)
+      - Each node: `{ tag, id?, type?, sel, ch?, bounds?, meta? }`
+      - Interactive elements have `bounds` and full metadata
+      - Parent containers have minimal info (position only)
+    - `groups` - Radio/checkbox groups with options (name, value, label, checked state)
+    - `meta` - Page metadata (url, title, timestamp, element counts)
+    - Elements automatically registered - use IDs with `click({ id: "..." })`, `type({ id: "..." })`, etc.
+    - **Token-optimized**: Minified JSON, simplified parents, no redundant data
+    - Example: `analyzePage()` returns APOM, then use `click({ id: "button_45" })` or `type({ id: "input_20", text: "..." })`
+  - **Use `getElementByApomId({ id: "input_20" })`** to get full details for any element
   - **Legacy format** (`useLegacyFormat: true`): Classic format for backward compatibility
     - Complete map of forms (with current values), inputs, buttons, links, navigation with selectors
     - **Each element includes `uiFramework` info** (name, version, component type) ⭐
@@ -209,14 +214,52 @@ Get current page state and structure. Returns complete map of forms (with values
     - With `includeAll: true`: Also includes `allElements` array with ALL visible page elements (divs, spans, headings, etc.) - each with selector, tag, text, classes, id
 - **Example workflow**:
   1. `openBrowser({ url: "..." })`
-  2. `analyzePage()` ← Initial analysis
-  3. `click({ selector: "submit-btn" })`
-  4. **`analyzePage({ refresh: true })`** ← See what changed after click!
+  2. `analyzePage()` ← Initial analysis, returns elements with IDs
+  3. `type({ id: "input_20", text: "user@example.com" })` ← Use APOM ID
+  4. `click({ id: "button_45" })` ← Use APOM ID
+  5. **`analyzePage({ refresh: true })`** ← See what changed after click!
 - **Layout work example**:
   1. `analyzePage({ includeAll: true })` ← Get all elements
   2. Find element you want to style (e.g., `div.header`)
   3. `getComputedCss({ selector: "div.header" })` ← Get current styles
   4. `setStyles({ selector: "div.header", styles: [...] })` ← Apply new styles
+
+#### getElementByApomId ⭐ **NEW**
+Get detailed information about a specific element by its APOM ID from `analyzePage`. Use this to inspect elements without re-analyzing the entire page.
+- **Parameters**:
+  - `id` (required): APOM element ID (e.g., `"input_20"`, `"button_45"`)
+- **Use case**: Get full details for a specific element (bounds, attributes, computed styles)
+- **Returns**: Element details including:
+  - `id`: Element APOM ID
+  - `selector`: CSS selector
+  - `tag`: HTML tag name
+  - `type`: Input type (for inputs)
+  - `text`: Visible text content
+  - `bounds`: `{ x, y, width, height }` position and size
+  - `attributes`: All HTML attributes
+  - `computedStyles`: Key CSS properties (display, visibility, color, background, etc.)
+  - `isVisible`: Whether element is visible
+  - `isEnabled`: Whether element is enabled (not disabled)
+- **Example**:
+  ```javascript
+  // Get details for specific input field
+  getElementByApomId({ id: "input_20" })
+
+  // Returns:
+  {
+    "success": true,
+    "id": "input_20",
+    "selector": "input[name='email']",
+    "tag": "input",
+    "type": "email",
+    "text": "",
+    "bounds": { "x": 100, "y": 200, "width": 300, "height": 40 },
+    "attributes": { "name": "email", "placeholder": "Enter email" },
+    "computedStyles": { "display": "block", "visibility": "visible" },
+    "isVisible": true,
+    "isEnabled": true
+  }
+  ```
 
 #### getAllInteractiveElements
 Get all clickable/fillable elements with their selectors.
@@ -249,25 +292,45 @@ Opens browser and navigates to URL. Browser stays open for further interactions.
 ### 2. Interaction Tools
 
 #### click
-Click an element with optional result screenshot.
+Click an element with optional result screenshot. **PREFERRED**: Use APOM ID from `analyzePage` for reliable targeting.
 - **Parameters**:
-  - `selector` (required): CSS selector
+  - `id` (optional): APOM element ID from analyzePage (e.g., `"button_45"`, `"link_7"`). **Preferred over selector.**
+  - `selector` (optional): CSS selector. Use when APOM ID is not available.
+  - ⚠️ Either `id` OR `selector` required (mutually exclusive)
   - `waitAfter` (optional): Wait time in ms (default: 1500)
   - `screenshot` (optional): Capture screenshot (default: false for performance) ⚡
   - `timeout` (optional): Max operation time in ms (default: 30000)
 - **Use case**: Buttons, links, form submissions
 - **Returns**: Confirmation text + optional screenshot
 - **Performance**: 2-10x faster without screenshot
+- **Example**:
+  ```javascript
+  // PREFERRED: Using APOM ID
+  click({ id: "button_45" })
+
+  // Alternative: Using CSS selector
+  click({ selector: "button[type='submit']" })
+  ```
 
 #### type
-Type text into input fields with optional clearing and typing delay.
+Type text into input fields with optional clearing and typing delay. **PREFERRED**: Use APOM ID from `analyzePage` for reliable targeting.
 - **Parameters**:
-  - `selector` (required): CSS selector
+  - `id` (optional): APOM element ID from analyzePage (e.g., `"input_20"`). **Preferred over selector.**
+  - `selector` (optional): CSS selector. Use when APOM ID is not available.
+  - ⚠️ Either `id` OR `selector` required (mutually exclusive)
   - `text` (required): Text to type
   - `delay` (optional): Delay between keystrokes in ms
   - `clearFirst` (optional): Clear field first (default: true)
 - **Use case**: Filling forms, search boxes, text inputs
 - **Returns**: Confirmation text
+- **Example**:
+  ```javascript
+  // PREFERRED: Using APOM ID
+  type({ id: "input_20", text: "user@example.com" })
+
+  // Alternative: Using CSS selector
+  type({ selector: "input[name='email']", text: "user@example.com" })
+  ```
 
 #### scrollTo
 Scroll page to bring element into view.
@@ -278,9 +341,11 @@ Scroll page to bring element into view.
 - **Returns**: Final scroll position
 
 #### selectOption
-Select option in dropdown (HTML select elements). Automatically detected by analyzePage with all available options.
+Select option in dropdown (HTML select elements). **PREFERRED**: Use APOM ID from `analyzePage` for reliable targeting.
 - **Parameters**:
-  - `selector` or `id` (one required): CSS selector or APOM ID for select element
+  - `id` (optional): APOM element ID from analyzePage (e.g., `"select_5"`). **Preferred over selector.**
+  - `selector` (optional): CSS selector. Use when APOM ID is not available.
+  - ⚠️ Either `id` OR `selector` required (mutually exclusive)
   - `value` (optional): Option value attribute (priority 1)
   - `text` (optional): Option text content (priority 2)
   - `index` (optional): Option index, 0-based (priority 3)
@@ -288,6 +353,14 @@ Select option in dropdown (HTML select elements). Automatically detected by anal
 - **Returns**: Selected option details (value, text, index)
 - **Selection priority**: If multiple parameters specified, tries value → text → index
 - **AI Integration**: Use `analyzePage` to see all available options with their values, text, and indices
+- **Example**:
+  ```javascript
+  // PREFERRED: Using APOM ID
+  selectOption({ id: "select_5", value: "US" })
+
+  // Alternative: Using CSS selector
+  selectOption({ selector: "select[name='country']", text: "United States" })
+  ```
 
 #### selectFromGroup ⭐ **NEW**
 Select option(s) from radio or checkbox group by name attribute. Works at abstract group level instead of individual clicks.
@@ -466,10 +539,21 @@ Filter requests by URL pattern with full details.
 3. `filterNetworkRequests({ urlPattern: "api/..." })` - get all matching requests with details
 
 #### hover
-Simulate mouse hover over element.
-- **Parameters**: `selector` (required)
+Simulate mouse hover over element. **PREFERRED**: Use APOM ID from `analyzePage` for reliable targeting.
+- **Parameters**:
+  - `id` (optional): APOM element ID from analyzePage (e.g., `"button_10"`). **Preferred over selector.**
+  - `selector` (optional): CSS selector. Use when APOM ID is not available.
+  - ⚠️ Either `id` OR `selector` required (mutually exclusive)
 - **Use case**: Testing hover effects, tooltips, dropdown menus
 - **Returns**: Confirmation text
+- **Example**:
+  ```javascript
+  // PREFERRED: Using APOM ID
+  hover({ id: "button_10" })
+
+  // Alternative: Using CSS selector
+  hover({ selector: ".dropdown-trigger" })
+  ```
 
 #### setStyles
 Apply inline CSS styles to element for live editing.
@@ -502,7 +586,49 @@ Navigate to different URL while keeping browser instance.
 - **Use case**: Moving between pages in workflow
 - **Returns**: New page title
 
-### 5. Figma Tools ⭐ ENHANCED
+### 5. Tab Management Tools ⭐ NEW
+
+Tools for managing multiple browser tabs. New tabs opened via `window.open()`, `target="_blank"`, or user actions are automatically detected and tracked.
+
+#### listTabs
+List all open browser tabs with their URLs, titles, and active status.
+- **Parameters**: None
+- **Returns**:
+  - `tabs`: Array of `{ index, url, title, isActive }`
+  - `totalCount`: Number of open tabs
+  - `newTabsDetected` (optional): Array of tabs opened since last check
+- **Use case**: See all open tabs, check for newly opened tabs
+
+```javascript
+// Example response
+{
+  "tabs": [
+    { "index": 0, "url": "https://example.com", "title": "Example", "isActive": false },
+    { "index": 1, "url": "https://google.com", "title": "Google", "isActive": true }
+  ],
+  "totalCount": 2,
+  "newTabsDetected": [
+    { "timestamp": "2026-01-25T...", "url": "https://google.com", "openerUrl": "https://example.com" }
+  ]
+}
+```
+
+#### switchTab
+Switch to a different browser tab by index or URL pattern.
+- **Parameters**:
+  - `tab` (required): Tab index (number, 0-based) or URL pattern (string, partial match)
+- **Use case**: Switch between tabs for multi-tab workflows
+- **Returns**: `{ success, switchedTo: { url, title } }`
+
+```javascript
+// Switch by index
+switchTab({ tab: 0 })
+
+// Switch by URL pattern
+switchTab({ tab: "google.com" })
+```
+
+### 6. Figma Tools ⭐ ENHANCED
 
 Design-to-code validation, file browsing, design system extraction, and comparison tools with automatic 3 MB compression.
 
@@ -648,7 +774,7 @@ Extract detailed design specifications from Figma including text content, colors
   - **Dimensions**: Width, height, x, y coordinates
   - **Children**: Recursive tree with text extraction from all child elements
 
-### 6. Recorder Tools ⭐ NEW
+### 7. Recorder Tools ⭐ NEW
 
 **URL-Based Storage (v2.1+)**: Scenarios are automatically organized by website domain in `~/.config/chrometools-mcp/projects/{domain}/scenarios/`.
 
@@ -1009,56 +1135,6 @@ Generate Page Object Model (POM) class from current page structure. Analyzes pag
   - `selenium-python`: Selenium with Python (WebDriver, explicit waits, By locators)
   - `selenium-java`: Selenium with Java (WebDriver, Page Factory compatible)
 
-#### registerPageObject ⭐ **NEW**
-Register Page Object elements for use with IDs instead of CSS selectors. Enables backward-compatible dual selector mode: all interaction tools accept BOTH Page Object IDs and regular CSS selectors.
-
-- **Parameters**:
-  - `elements` (required): Array of elements to register, each with:
-    - `id` (required): Unique element ID (e.g., `"login_email_input"`)
-    - `selector` (required): CSS selector for the element
-    - `metadata` (optional): Additional element info (type, label, options, uiFramework, etc.)
-  - `clearExisting` (optional): Clear existing registry before registering (default: false)
-
-- **Why use Page Object IDs?**
-  - **More maintainable**: IDs are meaningful (`"login_submit_button"` vs `"button[type='submit']"`)
-  - **Less fragile**: CSS selectors can break when UI changes; centralized IDs are easier to update
-  - **Better for AI**: Descriptive IDs help AI understand page structure
-  - **Backward compatible**: Tools still accept regular CSS selectors
-
-- **After registration, use IDs in all interaction tools**:
-  - `click({ selector: "login_submit_button" })` ← Page Object ID
-  - `type({ selector: "email_input", text: "user@test.com" })` ← Page Object ID
-  - `selectOption({ selector: "country_dropdown", value: "US" })` ← Page Object ID
-  - Or still use CSS: `click({ selector: "button[type='submit']" })` ← Still works!
-
-- **Returns**: Success confirmation with count of registered elements
-
-- **Example workflow**:
-  ```javascript
-  // 1. Generate Page Object (gets element IDs and selectors)
-  const pageObject = generatePageObject({ className: "LoginPage" })
-
-  // 2. Extract elements from generated Page Object
-  const elements = [
-    { id: "login_email_input", selector: "#email", metadata: { type: "email" } },
-    { id: "login_password_input", selector: "#password", metadata: { type: "password" } },
-    { id: "login_submit_button", selector: "button[type='submit']" }
-  ]
-
-  // 3. Register elements
-  registerPageObject({ elements })
-
-  // 4. Now use IDs instead of selectors
-  type({ selector: "login_email_input", text: "user@example.com" })  // ← ID!
-  type({ selector: "login_password_input", text: "secret123" })      // ← ID!
-  click({ selector: "login_submit_button" })                          // ← ID!
-  ```
-
-- **UI Framework Detection Integration**:
-  - When using with `analyzePage`, elements include `uiFramework` in metadata
-  - For dropdowns, metadata includes `options` array with all available choices
-  - Works with MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI
-
 ---
 
 ## Typical Workflow Example
@@ -1067,16 +1143,27 @@ Register Page Object elements for use with IDs instead of CSS selectors. Enables
 // 1. Open page
 openBrowser({ url: "https://example.com/form" })
 
-// 2. Fill form
-type({ selector: "input[name='email']", text: "user@example.com" })
-type({ selector: "input[name='password']", text: "secret123" })
+// 2. Analyze page to get element IDs
+analyzePage()
+// Returns: { tree: {...}, groups: {...}, meta: {...} }
+// Elements: input_20 (email), input_21 (password), button_45 (submit)
 
-// 3. Submit
-click({ selector: "button[type='submit']" })
+// 3. Fill form using APOM IDs (preferred)
+type({ id: "input_20", text: "user@example.com" })
+type({ id: "input_21", text: "secret123" })
 
-// 4. Verify
-getElement({ selector: ".success-message" })
+// 4. Submit using APOM ID
+click({ id: "button_45" })
+
+// 5. Verify
+analyzePage({ refresh: true })  // See updated state
 screenshot({ selector: ".dashboard", padding: 20 })
+```
+
+**Alternative: Using CSS selectors (still supported)**
+```javascript
+type({ selector: "input[name='email']", text: "user@example.com" })
+click({ selector: "button[type='submit']" })
 ```
 
 ---
@@ -1347,18 +1434,20 @@ npx @modelcontextprotocol/inspector node index.js
 
 ## Features
 
-- **28+ Powerful Tools**: Complete toolkit for browser automation
+- **44+ Powerful Tools**: Complete toolkit for browser automation
   - Core: ping, openBrowser
-  - Interaction: click, type, scrollTo, selectOption, drag, scrollHorizontal
-  - Inspection: getElement, getComputedCss, getBoxModel, screenshot
-  - Advanced: executeScript, getConsoleLogs, getNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
-  - AI-Powered: smartFindElement, analyzePage, getAllInteractiveElements, findElementsByText
-  - Page Object: generatePageObject, registerPageObject ⭐ **NEW**
-  - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario
-  - Figma: getFigmaFrame, compareFigmaToElement, getFigmaSpecs
+  - Interaction: click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
+  - Inspection: getElement, getComputedCss, getBoxModel, screenshot, saveScreenshot
+  - Advanced: executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo, waitForElement
+  - AI-Powered: smartFindElement, analyzePage, getElementByApomId, getAllInteractiveElements, findElementsByText ⭐ **NEW**
+  - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
+  - Figma: getFigmaFrame, compareFigmaToElement, getFigmaSpecs, parseFigmaUrl, listFigmaPages, searchFigmaFrames, getFigmaComponents, getFigmaStyles, getFigmaColorPalette, convertFigmaToCode
 - **UI Framework Detection**: Automatic detection of MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI ⭐ **NEW**
 - **Smart Dropdown Handling**: Extracts options from both native `<select>` and custom UI framework components ⭐ **NEW**
-- **Page Object ID Support**: Use meaningful IDs instead of fragile CSS selectors (backward compatible) ⭐ **NEW**
+- **APOM (Agent Page Object Model)**: Automatic element ID assignment for reliable interaction ⭐ **NEW**
+  - `analyzePage()` returns elements with unique IDs (e.g., `input_20`, `button_45`)
+  - Use `id` parameter in click/type/hover/selectOption for stable targeting
+  - Use `getElementByApomId()` to get detailed element info
 - **Console Log Capture**: Automatic JavaScript console monitoring
 - **Network Request Monitoring**: Track all HTTP/API requests (XHR, Fetch, etc.)
 - **Persistent Browser Sessions**: Browser tabs remain open between requests

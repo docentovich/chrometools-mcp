@@ -92,6 +92,23 @@ Expected tools might include:
 
 All tools should work with **current browser state**, not create new sessions.
 
+## Important: Applying Code Changes
+
+**⚠️ All code changes require MCP server restart to take effect!**
+
+After modifying any code files (index.js, tool-schemas.js, tool-definitions.js, etc.):
+
+1. **User must restart the MCP server** (or restart the MCP client like Claude Desktop/Telegram bot)
+2. Only then will changes be applied
+3. Testing with old server instance will show old behavior
+
+**DO NOT** test changes without confirming the server was restarted. If testing fails unexpectedly, first verify the server was restarted.
+
+```bash
+# For development: restart the MCP client or run
+npm start
+```
+
 ## Testing
 
 When testing locally:

@@ -355,3 +355,13 @@ export const GeneratePageObjectSchema = z.object({
   groupElements: z.boolean().optional().describe("Group elements by page sections (default: true)")
 });
 
+// Tab management tools
+export const ListTabsSchema = z.object({});
+
+export const SwitchTabSchema = z.object({
+  tab: z.union([
+    z.number().min(0).describe("Tab index (0-based)"),
+    z.string().describe("URL pattern to match (partial match)")
+  ]).describe("Tab identifier: index number or URL pattern to match"),
+});
+
