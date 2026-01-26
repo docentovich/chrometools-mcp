@@ -987,6 +987,11 @@ async function executeOpenTab(action, page, timeout) {
     return null; // Don't switch, keep current page
   }
 
+  // Wait for previous tab's processes to complete before switching
+  // This prevents issues with pending navigations, AJAX calls, or form submissions
+  debugLog(`[openTab] Waiting 500ms for previous tab to settle...`);
+  await new Promise(resolve => setTimeout(resolve, 500));
+
   debugLog(`[openTab] Opening tab: ${url}, switchToTab: ${switchToTab}`);
 
   // Get browser instance

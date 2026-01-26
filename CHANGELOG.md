@@ -25,6 +25,11 @@ All notable changes to this project will be documented in this file.
   - Empty URLs without look-ahead match are still skipped (prevents about:blank tabs)
   - Location: `recorder/scenario-executor.js:168-176, 987-990`
 
+- **Added 500ms delay before tab switch** — Prevents race conditions during scenario playback
+  - Allows previous tab's pending processes (navigation, AJAX, form submissions) to complete
+  - Ensures stable state before switching to new tab
+  - Location: `recorder/scenario-executor.js:990-992`
+
 ## [3.1.1] - 2026-01-26
 
 ### Fixed
