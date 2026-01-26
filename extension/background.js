@@ -238,6 +238,11 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   if (recorderState.isRecording) {
     recorderState.currentTabId = activeInfo.tabId;
     saveRecorderState();
+
+    // Inject content script if needed and notify about active recording
+    await injectContentScriptAndNotify(activeInfo.tabId, 'RECORDING_STARTED', {
+      actionCount: recorderState.actions.length
+    });
   }
 });
 
@@ -292,6 +297,52 @@ function updateIcon(connected) {
 }
 
 // ============================================
+// Content Script Injection
+// ============================================
+
+/**
+ * Inject content script into tab if not already present, then send message
+ */
+async function injectContentScriptAndNotify(tabId, messageType, extraData = {}) {
+  try {
+    // First try to send message - if content script is already there, it will respond
+    await chrome.tabs.sendMessage(tabId, { type: messageType, ...extraData });
+    console.log(`[ChromeTools] Content script responded to ${messageType}`);
+    return true;
+  } catch (error) {
+    // Content script not present, inject it
+    console.log('[ChromeTools] Content script not present, injecting...');
+
+    try {
+      // Inject CSS first
+      await chrome.scripting.insertCSS({
+        target: { tabId },
+        files: ['recorder-overlay.css']
+      });
+
+      // Then inject JS
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['content.js']
+      });
+
+      console.log('[ChromeTools] Content script injected');
+
+      // Wait a bit for script to initialize
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Now send the message
+      await chrome.tabs.sendMessage(tabId, { type: messageType, ...extraData });
+      console.log(`[ChromeTools] Sent ${messageType} after injection`);
+      return true;
+    } catch (injectError) {
+      console.error('[ChromeTools] Failed to inject content script:', injectError.message);
+      return false;
+    }
+  }
+}
+
+// ============================================
 // Recorder Functions
 // ============================================
 
@@ -332,6 +383,11 @@ async function startRecording(options = {}) {
 
   await saveRecorderState();
 
+  // Inject content script if needed and notify about recording start
+  if (activeTab?.id) {
+    await injectContentScriptAndNotify(activeTab.id, 'RECORDING_STARTED');
+  }
+
   // Notify Bridge about state change
   sendToBridge({
     type: 'recorder_state_changed',
@@ -356,6 +412,16 @@ async function stopRecording() {
       recordedAt: new Date().toISOString()
     }
   };
+
+  // Notify content script in current recording tab to stop
+  if (recorderState.currentTabId) {
+    try {
+      await chrome.tabs.sendMessage(recorderState.currentTabId, { type: 'RECORDING_STOPPED' });
+      console.log('[ChromeTools] Notified content script about recording stop');
+    } catch (error) {
+      console.log('[ChromeTools] Content script not available:', error.message);
+    }
+  }
 
   recorderState.isRecording = false;
   recorderState.isPaused = false;
@@ -383,6 +449,17 @@ async function stopRecording() {
 async function pauseRecording() {
   recorderState.isPaused = !recorderState.isPaused;
   await saveRecorderState();
+
+  // Notify content script about pause/resume
+  if (recorderState.currentTabId) {
+    try {
+      const messageType = recorderState.isPaused ? 'RECORDING_PAUSED' : 'RECORDING_RESUMED';
+      await chrome.tabs.sendMessage(recorderState.currentTabId, { type: messageType });
+      console.log(`[ChromeTools] Notified content script: ${messageType}`);
+    } catch (error) {
+      console.log('[ChromeTools] Content script not available for pause notification:', error.message);
+    }
+  }
 
   sendToBridge({
     type: 'recorder_state_changed',

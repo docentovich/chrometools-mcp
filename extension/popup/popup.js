@@ -261,12 +261,23 @@ elements.btnStop.addEventListener('click', async () => {
   }
 
   try {
+    // First, stop recording to get actions and secrets
+    const stopResult = await chrome.runtime.sendMessage({ type: 'STOP_RECORDING' });
+
+    if (!stopResult.success) {
+      throw new Error('Failed to stop recording');
+    }
+
+    // Then save the scenario with collected data
     await chrome.runtime.sendMessage({
       type: 'SAVE_SCENARIO',
       scenario: {
         name,
         description: currentState.scenarioDescription || elements.scenarioDesc.value.trim(),
-        tags: currentState.scenarioTags.length > 0 ? currentState.scenarioTags : elements.scenarioTags.value.split(',').map(t => t.trim()).filter(Boolean)
+        tags: currentState.scenarioTags.length > 0 ? currentState.scenarioTags : elements.scenarioTags.value.split(',').map(t => t.trim()).filter(Boolean),
+        actions: stopResult.actions || [],
+        secrets: stopResult.secrets || {},
+        metadata: stopResult.metadata || {}
       }
     });
 

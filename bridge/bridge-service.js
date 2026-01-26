@@ -13,6 +13,8 @@
 
 import { WebSocketServer } from 'ws';
 import { createRequire } from 'module';
+import { saveScenario } from '../recorder/scenario-storage.js';
+import { urlToProjectId } from '../utils/url-to-project.js';
 
 // For Native Messaging protocol
 const require = createRequire(import.meta.url);
@@ -275,6 +277,11 @@ function handleExtensionMessage(message) {
       broadcastToClients({ type: 'recordings_cleared' });
       break;
 
+    case 'scenario_save':
+      // Handle scenario save from extension popup
+      handleScenarioSave(message.payload, message.requestId);
+      break;
+
     // Responses to forward to requesting client
     case 'recorder_started':
     case 'recorder_stopped':
@@ -302,6 +309,62 @@ function addToEventLog(event) {
   // Keep ring buffer bounded
   if (state.eventLog.length > MAX_EVENT_LOG) {
     state.eventLog.shift();
+  }
+}
+
+/**
+ * Handle scenario save from extension popup
+ */
+async function handleScenarioSave(scenario, requestId) {
+  try {
+    // Determine project ID from entry URL
+    const entryUrl = scenario.metadata?.entryUrl || scenario.entryUrl || '';
+    const projectId = urlToProjectId(entryUrl);
+
+    log(`Saving scenario "${scenario.name}" to project "${projectId}"`);
+
+    // Convert actions to chain format if needed (popup sends 'actions', storage expects 'chain')
+    const scenarioToSave = {
+      ...scenario,
+      chain: scenario.chain || scenario.actions || []
+    };
+
+    const result = await saveScenario(scenarioToSave, projectId);
+
+    // Send response back to extension
+    sendToExtension({
+      type: 'scenario_saved',
+      payload: {
+        success: result.success,
+        filePath: result.filePath,
+        error: result.error
+      },
+      requestId
+    });
+
+    // Also notify clients
+    broadcastToClients({
+      type: 'scenario_saved',
+      payload: {
+        success: result.success,
+        name: scenario.name,
+        projectId
+      },
+      requestId
+    });
+
+    log(`Scenario saved: ${scenario.name}`);
+  } catch (error) {
+    log(`Failed to save scenario: ${error.message}`);
+
+    sendToExtension({
+      type: 'scenario_saved',
+      payload: {
+        success: false,
+        error: error.message
+      },
+      requestId
+    });
   }
 }
 

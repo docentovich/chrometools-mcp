@@ -345,11 +345,19 @@
       inputStartValues.set(element, lastInputValues.get(element) || '');
     }
 
-    // Set up debounce timer - this is a FALLBACK, not the primary mechanism
-    // Primary recording happens on blur/Enter (see handleBlur and handleKeyDown)
-    inputDebounceTimers.set(element, setTimeout(() => {
+    // NO debounce timer - only record on blur/Enter/tab switch
+    // This prevents multiple recordings when user types slowly with pauses
+    // The value will be recorded when:
+    // 1. User clicks elsewhere (blur)
+    // 2. User presses Enter or Tab
+    // 3. Recording stops
+  }
+
+  function flushAllPendingInputs() {
+    // Flush all elements that have pending input values
+    for (const element of inputStartValues.keys()) {
       flushInputValue(element);
-    }, 1500)); // Longer debounce - prefer blur/Enter
+    }
   }
 
   function flushInputValue(element) {
@@ -629,13 +637,16 @@
       case 'RECORDING_STARTED':
         isRecording = true;
         isPaused = false;
-        actionCount = 0;
+        // Use provided actionCount if available (e.g., when switching tabs during recording)
+        actionCount = message.actionCount || actionCount || 0;
         createOverlay();
         attachEventListeners();
         sendResponse({ success: true });
         break;
 
       case 'RECORDING_STOPPED':
+        // Flush any pending input values before stopping
+        flushAllPendingInputs();
         isRecording = false;
         isPaused = false;
         removeOverlay();
