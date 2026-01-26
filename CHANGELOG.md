@@ -17,6 +17,13 @@ All notable changes to this project will be documented in this file.
   - Consistent with other navigation improvements in 3.1.1
   - Location: `recorder/scenario-executor.js:979`
 
+### Fixed
+- **openTab skips empty/blank URLs during playback** — Prevents creating unwanted about:blank tabs
+  - Empty URL switches (transient tabs) are now skipped during scenario execution
+  - Fixes issue where extra blank tabs were created during playback
+  - Only switches to tabs with real URLs
+  - Location: `recorder/scenario-executor.js:971-975`
+
 ## [3.1.1] - 2026-01-26
 
 ### Fixed

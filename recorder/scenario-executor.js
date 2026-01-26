@@ -969,7 +969,13 @@ function substituteParameters(action, params) {
 async function executeOpenTab(action, page, timeout) {
   const { url, switchToTab } = action.data;
 
-  debugLog(`[openTab] Opening tab: ${url || 'blank'}, switchToTab: ${switchToTab}`);
+  // Skip openTab actions with empty URL (were recorded during transient tab switches)
+  if (!url || url === '' || url === 'about:blank') {
+    debugLog(`[openTab] Skipping empty/blank tab switch - keeping current page`);
+    return null; // Don't switch, keep current page
+  }
+
+  debugLog(`[openTab] Opening tab: ${url}, switchToTab: ${switchToTab}`);
 
   // Get browser instance
   const browser = page.browser();
@@ -985,14 +991,12 @@ async function executeOpenTab(action, page, timeout) {
     // Create new tab
     targetPage = await browser.newPage();
 
-    if (url && url !== 'about:blank') {
-      await targetPage.goto(url, {
-        waitUntil: 'domcontentloaded', // Less strict for sites with continuous loading
-        timeout
-      });
-    }
+    await targetPage.goto(url, {
+      waitUntil: 'domcontentloaded', // Less strict for sites with continuous loading
+      timeout
+    });
 
-    debugLog(`[openTab] New tab created: ${url || 'blank'}`);
+    debugLog(`[openTab] New tab created: ${url}`);
   }
 
   // If switchToTab is true, bring the tab to front and return the new page
