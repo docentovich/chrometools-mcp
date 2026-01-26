@@ -538,6 +538,14 @@ async function executeAction(action, page, timeout) {
       result.output = await executeExtract(action, page);
       break;
 
+    case 'switchTab':
+      await executeSwitchTab(action, page);
+      break;
+
+    case 'newTab':
+      await executeNewTab(action, page);
+      break;
+
     default:
       throw new Error(`Unknown action type: ${action.type}`);
   }
@@ -946,6 +954,47 @@ function substituteParameters(action, params) {
   }
 
   return resolved;
+}
+
+/**
+ * Switch to another tab
+ */
+async function executeSwitchTab(action, page) {
+  const { toTabUrl } = action.data;
+
+  debugLog(`[switchTab] Switching to tab: ${toTabUrl}`);
+
+  // Use MCP's switchTab tool
+  const { connectToTabByUrl } = await import('../server/page-manager.js');
+
+  try {
+    await connectToTabByUrl(toTabUrl);
+    debugLog(`[switchTab] Successfully switched to ${toTabUrl}`);
+  } catch (error) {
+    throw new Error(`Failed to switch to tab "${toTabUrl}": ${error.message}`);
+  }
+}
+
+/**
+ * Open a new tab
+ */
+async function executeNewTab(action, page) {
+  const { url } = action.data;
+
+  debugLog(`[newTab] Opening new tab: ${url || 'blank'}`);
+
+  // Get browser instance
+  const browser = page.browser();
+  const newPage = await browser.newPage();
+
+  if (url && url !== 'about:blank') {
+    await newPage.goto(url, { waitUntil: 'networkidle2' });
+  }
+
+  debugLog(`[newTab] New tab opened: ${url || 'blank'}`);
+
+  // Note: The caller should update their page reference if needed
+  // For now, we stay on the current page context
 }
 
 /**

@@ -26,6 +26,7 @@ let recorderState = {
   secrets: {},
   startUrl: null,
   startTabId: null,
+  currentTabId: null,  // ⭐ Track active recording tab
   metadata: {
     name: '',
     description: '',
@@ -330,6 +331,25 @@ chrome.tabs.onCreated.addListener((tab) => {
     payload: state
   });
 
+  // ⭐ If recording and new tab is active, record newTab action
+  if (recorderState.isRecording && !recorderState.isPaused && tab.active) {
+    recordAction({
+      type: 'newTab',
+      timestamp: Date.now(),
+      data: {
+        tabId: tab.id,
+        url: state.url,
+        title: state.title || 'New Tab'
+      }
+    });
+
+    // Update current recording tab to the new tab
+    recorderState.currentTabId = tab.id;
+    saveRecorderState();
+
+    console.log(`[ChromeTools] New tab opened during recording: ${tab.id}`);
+  }
+
   console.log('[ChromeTools] Tab created:', tab.id, state.url);
 });
 
@@ -346,7 +366,7 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
 });
 
 // Tab activated (switched to)
-chrome.tabs.onActivated.addListener((activeInfo) => {
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
   // Update active status in local state
   for (const [id, state] of tabsState) {
     state.active = (id === activeInfo.tabId);
@@ -359,6 +379,35 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
       windowId: activeInfo.windowId
     }
   });
+
+  // ⭐ If recording, switch recording to new active tab
+  if (recorderState.isRecording && !recorderState.isPaused) {
+    const previousTabId = recorderState.currentTabId;
+
+    // Only record if actually switching to a different tab
+    if (previousTabId !== activeInfo.tabId) {
+      // Get tab info for the action
+      const tab = await chrome.tabs.get(activeInfo.tabId);
+
+      // Record switchTab action
+      recordAction({
+        type: 'switchTab',
+        timestamp: Date.now(),
+        data: {
+          fromTabId: previousTabId,
+          toTabId: activeInfo.tabId,
+          toTabUrl: tab.url,
+          toTabTitle: tab.title
+        }
+      });
+
+      // Update current recording tab
+      recorderState.currentTabId = activeInfo.tabId;
+      await saveRecorderState();
+
+      console.log(`[ChromeTools] Recording switched from tab ${previousTabId} to tab ${activeInfo.tabId}`);
+    }
+  }
 
   console.log('[ChromeTools] Tab activated:', activeInfo.tabId);
 });
@@ -430,6 +479,7 @@ async function startRecording(options = {}) {
     secrets: {},
     startUrl: activeTab?.url || null,
     startTabId: activeTab?.id || null,
+    currentTabId: activeTab?.id || null,  // ⭐ Initialize with start tab
     metadata: {
       name: options.name || '',
       description: options.description || '',
@@ -514,12 +564,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
     // From content script
     case 'ACTION':
-      recordAction({
-        ...message.action,
-        tabId: sender.tab?.id,
-        tabUrl: sender.tab?.url
-      });
-      sendResponse({ success: true });
+      // ⭐ Only record actions from currently active recording tab
+      if (recorderState.isRecording && sender.tab?.id === recorderState.currentTabId) {
+        recordAction({
+          ...message.action,
+          tabId: sender.tab?.id,
+          tabUrl: sender.tab?.url
+        });
+        sendResponse({ success: true });
+      } else {
+        // Ignore actions from non-active tabs during recording
+        sendResponse({ success: false, reason: 'Not recording on this tab' });
+      }
       break;
 
     case 'GET_RECORDING_STATE':
