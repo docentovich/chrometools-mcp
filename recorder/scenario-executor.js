@@ -178,6 +178,11 @@ async function executeSingleScenario(scenario, page, params = {}, options = {}) 
         return result;
       }
 
+      // Update page if action returned a new page (e.g., openTab switched tabs)
+      if (actionResult.page) {
+        page = actionResult.page;
+      }
+
       // Store outputs if action produces any
       if (actionResult.output) {
         Object.assign(result.outputs, actionResult.output);
@@ -270,6 +275,7 @@ async function executeActionWithRetry(action, page, maxRetries, timeout) {
 
       result.success = true;
       result.output = actionResult.output;
+      result.page = actionResult.page; // Pass through the updated page
       attemptInfo.success = true;
       result.errorDetails.attempts.push(attemptInfo);
       return result;
@@ -491,7 +497,7 @@ function formatDetailedError(action, errorDetails) {
  * Execute single action
  */
 async function executeAction(action, page, timeout) {
-  const result = { output: null };
+  const result = { output: null, page: page }; // Return page in result
 
   switch (action.type) {
     case 'click':
@@ -539,7 +545,11 @@ async function executeAction(action, page, timeout) {
       break;
 
     case 'openTab':
-      await executeOpenTab(action, page, timeout);
+      // openTab may return a new page to switch to
+      const newPage = await executeOpenTab(action, page, timeout);
+      if (newPage) {
+        result.page = newPage;
+      }
       break;
 
     default:
@@ -985,11 +995,14 @@ async function executeOpenTab(action, page, timeout) {
     debugLog(`[openTab] New tab created: ${url || 'blank'}`);
   }
 
-  // If switchToTab is true, bring the tab to front
-  if (switchToTab) {
+  // If switchToTab is true, bring the tab to front and return the new page
+  if (switchToTab && targetPage) {
     await targetPage.bringToFront();
     debugLog(`[openTab] Switched to tab: ${url}`);
+    return targetPage; // Return the new page for subsequent actions
   }
+
+  return null; // Don't switch page if switchToTab is false
 }
 
 /**
