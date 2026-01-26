@@ -159,9 +159,21 @@ async function executeSingleScenario(scenario, page, params = {}, options = {}) 
   };
 
   try {
-    for (const action of scenario.chain) {
+    for (let i = 0; i < scenario.chain.length; i++) {
+      const action = scenario.chain[i];
+
       // Substitute parameters in action
       const resolvedAction = substituteParameters(action, params);
+
+      // Special handling for openTab with empty URL: look ahead to next action's URL
+      if (resolvedAction.type === 'openTab' && (!resolvedAction.data.url || resolvedAction.data.url === '')) {
+        const nextAction = scenario.chain[i + 1];
+        if (nextAction && nextAction.tabUrl && nextAction.tabUrl !== '') {
+          // Next action has a real URL, use it for openTab
+          debugLog(`[Executor] openTab has empty URL, using next action's URL: ${nextAction.tabUrl}`);
+          resolvedAction.data.url = nextAction.tabUrl;
+        }
+      }
 
       // Execute action with retry
       const actionResult = await executeActionWithRetry(
@@ -969,7 +981,7 @@ function substituteParameters(action, params) {
 async function executeOpenTab(action, page, timeout) {
   const { url, switchToTab } = action.data;
 
-  // Skip openTab actions with empty URL (were recorded during transient tab switches)
+  // Skip openTab actions with empty URL or about:blank (after look-ahead failed to find URL)
   if (!url || url === '' || url === 'about:blank') {
     debugLog(`[openTab] Skipping empty/blank tab switch - keeping current page`);
     return null; // Don't switch, keep current page

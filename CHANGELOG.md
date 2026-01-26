@@ -18,11 +18,12 @@ All notable changes to this project will be documented in this file.
   - Location: `recorder/scenario-executor.js:979`
 
 ### Fixed
-- **openTab skips empty/blank URLs during playback** — Prevents creating unwanted about:blank tabs
-  - Empty URL switches (transient tabs) are now skipped during scenario execution
-  - Fixes issue where extra blank tabs were created during playback
-  - Only switches to tabs with real URLs
-  - Location: `recorder/scenario-executor.js:971-975`
+- **openTab with empty URL uses look-ahead to next action's URL** — Smart URL detection for tab switches
+  - When openTab has empty URL, executor looks at next action's tabUrl
+  - If next action has real URL, uses it for tab opening/switching
+  - Fixes scenarios where new tab was opened but URL loaded immediately after
+  - Empty URLs without look-ahead match are still skipped (prevents about:blank tabs)
+  - Location: `recorder/scenario-executor.js:168-176, 987-990`
 
 ## [3.1.1] - 2026-01-26
 
