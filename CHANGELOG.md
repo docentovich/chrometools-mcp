@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.2] - 2026-01-26
+
+### Added
+- **Multi-tab scenario recording** — Automatic recording of tab switches during scenario capture
+  - When user switches tabs during recording, an `openTab` action is automatically recorded
+  - Records tab URL, title, and switch reason for accurate playback
+  - Only records if switching to a different tab (ignores same-tab activations)
+  - Location: `extension/background.js` (chrome.tabs.onActivated listener)
+
+### Changed
+- **openTab navigation strategy** — Changed from `networkidle2` to `domcontentloaded` in scenario executor
+  - Prevents timeout errors when opening tabs with continuous ad/tracking loading
+  - Consistent with other navigation improvements in 3.1.1
+  - Location: `recorder/scenario-executor.js:979`
+
 ## [3.1.1] - 2026-01-26
 
 ### Fixed

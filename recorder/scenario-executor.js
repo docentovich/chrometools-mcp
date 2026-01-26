@@ -977,7 +977,7 @@ async function executeOpenTab(action, page, timeout) {
 
     if (url && url !== 'about:blank') {
       await targetPage.goto(url, {
-        waitUntil: 'networkidle2',
+        waitUntil: 'domcontentloaded', // Less strict for sites with continuous loading
         timeout
       });
     }

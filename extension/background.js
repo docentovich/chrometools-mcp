@@ -235,9 +235,37 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   });
 
   // Update recording tab if recording
-  if (recorderState.isRecording) {
-    recorderState.currentTabId = activeInfo.tabId;
-    saveRecorderState();
+  if (recorderState.isRecording && !recorderState.isPaused) {
+    const previousTabId = recorderState.currentTabId;
+
+    // Only record tab switch if switching to a different tab
+    if (previousTabId !== activeInfo.tabId) {
+      // Get tab info for the new tab
+      try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+
+        // Record openTab action for tab switch
+        recordAction({
+          type: 'openTab',
+          data: {
+            url: tab.url,
+            title: tab.title,
+            switchToTab: true,
+            reason: 'tab_switch' // Indicates this was a manual tab switch
+          },
+          selector: null,
+          tabId: activeInfo.tabId,
+          tabUrl: tab.url
+        });
+
+        console.log(`[ChromeTools] Recorded tab switch from ${previousTabId} to ${activeInfo.tabId}`);
+      } catch (error) {
+        console.error('[ChromeTools] Failed to get tab info for recording:', error);
+      }
+
+      recorderState.currentTabId = activeInfo.tabId;
+      saveRecorderState();
+    }
 
     // Inject content script if needed and notify about active recording
     await injectContentScriptAndNotify(activeInfo.tabId, 'RECORDING_STARTED', {
