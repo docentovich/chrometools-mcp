@@ -1467,134 +1467,178 @@ npx @modelcontextprotocol/inspector node index.js
 
 ## Multi-Instance Support
 
-⭐ **NEW**: Run multiple MCP servers simultaneously and control Chrome from different AI clients in parallel.
+⭐ **NEW**: Run up to 8 MCP servers simultaneously, connecting/disconnecting at any time without coordination.
 
 ### Overview
 
-ChromeTools MCP supports running multiple server instances that share the same Chrome browser. This enables:
+ChromeTools MCP uses a **Bridge Architecture** for reliable multi-instance support:
 
-- **Multiple AI clients** working with the same browser (Claude Desktop, Telegram bot, custom scripts)
-- **Automatic discovery** of running instances via port scanning
-- **Parallel workflows** without conflicts or manual coordination
-- **Resilient connections** that survive process crashes and restarts
+- **Multiple AI clients** (0-8) can connect/disconnect at any time
+- **No scanning delays** — instant connection to persistent Bridge Service
+- **Resilient** — Bridge survives MCP process crashes, maintains state
+- **Chrome lifecycle** — Bridge starts/stops with Chrome Extension
 
 ### How It Works
 
 ```
-┌─────────────────┐      ┌─────────────────┐
-│ Claude Desktop  │      │ Telegram Bot    │
-│   MCP Client    │      │   MCP Client    │
-└────────┬────────┘      └────────┬────────┘
-         │                        │
-         ↓                        ↓
-    ┌────────┐              ┌────────┐
-    │ Port   │              │ Port   │
-    │ 9223   │              │ 9224   │
-    └────┬───┘              └───┬────┘
-         │                      │
-         └──────────┬───────────┘
-                    ↓
-         ┌────────────────────┐
-         │ Chrome Extension   │
-         │  (broadcasts to    │
-         │   all instances)   │
-         └────────────────────┘
-                    ↓
-         ┌────────────────────┐
-         │   Chrome Browser   │
-         └────────────────────┘
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ Claude Desktop  │  │ Telegram Bot    │  │ Custom Script   │
+│   MCP Client    │  │   MCP Client    │  │   MCP Client    │
+└────────┬────────┘  └────────┬────────┘  └────────┬────────┘
+         │                    │                    │
+         │    WebSocket       │    WebSocket       │    WebSocket
+         │    (client)        │    (client)        │    (client)
+         │                    │                    │
+         └────────────────────┼────────────────────┘
+                              │
+                              ↓
+              ┌───────────────────────────────┐
+              │      Bridge Service (:9223)   │
+              │   (Native Messaging Host)     │
+              │                               │
+              │  • Stores tabs state          │
+              │  • Stores recordings          │
+              │  • Broadcasts events          │
+              │  • Accepts 0-8 clients        │
+              └───────────────┬───────────────┘
+                              │
+                              │ Native Messaging (stdio)
+                              │
+              ┌───────────────┴───────────────┐
+              │      Chrome Extension         │
+              │   (Event Producer)            │
+              │                               │
+              │  • Tracks all tabs            │
+              │  • Records user actions       │
+              │  • Sends events to Bridge     │
+              └───────────────┬───────────────┘
+                              │
+                              ↓
+              ┌───────────────────────────────┐
+              │        Chrome Browser         │
+              └───────────────────────────────┘
+```
+
+### Installation
+
+**One-time setup** (installs Native Messaging Bridge):
+
+```bash
+npx chrometools-mcp --install-bridge
+```
+
+This:
+1. Creates Bridge Service files in `~/.chrometools/`
+2. Registers Native Messaging Host in system (Windows Registry / Chrome config)
+3. Bridge will auto-start when Chrome Extension loads
+
+**Verify installation:**
+```bash
+npx chrometools-mcp --check-bridge
 ```
 
 ### Architecture
 
-**1. Dynamic Port Allocation**
-- MCP servers automatically find free ports in range 9223-9227
-- No manual configuration needed
-- Each instance runs on its own port
+**1. Bridge Service (Persistent Intermediary)**
+- Launched by Chrome via Native Messaging when Extension starts
+- Runs WebSocket server on port 9223
+- Stores state: tabs, recordings, recorder state
+- Lives as long as Chrome is running
+- Accepts 0-8 simultaneous MCP clients
 
-**2. Chrome Extension Port Scanning**
-- Scans for active MCP servers every 20 seconds
-- Tests each port (9223-9227) for WebSocket availability
-- Automatically connects to discovered instances
-- Automatically disconnects from dead instances
+**2. Chrome Extension (Event Producer)**
+- Tracks all browser tabs (created, updated, closed, activated)
+- Records user actions (clicks, typing, navigation)
+- Sends ALL events to Bridge via Native Messaging
+- Doesn't care about MCP clients — just produces events
 
-**3. Broadcast Pattern**
-- Extension maintains multiple WebSocket connections (Map<port, WebSocket>)
-- Tab events (created, updated, activated, closed) → broadcast to ALL servers
-- Each MCP server sees the same browser state
-- Commands from any server execute in the shared browser
-
-**4. Graceful Error Handling**
-- WebSocket.onclose automatically handles disconnections
-- Ungraceful shutdowns (kill -9) detected within 20 seconds
-- No stale state or zombie connections
-- Extension continues working with remaining instances
+**3. MCP Server (Event Consumer)**
+- Connects to Bridge as WebSocket client
+- Receives full state immediately on connect
+- Gets real-time event updates
+- Can disconnect/reconnect at any time without losing state
 
 ### Use Cases
 
-**Parallel AI Workflows**
+**Ephemeral AI Sessions**
 ```bash
-# Terminal 1: Claude Desktop with chrometools-mcp
-# Working on form automation
+# User sends message to Telegram bot
+# → Claude Code starts, connects to Bridge
+# → Gets current tabs state instantly
+# → Performs automation
+# → Claude Code exits, disconnects
+# → Bridge keeps running, state preserved
 
-# Terminal 2: Telegram bot with chrometools-mcp
-# Monitoring page changes and debugging
-
-# Both see the same tabs, both can control Chrome
+# Next message: same flow, instant state access
 ```
 
-**Development + Production**
+**Parallel Workflows**
 ```bash
-# Local development MCP instance (port 9223)
-# Production monitoring instance (port 9224)
-# Both connected to the same browser for testing
-```
+# Claude Desktop: form automation
+# Telegram Bot: monitoring & debugging
+# Custom script: data extraction
 
-**Multi-User Collaboration**
-```bash
-# Different team members with their own AI clients
-# All controlling the same browser session
-# Extension broadcasts state to everyone
+# All connected to same Bridge
+# All see same browser state
+# All can control Chrome
 ```
 
 ### Configuration
 
-No special configuration needed! Just run multiple instances:
+No configuration needed after installation. Just use:
 
 ```bash
-# Terminal 1
-npx -y chrometools-mcp
+npx chrometools-mcp
+```
 
-# Terminal 2
-npx -y chrometools-mcp
+MCP automatically connects to Bridge on startup.
 
-# Extension automatically discovers both
+### CLI Options
+
+```bash
+npx chrometools-mcp --install-bridge    # Install Native Messaging Bridge
+npx chrometools-mcp --uninstall-bridge  # Uninstall Bridge
+npx chrometools-mcp --check-bridge      # Check if Bridge is installed
+npx chrometools-mcp --help              # Show help
 ```
 
 ### Technical Details
 
-**Port Range:** 9223-9227 (5 simultaneous instances max)
+| Component | Technology | Port |
+|-----------|------------|------|
+| Bridge Service | Node.js + WebSocket Server | 9223 |
+| Extension ↔ Bridge | Native Messaging (stdio) | — |
+| MCP ↔ Bridge | WebSocket (client) | 9223 |
 
-**Scan Interval:** 20 seconds
+**Max Clients:** 8 simultaneous MCP connections
 
-**Connection Test:** WebSocket connection attempt with 1 second timeout
+**State on Connect:** Full state (tabs, recordings, recorder state) sent immediately
 
-**Tab Sync:** Active tab automatically syncs to all MCP servers when user switches tabs
+**Extension ID:** `dmehkibmncgphijnigkahhlekgajhpbl` (stable, generated from key)
 
-**State Consistency:** All instances share the same `extensionTabs` state via broadcast
+### Troubleshooting
 
-### Limitations
+**Bridge not connecting:**
+```bash
+# Check if Bridge is installed
+npx chrometools-mcp --check-bridge
 
-- Maximum 5 simultaneous instances (port range 9223-9227)
-- 20 second discovery latency for new instances
-- All instances must have Chrome Extension installed
-- Tab events broadcast to all (no per-instance filtering)
+# Reinstall if needed
+npx chrometools-mcp --install-bridge
+
+# Reload extension in chrome://extensions
+```
+
+**Extension shows "Disconnected":**
+- Bridge only runs when Chrome Extension is active
+- Close and reopen Chrome
+- Check Extension Service Worker console for errors
 
 ## Architecture
 
-- Uses Puppeteer for Chrome automation
-- MCP Server SDK for protocol implementation
-- Zod for schema validation
-- Stdio transport for communication
-- WebSocket bridge for Chrome Extension communication
-- Multi-instance support via dynamic port allocation (9223-9227)
+- **Puppeteer** for Chrome automation
+- **MCP Server SDK** for protocol implementation
+- **Native Messaging Bridge** for persistent Extension ↔ MCP communication
+- **WebSocket** for multi-client support (Bridge as server, MCP as clients)
+- **Zod** for schema validation
+- **Stdio transport** for MCP communication

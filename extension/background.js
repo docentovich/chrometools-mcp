@@ -1,22 +1,25 @@
 /**
  * ChromeTools MCP Extension - Background Service Worker
  *
- * Handles:
- * - Tab tracking via Chrome tabs API
- * - WebSocket connection to MCP server
- * - Recorder state management
- * - Message routing between content scripts and MCP
+ * NEW ARCHITECTURE: Uses Native Messaging to communicate with Bridge Service
+ *
+ * - Extension is the EVENT PRODUCER
+ * - Bridge Service is the PERSISTENT INTERMEDIARY
+ * - Claude/MCP clients connect to Bridge as CONSUMERS
+ *
+ * Extension lifecycle:
+ * 1. On load: connect to Native Host (Bridge Service)
+ * 2. Send all events (tabs, recordings) to Bridge
+ * 3. Bridge stores state and broadcasts to connected clients
+ * 4. Extension doesn't care how many clients are connected
  */
 
-const WS_PORT_START = 9223;
-const WS_PORT_END = 9227;
-const RECONNECT_INTERVAL = 3000;
-const INSTANCES_SCAN_INTERVAL = 20000; // 20 seconds
+const HOST_NAME = 'com.chrometools.bridge';
 
 // State
-const wsConnections = new Map(); // port -> WebSocket
+let nativePort = null;
+let isConnected = false;
 const tabsState = new Map(); // tabId -> {url, title, active, windowId}
-let scanTimer = null;
 
 // Recorder state (persisted in storage)
 let recorderState = {
@@ -26,7 +29,7 @@ let recorderState = {
   secrets: {},
   startUrl: null,
   startTabId: null,
-  currentTabId: null,  // ⭐ Track active recording tab
+  currentTabId: null,
   metadata: {
     name: '',
     description: '',
@@ -35,254 +38,122 @@ let recorderState = {
 };
 
 // ============================================
-// WebSocket Connection - Multi-Instance Support
+// Native Messaging Connection
 // ============================================
 
 /**
- * Scan for active MCP instances by testing ports
- * Tries to connect to each port in range to discover running servers
+ * Connect to Native Messaging Host (Bridge Service)
  */
-async function scanForMCPInstances() {
+function connectToNativeHost() {
+  console.log(`[ChromeTools] Connecting to Native Host: ${HOST_NAME}`);
+
   try {
-    const discoveredPorts = new Set();
+    nativePort = chrome.runtime.connectNative(HOST_NAME);
 
-    // Test each port in range
-    for (let port = WS_PORT_START; port <= WS_PORT_END; port++) {
-      const isAvailable = await testPortConnection(port);
-      if (isAvailable) {
-        discoveredPorts.add(port);
-      }
-    }
+    nativePort.onMessage.addListener((message) => {
+      console.log('[ChromeTools] Message from Bridge:', message.type);
+      handleBridgeMessage(message);
+    });
 
-    console.log(`[ChromeTools] Found ${discoveredPorts.size} MCP instance(s) on ports: ${Array.from(discoveredPorts).join(', ')}`);
+    nativePort.onDisconnect.addListener(() => {
+      const error = chrome.runtime.lastError;
+      console.log('[ChromeTools] Disconnected from Bridge:', error?.message || 'no error');
+      isConnected = false;
+      nativePort = null;
+      updateIcon(false);
 
-    // Get current connected ports
-    const currentPorts = new Set(wsConnections.keys());
+      // Try to reconnect after a delay
+      setTimeout(connectToNativeHost, 5000);
+    });
 
-    // Disconnect from instances that no longer exist
-    for (const port of currentPorts) {
-      if (!discoveredPorts.has(port)) {
-        console.log(`[ChromeTools] Instance on port ${port} no longer exists, disconnecting`);
-        disconnectFromPort(port);
-      }
-    }
+    isConnected = true;
+    updateIcon(true);
+    console.log('[ChromeTools] Connected to Native Host');
 
-    // Connect to new instances
-    for (const port of discoveredPorts) {
-      if (!wsConnections.has(port)) {
-        connectToPort(port);
-      }
-    }
-
-    // Update extension icon
-    updateIcon(wsConnections.size > 0);
+    // Send initial tabs state
+    syncAllTabs();
 
   } catch (error) {
-    console.error('[ChromeTools] Failed to scan for instances:', error);
+    console.error('[ChromeTools] Failed to connect to Native Host:', error);
+    isConnected = false;
+    updateIcon(false);
+
+    // Retry connection
+    setTimeout(connectToNativeHost, 5000);
   }
 }
 
 /**
- * Test if MCP server is running on given port
+ * Send message to Bridge Service
  */
-async function testPortConnection(port) {
-  return new Promise((resolve) => {
+function sendToBridge(message) {
+  if (nativePort && isConnected) {
     try {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-
-      const timeout = setTimeout(() => {
-        ws.close();
-        resolve(false);
-      }, 1000); // 1 second timeout
-
-      ws.onopen = () => {
-        clearTimeout(timeout);
-        ws.close();
-        resolve(true);
-      };
-
-      ws.onerror = () => {
-        clearTimeout(timeout);
-        resolve(false);
-      };
+      nativePort.postMessage(message);
+      return true;
     } catch (error) {
-      resolve(false);
-    }
-  });
-}
-
-/**
- * Connect to MCP server on specific port
- */
-function connectToPort(port) {
-  if (wsConnections.has(port)) {
-    const existing = wsConnections.get(port);
-    if (existing.readyState === WebSocket.OPEN) {
-      return;
+      console.error('[ChromeTools] Failed to send to Bridge:', error);
+      return false;
     }
   }
-
-  try {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-
-    ws.onopen = () => {
-      console.log(`[ChromeTools] Connected to MCP server on port ${port}`);
-      wsConnections.set(port, ws);
-
-      // Send current state of all tabs
-      syncAllTabs();
-
-      // Update extension icon
-      updateIcon(true);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        handleMCPMessage(message, port);
-      } catch (error) {
-        console.error(`[ChromeTools] Failed to parse message from port ${port}:`, error);
-      }
-    };
-
-    ws.onclose = () => {
-      console.log(`[ChromeTools] Disconnected from MCP server on port ${port}`);
-      wsConnections.delete(port);
-      updateIcon(wsConnections.size > 0);
-    };
-
-    ws.onerror = (error) => {
-      console.error(`[ChromeTools] WebSocket error on port ${port}:`, error);
-    };
-
-  } catch (error) {
-    console.error(`[ChromeTools] Failed to connect to port ${port}:`, error);
-  }
+  return false;
 }
 
 /**
- * Disconnect from specific port
+ * Handle messages from Bridge Service
  */
-function disconnectFromPort(port) {
-  const ws = wsConnections.get(port);
-  if (ws) {
-    ws.close();
-    wsConnections.delete(port);
-  }
-}
-
-/**
- * Send message to all connected MCP servers (broadcast)
- */
-function sendToMCP(message) {
-  let sent = false;
-  for (const [port, ws] of wsConnections) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(message));
-      sent = true;
-    }
-  }
-  return sent;
-}
-
-/**
- * Start periodic scanning for MCP instances
- */
-function startInstanceScanning() {
-  // Initial scan
-  scanForMCPInstances();
-
-  // Periodic scan every 20 seconds
-  if (scanTimer) {
-    clearInterval(scanTimer);
-  }
-  scanTimer = setInterval(scanForMCPInstances, INSTANCES_SCAN_INTERVAL);
-
-  console.log('[ChromeTools] Started periodic instance scanning (every 20s)');
-}
-
-/**
- * Stop periodic scanning
- */
-function stopInstanceScanning() {
-  if (scanTimer) {
-    clearInterval(scanTimer);
-    scanTimer = null;
-  }
-}
-
-function handleMCPMessage(message, port) {
-  console.log(`[ChromeTools] Received from MCP (port ${port}):`, message.type);
-
+function handleBridgeMessage(message) {
   switch (message.type) {
-    case 'tabs_request':
-      // MCP запрашивает список вкладок
+    case 'bridge_ready':
+      console.log('[ChromeTools] Bridge is ready');
       syncAllTabs();
       break;
 
+    case 'start_recording':
     case 'recorder_start':
-      // MCP запускает запись
-      startRecording(message.payload);
-      break;
-
-    case 'recorder_stop':
-      // MCP останавливает запись
-      stopRecording();
-      break;
-
-    case 'recorder_get_state':
-      // MCP запрашивает состояние рекордера
-      sendToMCP({
-        type: 'recorder_state',
-        payload: recorderState,
-        requestId: message.requestId
+      startRecording(message.payload).then(() => {
+        sendToBridge({
+          type: 'recorder_started',
+          payload: { success: true, startUrl: recorderState.startUrl },
+          requestId: message.requestId
+        });
       });
       break;
 
-    case 'scenario_list_response':
-      // Ответ на запрос списка сценариев
-      // Передать в popup если открыт
-      chrome.runtime.sendMessage({
-        type: 'SCENARIOS_LIST',
-        scenarios: message.payload.scenarios,
-        requestId: message.requestId
-      }).catch(() => {});
+    case 'stop_recording':
+    case 'recorder_stop':
+      stopRecording().then((result) => {
+        sendToBridge({
+          type: 'recorder_stopped',
+          payload: result,
+          requestId: message.requestId
+        });
+      });
       break;
 
-    case 'scenario_saved':
-      // Подтверждение сохранения сценария
-      chrome.runtime.sendMessage({
-        type: 'SCENARIO_SAVED',
-        success: message.payload.success,
-        error: message.payload.error,
-        requestId: message.requestId
-      }).catch(() => {});
-      break;
-
-    case 'pong':
-      // Keepalive response
+    case 'pause_recording':
+    case 'recorder_pause':
+      pauseRecording().then(() => {
+        sendToBridge({
+          type: 'recorder_paused',
+          payload: { isPaused: recorderState.isPaused },
+          requestId: message.requestId
+        });
+      });
       break;
 
     case 'switch_tab':
-      // MCP requests to switch to a specific tab
-      console.log('[ChromeTools] switch_tab received:', message.payload);
       if (message.payload?.tabId) {
-        chrome.tabs.update(message.payload.tabId, { active: true }, (tab) => {
-          if (chrome.runtime.lastError) {
-            console.error('[ChromeTools] Failed to switch tab:', chrome.runtime.lastError);
-          } else if (tab) {
-            // Also focus the window containing this tab
-            chrome.windows.update(tab.windowId, { focused: true });
-            console.log('[ChromeTools] Switched to tab:', tab.id, tab.url);
-          }
-        });
-      } else {
-        console.error('[ChromeTools] switch_tab: no tabId in payload');
+        chrome.tabs.update(message.payload.tabId, { active: true });
       }
       break;
 
+    case 'ping':
+      sendToBridge({ type: 'pong', requestId: message.requestId });
+      break;
+
     default:
-      console.log('[ChromeTools] Unknown message type:', message.type);
+      console.log('[ChromeTools] Unknown message from Bridge:', message.type);
   }
 }
 
@@ -290,89 +161,72 @@ function handleMCPMessage(message, port) {
 // Tab Tracking
 // ============================================
 
-function syncAllTabs() {
-  chrome.tabs.query({}, (tabs) => {
+/**
+ * Sync all current tabs to Bridge
+ */
+async function syncAllTabs() {
+  try {
+    const tabs = await chrome.tabs.query({});
     tabsState.clear();
 
-    const tabsList = tabs.map(tab => {
-      const state = {
-        tabId: tab.id,
-        url: tab.url || tab.pendingUrl || '',
-        title: tab.title || '',
-        active: tab.active,
-        windowId: tab.windowId,
-        index: tab.index
-      };
-      tabsState.set(tab.id, state);
-      return state;
+    const tabsData = tabs.map(tab => ({
+      tabId: tab.id,
+      windowId: tab.windowId,
+      url: tab.url || '',
+      title: tab.title || '',
+      active: tab.active,
+      index: tab.index
+    }));
+
+    tabsData.forEach(tab => {
+      tabsState.set(tab.tabId, tab);
     });
 
-    sendToMCP({
+    sendToBridge({
       type: 'tabs_sync',
-      payload: { tabs: tabsList }
+      payload: { tabs: tabsData }
     });
-  });
+
+    console.log(`[ChromeTools] Synced ${tabsData.length} tabs to Bridge`);
+  } catch (error) {
+    console.error('[ChromeTools] Failed to sync tabs:', error);
+  }
 }
 
-// Tab created
+// Tab event listeners
 chrome.tabs.onCreated.addListener((tab) => {
-  const state = {
+  const tabData = {
     tabId: tab.id,
-    url: tab.url || tab.pendingUrl || '',
+    windowId: tab.windowId,
+    url: tab.url || '',
     title: tab.title || '',
     active: tab.active,
-    windowId: tab.windowId,
     index: tab.index
   };
-  tabsState.set(tab.id, state);
+  tabsState.set(tab.id, tabData);
 
-  sendToMCP({
+  sendToBridge({
     type: 'tab_created',
-    payload: state
+    payload: tabData
   });
-
-  // ⭐ If recording and new tab is active, record openTab action
-  if (recorderState.isRecording && !recorderState.isPaused && tab.active) {
-    recordAction({
-      type: 'openTab',
-      timestamp: Date.now(),
-      data: {
-        url: state.url || 'about:blank',
-        title: state.title || 'New Tab',
-        switchToTab: true  // New tab is already active
-      }
-    });
-
-    // Update current recording tab to the new tab
-    recorderState.currentTabId = tab.id;
-    saveRecorderState();
-
-    console.log(`[ChromeTools] New tab opened during recording: ${tab.id} (${state.url})`);
-  }
-
-  console.log('[ChromeTools] Tab created:', tab.id, state.url);
 });
 
-// Tab closed
-chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+chrome.tabs.onRemoved.addListener((tabId) => {
   tabsState.delete(tabId);
 
-  sendToMCP({
+  sendToBridge({
     type: 'tab_closed',
-    payload: { tabId, windowId: removeInfo.windowId }
+    payload: { tabId }
   });
-
-  console.log('[ChromeTools] Tab closed:', tabId);
 });
 
-// Tab activated (switched to)
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   // Update active status in local state
-  for (const [id, state] of tabsState) {
-    state.active = (id === activeInfo.tabId);
+  for (const [id, tab] of tabsState) {
+    tab.active = (id === activeInfo.tabId);
   }
 
-  sendToMCP({
+  sendToBridge({
     type: 'tab_activated',
     payload: {
       tabId: activeInfo.tabId,
@@ -380,80 +234,72 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     }
   });
 
-  // ⭐ If recording, switch recording to new active tab
-  if (recorderState.isRecording && !recorderState.isPaused) {
-    const previousTabId = recorderState.currentTabId;
-
-    // Only record if actually switching to a different tab
-    if (previousTabId !== activeInfo.tabId) {
-      // Get tab info for the action
-      const tab = await chrome.tabs.get(activeInfo.tabId);
-
-      // ⭐ Record openTab action (always opens tab with URL, not just switches)
-      // This ensures tab exists during playback
-      recordAction({
-        type: 'openTab',
-        timestamp: Date.now(),
-        data: {
-          url: tab.url,
-          title: tab.title,
-          switchToTab: true  // Indicate we should switch to it after opening
-        }
-      });
-
-      // Update current recording tab
-      recorderState.currentTabId = activeInfo.tabId;
-      await saveRecorderState();
-
-      console.log(`[ChromeTools] Recording switched to tab ${activeInfo.tabId} (${tab.url})`);
-    }
+  // Update recording tab if recording
+  if (recorderState.isRecording) {
+    recorderState.currentTabId = activeInfo.tabId;
+    saveRecorderState();
   }
-
-  console.log('[ChromeTools] Tab activated:', activeInfo.tabId);
 });
 
-// Tab updated (URL change, title change, etc.)
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (tabsState.has(tabId)) {
-    const state = tabsState.get(tabId);
-    if (changeInfo.url) state.url = changeInfo.url;
-    if (changeInfo.title) state.title = changeInfo.title;
-    if (changeInfo.status) state.status = changeInfo.status;
-  } else {
-    // Tab not in our state yet, add it
-    tabsState.set(tabId, {
+  if (changeInfo.url || changeInfo.title || changeInfo.status === 'complete') {
+    const tabData = {
       tabId: tab.id,
+      windowId: tab.windowId,
       url: tab.url || '',
       title: tab.title || '',
       active: tab.active,
-      windowId: tab.windowId,
       index: tab.index
-    });
-  }
+    };
+    tabsState.set(tabId, tabData);
 
-  // Only send meaningful updates
-  if (changeInfo.url || changeInfo.title || changeInfo.status === 'complete') {
-    sendToMCP({
+    sendToBridge({
       type: 'tab_updated',
-      payload: {
-        tabId,
-        changes: changeInfo,
-        tab: tabsState.get(tabId)
-      }
+      payload: { tabId, tab: tabData, changeInfo }
     });
   }
 });
 
 // ============================================
-// Recorder Management
+// Icon Management
+// ============================================
+
+function updateIcon(connected) {
+  const iconSuffix = connected ? '' : '-gray';
+  const iconPath = {
+    16: `icons/icon16${iconSuffix}.png`,
+    48: `icons/icon48${iconSuffix}.png`,
+    128: `icons/icon128${iconSuffix}.png`
+  };
+
+  // Check if gray icons exist, otherwise use default
+  chrome.action.setIcon({ path: iconPath }).catch(() => {
+    // Fallback to default icons if gray versions don't exist
+    chrome.action.setIcon({
+      path: {
+        16: 'icons/icon16.png',
+        48: 'icons/icon48.png',
+        128: 'icons/icon128.png'
+      }
+    });
+  });
+
+  chrome.action.setTitle({
+    title: connected ? 'ChromeTools MCP (Connected)' : 'ChromeTools MCP (Disconnected)'
+  });
+
+  console.log(`[ChromeTools] Icon status: ${connected ? 'connected' : 'disconnected'}`);
+}
+
+// ============================================
+// Recorder Functions
 // ============================================
 
 async function loadRecorderState() {
   try {
-    const result = await chrome.storage.local.get('recorderState');
-    if (result.recorderState) {
-      recorderState = result.recorderState;
-      console.log('[ChromeTools] Recorder state loaded:', recorderState.isRecording ? 'recording' : 'idle');
+    const stored = await chrome.storage.local.get('recorderState');
+    if (stored.recorderState) {
+      recorderState = { ...recorderState, ...stored.recorderState };
     }
   } catch (error) {
     console.error('[ChromeTools] Failed to load recorder state:', error);
@@ -469,88 +315,99 @@ async function saveRecorderState() {
 }
 
 async function startRecording(options = {}) {
-  // Get current active tab
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  recorderState = {
-    isRecording: true,
-    isPaused: false,
-    actions: [],
-    secrets: {},
-    startUrl: activeTab?.url || null,
-    startTabId: activeTab?.id || null,
-    currentTabId: activeTab?.id || null,  // ⭐ Initialize with start tab
-    metadata: {
-      name: options.name || '',
-      description: options.description || '',
-      tags: options.tags || []
-    }
+  recorderState.isRecording = true;
+  recorderState.isPaused = false;
+  recorderState.actions = [];
+  recorderState.secrets = {};
+  recorderState.startUrl = activeTab?.url || '';
+  recorderState.startTabId = activeTab?.id;
+  recorderState.currentTabId = activeTab?.id;
+  recorderState.metadata = {
+    name: options.name || '',
+    description: options.description || '',
+    tags: options.tags || []
   };
 
   await saveRecorderState();
 
-  // Notify all content scripts
-  notifyContentScripts({ type: 'RECORDING_STARTED' });
-
-  // Notify MCP
-  sendToMCP({
-    type: 'recorder_started',
-    payload: { startUrl: recorderState.startUrl }
+  // Notify Bridge about state change
+  sendToBridge({
+    type: 'recorder_state_changed',
+    payload: {
+      isRecording: true,
+      isPaused: false,
+      startUrl: recorderState.startUrl,
+      metadata: recorderState.metadata
+    }
   });
 
   console.log('[ChromeTools] Recording started');
 }
 
 async function stopRecording() {
-  const actions = recorderState.actions;
-  const secrets = recorderState.secrets;
+  const result = {
+    actions: recorderState.actions,
+    secrets: recorderState.secrets,
+    metadata: {
+      ...recorderState.metadata,
+      entryUrl: recorderState.startUrl,
+      recordedAt: new Date().toISOString()
+    }
+  };
 
   recorderState.isRecording = false;
   recorderState.isPaused = false;
 
   await saveRecorderState();
 
-  // Notify all content scripts
-  notifyContentScripts({ type: 'RECORDING_STOPPED' });
+  // Notify Bridge
+  sendToBridge({
+    type: 'recorder_state_changed',
+    payload: {
+      isRecording: false,
+      isPaused: false
+    }
+  });
 
-  console.log('[ChromeTools] Recording stopped, actions:', actions.length);
+  // Also send recordings to Bridge for storage
+  sendToBridge({
+    type: 'recordings_cleared'
+  });
 
-  return { actions, secrets };
+  console.log('[ChromeTools] Recording stopped');
+  return result;
 }
 
 async function pauseRecording() {
   recorderState.isPaused = !recorderState.isPaused;
   await saveRecorderState();
 
-  notifyContentScripts({
-    type: recorderState.isPaused ? 'RECORDING_PAUSED' : 'RECORDING_RESUMED'
+  sendToBridge({
+    type: 'recorder_state_changed',
+    payload: { isPaused: recorderState.isPaused }
   });
 
-  console.log('[ChromeTools] Recording', recorderState.isPaused ? 'paused' : 'resumed');
+  console.log(`[ChromeTools] Recording ${recorderState.isPaused ? 'paused' : 'resumed'}`);
 }
 
 function recordAction(action) {
-  if (!recorderState.isRecording || recorderState.isPaused) {
-    return;
-  }
+  if (!recorderState.isRecording || recorderState.isPaused) return;
 
-  recorderState.actions.push(action);
+  const actionWithMeta = {
+    ...action,
+    timestamp: Date.now(),
+    index: recorderState.actions.length
+  };
+
+  recorderState.actions.push(actionWithMeta);
   saveRecorderState();
 
-  // Notify popup about new action
-  chrome.runtime.sendMessage({
-    type: 'ACTION_RECORDED',
-    actionCount: recorderState.actions.length
-  }).catch(() => {});
-
-  console.log('[ChromeTools] Action recorded:', action.type);
-}
-
-function notifyContentScripts(message) {
-  chrome.tabs.query({}, (tabs) => {
-    tabs.forEach(tab => {
-      chrome.tabs.sendMessage(tab.id, message).catch(() => {});
-    });
+  // Send to Bridge
+  sendToBridge({
+    type: 'action_recorded',
+    payload: actionWithMeta
   });
 }
 
@@ -564,7 +421,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
     // From content script
     case 'ACTION':
-      // ⭐ Only record actions from currently active recording tab
       if (recorderState.isRecording && sender.tab?.id === recorderState.currentTabId) {
         recordAction({
           ...message.action,
@@ -573,7 +429,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         sendResponse({ success: true });
       } else {
-        // Ignore actions from non-active tabs during recording
         sendResponse({ success: false, reason: 'Not recording on this tab' });
       }
       break;
@@ -597,7 +452,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       startRecording(message.options).then(() => {
         sendResponse({ success: true });
       });
-      return true; // async response
+      return true;
 
     case 'STOP_RECORDING':
       stopRecording().then((result) => {
@@ -615,11 +470,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       recorderState.actions = [];
       recorderState.secrets = {};
       saveRecorderState();
+      sendToBridge({ type: 'recordings_cleared' });
       sendResponse({ success: true });
       break;
 
     case 'FORCE_RESET':
-      // Force reset all recording state
       recorderState.isRecording = false;
       recorderState.isPaused = false;
       recorderState.actions = [];
@@ -627,6 +482,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       recorderState.metadata = null;
       recorderState.entryUrl = null;
       saveRecorderState();
+      sendToBridge({
+        type: 'recorder_state_changed',
+        payload: { isRecording: false, isPaused: false }
+      });
       sendResponse({ success: true, message: 'Recording state reset' });
       break;
 
@@ -636,9 +495,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         isPaused: recorderState.isPaused,
         actions: recorderState.actions,
         metadata: recorderState.metadata,
-        isConnected: wsConnections.size > 0,
-        connectedInstances: wsConnections.size,
-        // Provide scenario metadata for popup state restoration
+        isConnected: isConnected,
+        connectedInstances: isConnected ? 1 : 0,
         scenarioName: recorderState.metadata?.name || '',
         scenarioDescription: recorderState.metadata?.description || '',
         scenarioTags: recorderState.metadata?.tags || []
@@ -646,126 +504,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case 'SAVE_SCENARIO':
-      saveScenario(message.scenario).then((result) => {
-        sendResponse(result);
-      });
-      return true;
-
-    case 'REQUEST_SCENARIOS_LIST':
-      sendToMCP({
-        type: 'scenario_list_request',
-        requestId: message.requestId
+      // Forward to Bridge for saving
+      sendToBridge({
+        type: 'scenario_save',
+        payload: message.scenario,
+        requestId: `save_${Date.now()}`
       });
       sendResponse({ success: true });
       break;
 
-    case 'GET_CONNECTION_STATUS':
-      sendResponse({
-        isConnected: wsConnections.size > 0,
-        connectedInstances: wsConnections.size
-      });
-      break;
-
     default:
-      console.log('[ChromeTools] Unknown message type:', message.type);
-      sendResponse({ error: 'Unknown message type' });
+      console.log('[ChromeTools] Unknown message:', message.type);
   }
-
-  return false;
 });
-
-async function saveScenario(scenarioData) {
-  // Get end URL from current active tab
-  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-  const scenario = {
-    name: scenarioData.name,
-    metadata: {
-      name: scenarioData.name,
-      description: scenarioData.description || '',
-      tags: scenarioData.tags || [],
-      dependencies: scenarioData.dependencies || [],
-      parameters: extractParameters(recorderState.secrets),
-      entryUrl: recorderState.startUrl,
-      exitUrl: activeTab?.url || null
-    },
-    chain: recorderState.actions,
-    secrets: recorderState.secrets
-  };
-
-  // Send to MCP for saving
-  const requestId = Date.now().toString();
-
-  sendToMCP({
-    type: 'scenario_save',
-    payload: scenario,
-    requestId
-  });
-
-  // Clear recorder state after save
-  recorderState.actions = [];
-  recorderState.secrets = {};
-  recorderState.isRecording = false;
-  await saveRecorderState();
-
-  return { success: true, requestId };
-}
-
-function extractParameters(secrets) {
-  const params = {};
-  for (const [paramName] of Object.entries(secrets)) {
-    params[paramName] = {
-      type: 'string',
-      required: true,
-      description: `Secret parameter: ${paramName}`
-    };
-  }
-  return params;
-}
-
-// ============================================
-// Icon Management
-// ============================================
-
-function updateIcon(connected) {
-  // For now, just log the status
-  // TODO: Create actual icon files and update badge
-  console.log('[ChromeTools] Icon status:', connected ? 'connected' : 'disconnected');
-
-  if (connected) {
-    chrome.action.setBadgeText({ text: '' });
-    chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-  } else {
-    chrome.action.setBadgeText({ text: '!' });
-    chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-  }
-}
 
 // ============================================
 // Initialization
 // ============================================
 
-async function initialize() {
-  console.log('[ChromeTools] Extension initializing...');
+async function init() {
+  console.log('[ChromeTools] Initializing extension...');
 
-  // Load persisted recorder state
+  // Load saved state
   await loadRecorderState();
 
-  // Start scanning for MCP instances and connect to all found
-  startInstanceScanning();
-
-  // Initial tab sync
-  syncAllTabs();
+  // Connect to Native Host
+  connectToNativeHost();
 
   console.log('[ChromeTools] Extension initialized');
 }
 
 // Start
-initialize();
-
-// Keepalive ping to all connections
-setInterval(() => {
-  if (wsConnections.size > 0) {
-    sendToMCP({ type: 'ping' });
-  }
-}, 30000);
+init();

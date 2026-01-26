@@ -14,15 +14,17 @@ import {homedir} from 'os';
 import {closeBrowser, isConnectedToExistingChrome} from './browser/browser-manager.js';
 import {isWSL} from './utils/platform-utils.js';
 
-// Import WebSocket bridge for Chrome Extension communication
+// Import Bridge client for Chrome Extension communication (via Bridge Service)
 import {
   startWebSocketServer,
   isExtensionConnected,
   getTabsFromExtension,
   getActiveTabFromExtension,
   switchTabViaExtension,
-  setActiveTabSyncHandler
-} from './server/websocket-bridge.js';
+  setActiveTabSyncHandler,
+  getWsDebugInfo,
+  isBridgeConnected
+} from './bridge/bridge-client.js';
 
 // Import page management utilities
 import {
@@ -2406,6 +2408,7 @@ Start coding now.`;
     if (name === "enableRecorder") {
       // Check if extension is connected
       const extensionConnected = isExtensionConnected();
+      const debugInfo = getWsDebugInfo();
 
       if (extensionConnected) {
         return {
@@ -2414,7 +2417,8 @@ Start coding now.`;
             text: JSON.stringify({
               success: true,
               message: 'ChromeTools Extension is connected. Use startRecording/stopRecording tools to control recording programmatically.',
-              extensionConnected: true
+              extensionConnected: true,
+              debugInfo
             }, null, 2)
           }]
         };
@@ -2427,6 +2431,7 @@ Start coding now.`;
               success: false,
               error: 'ChromeTools Extension is not connected. Recording requires the extension.',
               extensionConnected: false,
+              debugInfo,
               ...instructions
             }, null, 2)
           }]
@@ -2452,8 +2457,8 @@ Start coding now.`;
         };
       }
 
-      // Send start recording command to extension
-      const { sendExtensionCommand } = await import('./server/websocket-bridge.js');
+      // Send start recording command to extension via Bridge
+      const { sendExtensionCommand } = await import('./bridge/bridge-client.js');
       const result = await sendExtensionCommand({
         type: 'recorder_start',
         payload: {
@@ -2491,8 +2496,8 @@ Start coding now.`;
         };
       }
 
-      // Send stop recording command to extension
-      const { sendExtensionCommand } = await import('./server/websocket-bridge.js');
+      // Send stop recording command to extension via Bridge
+      const { sendExtensionCommand } = await import('./bridge/bridge-client.js');
       const result = await sendExtensionCommand({
         type: 'recorder_stop'
       });
@@ -2527,8 +2532,8 @@ Start coding now.`;
         };
       }
 
-      // Query recorder state from extension
-      const { sendExtensionCommand } = await import('./server/websocket-bridge.js');
+      // Query recorder state from extension via Bridge
+      const { sendExtensionCommand } = await import('./bridge/bridge-client.js');
       const result = await sendExtensionCommand({
         type: 'recorder_get_state'
       });
@@ -3263,8 +3268,58 @@ Start coding now.`;
   }
 }
 
+// CLI argument handling
+async function handleCLIArgs() {
+  const args = process.argv.slice(2);
+
+  if (args.includes('--install-bridge')) {
+    const { installBridge } = await import('./bridge/install.js');
+    const result = await installBridge();
+    process.exit(result.success ? 0 : 1);
+  }
+
+  if (args.includes('--uninstall-bridge')) {
+    const { uninstallBridge } = await import('./bridge/install.js');
+    const result = await uninstallBridge();
+    process.exit(result.success ? 0 : 1);
+  }
+
+  if (args.includes('--check-bridge')) {
+    const { isBridgeInstalled } = await import('./bridge/install.js');
+    const installed = isBridgeInstalled();
+    console.log(installed ? 'Bridge is installed' : 'Bridge is NOT installed');
+    process.exit(installed ? 0 : 1);
+  }
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`
+chrometools-mcp - MCP server for Chrome automation
+
+Usage: npx chrometools-mcp [options]
+
+Options:
+  --install-bridge    Install Native Messaging Bridge (required for extension)
+  --uninstall-bridge  Uninstall Native Messaging Bridge
+  --check-bridge      Check if Bridge is installed
+  --help, -h          Show this help message
+
+Environment variables:
+  CHROMETOOLS_DEBUG=true   Enable debug logging
+  ENABLED_TOOLS=group1,..  Enable only specified tool groups
+  FIGMA_TOKEN=xxx          Figma API token for Figma tools
+`);
+    process.exit(0);
+  }
+
+  // Continue to main server
+  return false;
+}
+
 // Start server
 async function main() {
+  // Handle CLI arguments first
+  await handleCLIArgs();
+
   console.error("Starting chrometools-mcp server...");
 
   // Show environment info
@@ -3273,7 +3328,7 @@ async function main() {
     console.error("[chrometools-mcp] GUI mode requires X server (DISPLAY=" + (process.env.DISPLAY || "not set") + ")");
   }
 
-  // Start WebSocket server for Chrome Extension communication
+  // Connect to Bridge Service (if running)
   await startWebSocketServer();
 
   // Register handler for syncing active tab when user switches tabs

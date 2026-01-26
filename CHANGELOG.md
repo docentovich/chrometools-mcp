@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.0] - 2026-01-26
+
+### Added
+- **Native Messaging Bridge Architecture** — complete rewrite of Extension ↔ MCP communication
+  - Bridge Service runs as Native Messaging Host (launched by Chrome with Extension)
+  - MCP servers connect as WebSocket clients (not servers)
+  - Supports 0-8 simultaneous MCP clients connecting/disconnecting at any time
+  - Full state (tabs, recordings) sent immediately on client connect
+  - No more scanning delays — instant connection to persistent Bridge
+
+- **CLI commands for Bridge management**
+  - `--install-bridge` — Install Native Messaging Bridge (one-time setup)
+  - `--uninstall-bridge` — Remove Bridge installation
+  - `--check-bridge` — Verify Bridge is installed
+  - `--help` — Show all CLI options
+
+- **Stable Extension ID** via manifest key
+  - Extension ID is now deterministic: `dmehkibmncgphijnigkahhlekgajhpbl`
+  - Required for Native Messaging Host registration
+
+- **New extension icons** — Chrome/robot themed design (16, 48, 128px)
+
+### Changed
+- **Extension is now Event Producer** — sends all events to Bridge, doesn't manage WebSocket connections
+- **MCP is now Event Consumer** — connects to Bridge as client, receives state on demand
+- **Bridge lifecycle** — starts with Chrome Extension, stops when Chrome closes
+- Removed port scanning (9223-9227) — Bridge uses single fixed port 9223
+
+### Architecture
+```
+Chrome Extension (producer) → Native Messaging → Bridge Service (:9223) ← WebSocket ← MCP clients (0-8)
+```
+
+### Migration
+1. Run `npx chrometools-mcp --install-bridge` once
+2. Reload Extension in chrome://extensions
+3. Use normally — MCP auto-connects to Bridge
+
 ## [3.0.4] - 2026-01-26
 
 ### Added

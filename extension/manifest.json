@@ -4,12 +4,15 @@
   "version": "1.0.0",
   "description": "Tab tracking and scenario recording for chrometools-mcp",
 
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxLLqg7Nu1h9ogRVgQoVMRPv8Jp7uRJugZSGUh++Niq0xm3khJefBuJ3L0dSG6xb9tkjTdgqUyg81VUgJBDVw9Bxu6iz1uL17VnEGHDZKe5wpsEpG8o6ZsTWtKRDeoxmkCGSOSDsh/ihlJe8mFaqpBYz6RBaO28R89TNobVhSobTQPB1ptyEND7W7JnsnMOiMcTo9l6j9HrIHLoHj7tO42DHNI4tEyLxI7C6R3i5dLIdwwxJMj0Hhrx4Ncmh24AzPyZypxVvpa1V7HP3sAXGBoUjLd/SEaY8j50lnaIQI3AkYv86pS9l6EZ6y3XCuW7C7W9guTTL/7ZNawYoE2bJ1HwIDAQAB",
+
   "permissions": [
     "tabs",
     "activeTab",
     "scripting",
     "storage",
-    "webNavigation"
+    "webNavigation",
+    "nativeMessaging"
   ],
 
   "host_permissions": [
