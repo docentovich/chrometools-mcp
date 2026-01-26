@@ -331,15 +331,15 @@ chrome.tabs.onCreated.addListener((tab) => {
     payload: state
   });
 
-  // ⭐ If recording and new tab is active, record newTab action
+  // ⭐ If recording and new tab is active, record openTab action
   if (recorderState.isRecording && !recorderState.isPaused && tab.active) {
     recordAction({
-      type: 'newTab',
+      type: 'openTab',
       timestamp: Date.now(),
       data: {
-        tabId: tab.id,
-        url: state.url,
-        title: state.title || 'New Tab'
+        url: state.url || 'about:blank',
+        title: state.title || 'New Tab',
+        switchToTab: true  // New tab is already active
       }
     });
 
@@ -347,7 +347,7 @@ chrome.tabs.onCreated.addListener((tab) => {
     recorderState.currentTabId = tab.id;
     saveRecorderState();
 
-    console.log(`[ChromeTools] New tab opened during recording: ${tab.id}`);
+    console.log(`[ChromeTools] New tab opened during recording: ${tab.id} (${state.url})`);
   }
 
   console.log('[ChromeTools] Tab created:', tab.id, state.url);
@@ -389,15 +389,15 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       // Get tab info for the action
       const tab = await chrome.tabs.get(activeInfo.tabId);
 
-      // Record switchTab action
+      // ⭐ Record openTab action (always opens tab with URL, not just switches)
+      // This ensures tab exists during playback
       recordAction({
-        type: 'switchTab',
+        type: 'openTab',
         timestamp: Date.now(),
         data: {
-          fromTabId: previousTabId,
-          toTabId: activeInfo.tabId,
-          toTabUrl: tab.url,
-          toTabTitle: tab.title
+          url: tab.url,
+          title: tab.title,
+          switchToTab: true  // Indicate we should switch to it after opening
         }
       });
 
@@ -405,7 +405,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       recorderState.currentTabId = activeInfo.tabId;
       await saveRecorderState();
 
-      console.log(`[ChromeTools] Recording switched from tab ${previousTabId} to tab ${activeInfo.tabId}`);
+      console.log(`[ChromeTools] Recording switched to tab ${activeInfo.tabId} (${tab.url})`);
     }
   }
 

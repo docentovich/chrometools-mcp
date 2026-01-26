@@ -7,14 +7,17 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **Smart tab tracking for scenario recording**
   - Recording automatically follows the active tab
-  - When user switches tabs during recording, a `switchTab` action is recorded
-  - When user opens new tab, a `newTab` action is recorded
+  - When user switches tabs during recording, an `openTab` action is recorded
+  - When user opens new tab, an `openTab` action is recorded
   - Actions from non-active tabs are automatically filtered out
-  - Scenario executor supports `switchTab` and `newTab` actions for playback
+  - `openTab` action ensures tab exists during playback (opens tab with URL if not exists)
+  - Scenario executor supports `openTab` with automatic tab reuse and creation
 
 ### Changed
 - Recording now tracks `currentTabId` instead of being locked to `startTabId`
 - Content scripts only send actions when their tab is the active recording target
+- Replaced `switchTab`/`newTab` with unified `openTab` action type
+- `openTab` intelligently checks if tab already exists before creating new one
 
 ## [3.0.3] - 2026-01-25
 

@@ -538,12 +538,8 @@ async function executeAction(action, page, timeout) {
       result.output = await executeExtract(action, page);
       break;
 
-    case 'switchTab':
-      await executeSwitchTab(action, page);
-      break;
-
-    case 'newTab':
-      await executeNewTab(action, page);
+    case 'openTab':
+      await executeOpenTab(action, page, timeout);
       break;
 
     default:
@@ -957,44 +953,43 @@ function substituteParameters(action, params) {
 }
 
 /**
- * Switch to another tab
+ * Open a tab with URL and optionally switch to it
+ * This ensures the tab exists during playback
  */
-async function executeSwitchTab(action, page) {
-  const { toTabUrl } = action.data;
+async function executeOpenTab(action, page, timeout) {
+  const { url, switchToTab } = action.data;
 
-  debugLog(`[switchTab] Switching to tab: ${toTabUrl}`);
-
-  // Use MCP's switchTab tool
-  const { connectToTabByUrl } = await import('../server/page-manager.js');
-
-  try {
-    await connectToTabByUrl(toTabUrl);
-    debugLog(`[switchTab] Successfully switched to ${toTabUrl}`);
-  } catch (error) {
-    throw new Error(`Failed to switch to tab "${toTabUrl}": ${error.message}`);
-  }
-}
-
-/**
- * Open a new tab
- */
-async function executeNewTab(action, page) {
-  const { url } = action.data;
-
-  debugLog(`[newTab] Opening new tab: ${url || 'blank'}`);
+  debugLog(`[openTab] Opening tab: ${url || 'blank'}, switchToTab: ${switchToTab}`);
 
   // Get browser instance
   const browser = page.browser();
-  const newPage = await browser.newPage();
 
-  if (url && url !== 'about:blank') {
-    await newPage.goto(url, { waitUntil: 'networkidle2' });
+  // Check if tab with this URL already exists
+  const pages = await browser.pages();
+  let targetPage = pages.find(p => p.url() === url);
+
+  if (targetPage) {
+    // Tab already exists, just switch to it
+    debugLog(`[openTab] Tab with URL ${url} already exists, switching to it`);
+  } else {
+    // Create new tab
+    targetPage = await browser.newPage();
+
+    if (url && url !== 'about:blank') {
+      await targetPage.goto(url, {
+        waitUntil: 'networkidle2',
+        timeout
+      });
+    }
+
+    debugLog(`[openTab] New tab created: ${url || 'blank'}`);
   }
 
-  debugLog(`[newTab] New tab opened: ${url || 'blank'}`);
-
-  // Note: The caller should update their page reference if needed
-  // For now, we stay on the current page context
+  // If switchToTab is true, bring the tab to front
+  if (switchToTab) {
+    await targetPage.bringToFront();
+    debugLog(`[openTab] Switched to tab: ${url}`);
+  }
 }
 
 /**
