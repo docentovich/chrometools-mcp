@@ -12,12 +12,19 @@ All notable changes to this project will be documented in this file.
   - Actions from non-active tabs are automatically filtered out
   - `openTab` action ensures tab exists during playback (opens tab with URL if not exists)
   - Scenario executor supports `openTab` with automatic tab reuse and creation
+- **MCP tools for programmatic recording control**
+  - `startRecording` - Start recording from AI/code
+  - `stopRecording` - Stop and retrieve recorded actions
+  - `getRecorderState` - Query current recording state
+  - `saveScenario` - Save recorded actions as scenario
+  - AI agents can now fully control recording without manual interaction
 
 ### Changed
 - Recording now tracks `currentTabId` instead of being locked to `startTabId`
 - Content scripts only send actions when their tab is the active recording target
 - Replaced `switchTab`/`newTab` with unified `openTab` action type
 - `openTab` intelligently checks if tab already exists before creating new one
+- `enableRecorder` now mentions programmatic control tools
 
 ## [3.0.3] - 2026-01-25
 

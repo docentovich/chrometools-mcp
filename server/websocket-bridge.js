@@ -405,3 +405,43 @@ export function sendRecorderCommand(command, options = {}) {
     payload: options
   });
 }
+
+/**
+ * Send command to extension and wait for response
+ */
+export function sendExtensionCommand(message, timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    if (!extensionConnection) {
+      reject(new Error('Extension not connected'));
+      return;
+    }
+
+    const requestId = `req_${Date.now()}_${Math.random()}`;
+    message.requestId = requestId;
+
+    // Set up response handler
+    const responseHandler = (data) => {
+      try {
+        const response = JSON.parse(data);
+        if (response.requestId === requestId) {
+          clearTimeout(timeoutHandle);
+          extensionConnection.off('message', responseHandler);
+          resolve(response);
+        }
+      } catch (err) {
+        // Ignore parse errors for other messages
+      }
+    };
+
+    extensionConnection.on('message', responseHandler);
+
+    // Set timeout
+    const timeoutHandle = setTimeout(() => {
+      extensionConnection.off('message', responseHandler);
+      reject(new Error(`Extension command timeout after ${timeout}ms`));
+    }, timeout);
+
+    // Send message
+    extensionConnection.send(JSON.stringify(message));
+  });
+}

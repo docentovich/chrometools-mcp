@@ -571,6 +571,75 @@ export const toolDefinitions = [
         },
       },
       {
+        name: "startRecording",
+        description: "Start recording user actions into a scenario. Recording follows the active tab automatically. Use stopRecording to finish and save the scenario.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Scenario name (optional, can be set later when saving)",
+            },
+            description: {
+              type: "string",
+              description: "Scenario description (optional)",
+            },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+              description: "Tags for organizing scenarios (optional)",
+            },
+          },
+        },
+      },
+      {
+        name: "stopRecording",
+        description: "Stop recording and return recorded actions. Does not save the scenario - use this to review actions before saving with saveScenario.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "getRecorderState",
+        description: "Get current recorder state: isRecording, isPaused, action count, current tab",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "saveScenario",
+        description: "Save recorded actions as a scenario. Call this after stopRecording to persist the scenario to disk.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Scenario name",
+            },
+            description: {
+              type: "string",
+              description: "Scenario description (optional)",
+            },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+              description: "Tags for organizing scenarios (optional)",
+            },
+            actions: {
+              type: "array",
+              description: "Array of recorded actions (from stopRecording)",
+            },
+            secrets: {
+              type: "object",
+              description: "Secrets object (from stopRecording)",
+            },
+          },
+          required: ["name", "actions"],
+        },
+      },
+      {
         name: "executeScenario",
         description: "Execute recorded scenario by name. Runs actions with dependency resolution. Scenarios are organized by domain in ~/.config/chrometools-mcp/projects/{domain}/scenarios/. If multiple scenarios have the same name across different domains, specify projectId to disambiguate.",
         inputSchema: {

@@ -2413,7 +2413,7 @@ Start coding now.`;
             type: 'text',
             text: JSON.stringify({
               success: true,
-              message: 'ChromeTools Extension is connected. Use the extension popup to start/stop recording. Click the CT icon in Chrome toolbar.',
+              message: 'ChromeTools Extension is connected. Use startRecording/stopRecording tools to control recording programmatically.',
               extensionConnected: true
             }, null, 2)
           }]
@@ -2428,6 +2428,154 @@ Start coding now.`;
               error: 'ChromeTools Extension is not connected. Recording requires the extension.',
               extensionConnected: false,
               ...instructions
+            }, null, 2)
+          }]
+        };
+      }
+    }
+
+    if (name === "startRecording") {
+      const extensionConnected = isExtensionConnected();
+
+      if (!extensionConnected) {
+        const instructions = getExtensionInstallInstructions();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: 'ChromeTools Extension is not connected. Recording requires the extension.',
+              extensionConnected: false,
+              ...instructions
+            }, null, 2)
+          }]
+        };
+      }
+
+      // Send start recording command to extension
+      const { sendExtensionCommand } = await import('./server/websocket-bridge.js');
+      const result = await sendExtensionCommand({
+        type: 'recorder_start',
+        payload: {
+          name: args.name || '',
+          description: args.description || '',
+          tags: args.tags || []
+        }
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: 'Recording started. Perform actions in the browser, then use stopRecording to finish.',
+            ...result
+          }, null, 2)
+        }]
+      };
+    }
+
+    if (name === "stopRecording") {
+      const extensionConnected = isExtensionConnected();
+
+      if (!extensionConnected) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: 'ChromeTools Extension is not connected.',
+              extensionConnected: false
+            }, null, 2)
+          }]
+        };
+      }
+
+      // Send stop recording command to extension
+      const { sendExtensionCommand } = await import('./server/websocket-bridge.js');
+      const result = await sendExtensionCommand({
+        type: 'recorder_stop'
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: 'Recording stopped.',
+            actions: result.actions || [],
+            secrets: result.secrets || {},
+            actionCount: result.actions?.length || 0
+          }, null, 2)
+        }]
+      };
+    }
+
+    if (name === "getRecorderState") {
+      const extensionConnected = isExtensionConnected();
+
+      if (!extensionConnected) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: 'ChromeTools Extension is not connected.',
+              extensionConnected: false
+            }, null, 2)
+          }]
+        };
+      }
+
+      // Query recorder state from extension
+      const { sendExtensionCommand } = await import('./server/websocket-bridge.js');
+      const result = await sendExtensionCommand({
+        type: 'recorder_get_state'
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            ...result
+          }, null, 2)
+        }]
+      };
+    }
+
+    if (name === "saveScenario") {
+      const { saveScenario } = await import('./recorder/scenario-storage.js');
+
+      const scenario = {
+        name: args.name,
+        description: args.description || '',
+        tags: args.tags || [],
+        actions: args.actions || [],
+        secrets: args.secrets || {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      try {
+        const result = await saveScenario(scenario, lastPage.url());
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              message: `Scenario "${args.name}" saved successfully.`,
+              scenarioPath: result.path
+            }, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: error.message
             }, null, 2)
           }]
         };
