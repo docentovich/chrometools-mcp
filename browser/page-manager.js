@@ -185,7 +185,11 @@ export async function getOrCreatePage(url) {
   // Setup network monitoring with auto-reinitialization on navigation
   await setupNetworkMonitoring(page);
 
-  await page.goto(url, { waitUntil: 'networkidle2' });
+  // Use longer timeout (60s) and less strict wait condition for slow sites like Yahoo
+  await page.goto(url, {
+    waitUntil: 'domcontentloaded', // Less strict than networkidle2, works for sites with continuous loading
+    timeout: 60000 // Increased from default 30s to 60s
+  });
   openPages.set(url, page);
   lastPage = page;
 

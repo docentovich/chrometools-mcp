@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.1] - 2026-01-26
+
+### Fixed
+- **Scenario recording and saving flow** — Fixed critical bugs preventing scenario recording
+  - Fixed Extension → Bridge → MCP communication flow for recording control
+  - `startRecording` now properly sends command to Extension via Bridge WebSocket
+  - `stopRecording` correctly retrieves recorded actions from Extension state
+  - `saveScenario` now successfully saves scenarios to correct project directory
+  - Recording state properly synchronized between Extension popup and MCP tools
+  - Location: `index.js` (startRecording/stopRecording/saveScenario handlers)
+
+- **Navigation timeout for slow websites** — Fixed timeout errors on sites with continuous loading
+  - Increased navigation timeout from 30s to 60s
+  - Changed wait strategy from `networkidle2` to `domcontentloaded` (less strict)
+  - Fixes timeout errors on sites like Yahoo that continuously load ads and tracking scripts
+  - Location: `browser/page-manager.js:188-193`
+
+### Changed
+- **Improved WebSocket message handling** — Better error reporting and state management
+  - Bridge now properly forwards recording commands to Extension
+  - MCP server correctly receives recording state updates from Bridge
+  - Clear error messages when Extension is not connected or recording fails
+
 ## [3.1.0] - 2026-01-26
 
 ### Added
