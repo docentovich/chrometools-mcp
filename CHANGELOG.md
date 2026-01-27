@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.5] - 2026-01-28
+
+### Fixed
+- **CSS selector validation** — Fixed analyzePage crash when elements have numeric IDs
+  - Added validation to skip IDs starting with digits (e.g., `id="301178"`)
+  - CSS selectors don't support IDs starting with numbers (per CSS specification)
+  - Added try-catch for invalid selector edge cases
+  - Affected file: `pom/apom-tree-converter.js`
+
 ## [3.2.4] - 2026-01-27
 
 ### Performance

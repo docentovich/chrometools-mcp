@@ -682,9 +682,17 @@ function buildAPOMTree(interactiveOnly = true) {
    * Excludes framework-specific dynamic attributes (React, Vue, Angular)
    */
   function generateSelector(element) {
-    // Use ID if available and unique
-    if (element.id && document.querySelectorAll(`#${element.id}`).length === 1) {
-      return `#${element.id}`;
+    // Use ID if available, valid (not starting with digit), and unique
+    // CSS selectors don't support IDs starting with digits (e.g., #301178 is invalid)
+    if (element.id && !/^[0-9]/.test(element.id)) {
+      try {
+        const selector = `#${CSS.escape(element.id)}`;
+        if (document.querySelectorAll(selector).length === 1) {
+          return selector;
+        }
+      } catch (e) {
+        // Invalid selector, continue to other strategies
+      }
     }
 
     // Try to find stable class name (excluding framework-specific dynamic classes)
