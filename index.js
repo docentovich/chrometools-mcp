@@ -380,7 +380,21 @@ async function executeToolInternal(name, args) {
           throw new Error(`Element not found: ${identifier}`);
         }
 
-        await element.click();
+        // Try multiple click methods for better reliability
+        try {
+          // Method 1: Puppeteer click (most reliable for most cases)
+          await element.click();
+        } catch (clickError) {
+          // Method 2: Scroll into view and try again
+          try {
+            await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
+            await new Promise(resolve => setTimeout(resolve, 100));
+            await element.click();
+          } catch (scrollClickError) {
+            // Method 3: JavaScript click (works for hidden/overlapping elements)
+            await element.evaluate(el => el.click());
+          }
+        }
         await new Promise(resolve => setTimeout(resolve, validatedArgs.waitAfter || 1500));
 
         // Generate AI hints after click
@@ -2065,14 +2079,14 @@ Start coding now.`;
       const pageUrl = page.url();
 
       // APOM Tree format (default) - v2 with tree structure and positioning
-      const apomResult = await page.evaluate((apomTreeConverterCode, selectorResolverCode, shouldRegister, includeAll) => {
+      const apomResult = await page.evaluate((apomTreeConverterCode, selectorResolverCode, shouldRegister, includeAll, detectFrameworks) => {
         // Inject utilities
         eval(apomTreeConverterCode);
         eval(selectorResolverCode);
 
         // Build APOM tree
         // interactiveOnly = !includeAll (if includeAll is true, we want ALL elements)
-        const apomData = buildAPOMTree(!includeAll);
+        const apomData = buildAPOMTree(!includeAll, detectFrameworks);
 
         // Register elements in selector resolver if requested
         if (shouldRegister) {
@@ -2105,7 +2119,7 @@ Start coding now.`;
         }
 
         return apomData;
-      }, apomTreeConverter, selectorResolver, validatedArgs.registerElements !== false, validatedArgs.includeAll || false);
+      }, apomTreeConverter, selectorResolver, validatedArgs.registerElements !== false, validatedArgs.includeAll || false, validatedArgs.detectFrameworks || false);
 
       return {
         content: [{
@@ -2115,14 +2129,19 @@ Start coding now.`;
       };
     }
 
-    if (name === "getElementByApomId") {
-      const validatedArgs = schemas.GetElementByApomIdSchema.parse(args);
+    if (name === "getElementDetails") {
+      const validatedArgs = schemas.GetElementDetailsSchema.parse(args);
       const page = await getLastOpenPage();
 
-      const result = await page.evaluate((elementId, selectorResolverCode) => {
+      const result = await page.evaluate((elementId, selectorResolverCode, apomTreeConverterCode, analyzeChildren, includeAll) => {
         // Inject selector resolver if not loaded
         if (typeof resolveSelector === 'undefined') {
           eval(selectorResolverCode);
+        }
+
+        // Inject APOM tree converter utilities
+        if (typeof buildAPOMTree === 'undefined') {
+          eval(apomTreeConverterCode);
         }
 
         // Resolve APOM ID to selector
@@ -2146,25 +2165,25 @@ Start coding now.`;
           };
         }
 
-        // Get element details
+        // Get element details with full information
         const rect = element.getBoundingClientRect();
         const computedStyle = window.getComputedStyle(element);
 
-        return {
+        const details = {
           success: true,
           id: elementId,
           selector: resolved.selector,
           tag: element.tagName.toLowerCase(),
           type: resolved.metadata.type || 'unknown',
           bounds: {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-            left: rect.left
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+            top: Math.round(rect.top),
+            right: Math.round(rect.right),
+            bottom: Math.round(rect.bottom),
+            left: Math.round(rect.left)
           },
           position: resolved.metadata.position || null,
           visible: element.offsetWidth > 0 && element.offsetHeight > 0,
@@ -2179,17 +2198,75 @@ Start coding now.`;
             required: element.hasAttribute('required'),
             readonly: element.hasAttribute('readonly'),
             href: element.getAttribute('href') || null,
-            src: element.getAttribute('src') || null
+            src: element.getAttribute('src') || null,
+            type: element.getAttribute('type') || null,
+            role: element.getAttribute('role') || null,
+            ariaLabel: element.getAttribute('aria-label') || null
           },
           computed: {
             display: computedStyle.display,
             visibility: computedStyle.visibility,
             opacity: computedStyle.opacity,
             zIndex: computedStyle.zIndex,
-            position: computedStyle.position
-          }
+            position: computedStyle.position,
+            cursor: computedStyle.cursor,
+            backgroundColor: computedStyle.backgroundColor,
+            color: computedStyle.color,
+            fontSize: computedStyle.fontSize,
+            fontWeight: computedStyle.fontWeight
+          },
+          metadata: resolved.metadata || {}
         };
-      }, validatedArgs.id, selectorResolver);
+
+        // If analyzeChildren is true, add children tree structure
+        if (analyzeChildren) {
+          try {
+            const pageId = `element_${elementId}_${Date.now()}`;
+
+            // Call buildAPOMTree with the element as root
+            const fullAnalysis = buildAPOMTree(!includeAll, false);
+
+            // Find the node in the tree that matches our element ID
+            function findNodeById(node, targetId) {
+              if (!node) return null;
+              if (node.id === targetId) return node;
+              if (node.children) {
+                for (const child of node.children) {
+                  const found = findNodeById(child, targetId);
+                  if (found) return found;
+                }
+              }
+              return null;
+            }
+
+            const targetNode = findNodeById(fullAnalysis.tree, elementId);
+
+            if (targetNode) {
+              details.childrenTree = {
+                pageId,
+                url: window.location.href,
+                title: document.title,
+                timestamp: Date.now(),
+                rootElementId: elementId,
+                tree: targetNode,
+                metadata: fullAnalysis.metadata
+              };
+            } else {
+              details.childrenTree = {
+                success: false,
+                error: `Could not find element "${elementId}" in analysis tree`
+              };
+            }
+          } catch (err) {
+            details.childrenTree = {
+              success: false,
+              error: `Failed to analyze children: ${err.message}`
+            };
+          }
+        }
+
+        return details;
+      }, validatedArgs.id, selectorResolver, apomTreeConverter, validatedArgs.analyzeChildren || false, validatedArgs.includeAll || false);
 
       return {
         content: [{

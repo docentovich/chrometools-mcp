@@ -2,6 +2,84 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.2] - 2026-01-27
+
+### Fixed
+- **APOM ID resolution** — Fixed element ID lookup in `click` and `type` tools
+  - Added CSS selector generation to APOM tree elements
+  - Both interactive and container elements now include `selector` field
+  - APOM IDs (e.g., `textarea_25`, `button_45`) now work correctly with click/type tools
+- **Improved click reliability** — Enhanced click method with fallback strategies
+  - Primary method: standard Puppeteer click
+  - Fallback 1: scroll element into view and retry click
+  - Fallback 2: JavaScript click for hidden/overlapping elements
+  - Fixes issues with Google Search button and similar elements
+
+## [3.2.1] - 2026-01-27
+
+### Changed
+- **Unified element analysis tools** — Merged `analyzeElementById` into `getElementDetails`
+  - `getElementDetails` now has optional `analyzeChildren` parameter
+  - Set `analyzeChildren: true` to get children tree structure
+  - Simplified API reduces tool count and improves consistency
+  - Children analysis includes same `includeAll` and `refresh` options
+
+### Removed
+- **`getElementByApomId`** — Removed deprecated method (use `getElementDetails` instead)
+- **`analyzeElementById`** — Merged into `getElementDetails` with `analyzeChildren` parameter
+
+## [3.2.0] - 2026-01-27
+
+### Added
+- **New tool: `getElementDetails`** — Get comprehensive details about element by APOM ID
+  - Returns bounds, CSS selector, position, attributes, computed styles
+  - Use when `analyzePage` output is simplified and full element info is needed
+- **New tool: `analyzeElementById`** — Analyze children elements starting from specific APOM ID
+  - Useful for analyzing specific page sections without re-analyzing entire page
+  - Supports `includeAll` and `refresh` parameters
+
+### Changed
+- **Optimized `analyzePage` output** — Significantly reduced token usage
+  - Parent/container elements now show only `tag` and `id` (minimal info)
+  - Interactive elements no longer include `bounds` and `selector` in main output
+  - Use `getElementDetails` to get full information when needed
+  - ~50-70% reduction in output size for typical pages
+- **Improved cursor:pointer detection** — Only detects explicitly set cursor, not inherited
+  - Filters out inherited `cursor:pointer` from parent elements
+  - Reduces false positives in interactive element detection
+  - More accurate identification of clickable elements
+
+### Deprecated
+- **`getElementByApomId`** — Use `getElementDetails` instead (same functionality, clearer name)
+
+## [3.1.10] - 2026-01-27
+
+### Changed
+- **Framework detection made optional** — Framework detection (React/Vue/Angular) in `analyzePage` is now disabled by default for better performance
+  - Added `detectFrameworks: false` (default) parameter to `analyzePage` tool
+  - Set to `true` only when framework info is needed
+  - Improves analysis speed on large pages by skipping framework detection
+  - Prevents potential errors from accessing framework internals
+
+## [3.1.9] - 2026-01-27
+
+### Added
+- **Framework detection in analyzePage** — Added detection and metadata for React, Vue, and Angular frameworks
+  - Detects React elements via `__react*` internal properties
+  - Detects Vue elements via `__vue*` internal properties
+  - Detects Angular elements via `_ngcontent-*`, `_nghost-*`, `ng-reflect-*` attributes
+  - Angular detection includes version from `ng-version` attribute when present
+  - Framework info added to element metadata as `framework` field
+
+### Changed
+- **Improved CSS selector stability** — Enhanced selector generation to exclude framework-specific dynamic attributes
+  - Filters out React CSS Modules patterns (e.g., `component-abc123`)
+  - Filters out Styled Components patterns (e.g., `sc-abc-xyz`)
+  - Filters out Emotion CSS patterns (e.g., `css-abc123`)
+  - Filters out Vue scoped style patterns (e.g., `data-v-12345678`)
+  - Filters out Angular dynamic classes (e.g., `_ng*`)
+  - Prefers stable class names for more reliable selectors across page loads
+
 ## [3.1.8] - 2026-01-27
 
 ### Changed

@@ -10,9 +10,10 @@
  * Runs in browser context via page.evaluate()
  *
  * @param {boolean} interactiveOnly - Only include interactive elements and their parents
+ * @param {boolean} detectFrameworks - Detect UI frameworks (React/Vue/Angular) - can be slow on large pages
  * @returns {Object} APOM tree structure
  */
-function buildAPOMTree(interactiveOnly = true) {
+function buildAPOMTree(interactiveOnly = true, detectFrameworks = false) {
   const pageId = `page_${btoa(window.location.href).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}_${Date.now()}`;
 
   const result = {
@@ -102,6 +103,35 @@ function buildAPOMTree(interactiveOnly = true) {
   }
 
   /**
+   * Check if cursor:pointer is explicitly set (not inherited)
+   */
+  function hasCursorPointerExplicit(element) {
+    const computedStyle = window.getComputedStyle(element);
+    if (computedStyle.cursor !== 'pointer') {
+      return false;
+    }
+
+    // Check if cursor is set via inline style
+    if (element.style.cursor === 'pointer') {
+      return true;
+    }
+
+    // Check if cursor is set via CSS class or direct CSS rule (not inherited)
+    // If parent also has cursor:pointer computed, then it's likely inherited
+    const parent = element.parentElement;
+    if (parent) {
+      const parentStyle = window.getComputedStyle(parent);
+      if (parentStyle.cursor === 'pointer') {
+        // Parent has cursor:pointer, so this is inherited
+        return false;
+      }
+    }
+
+    // Element has cursor:pointer but parent doesn't - it's explicitly set
+    return true;
+  }
+
+  /**
    * Mark interactive elements and their ancestors
    * NOTE: This function is defined before checkInteractivity,
    * so we need to inline the checks or move function definitions
@@ -125,8 +155,8 @@ function buildAPOMTree(interactiveOnly = true) {
         el.hasAttribute('onclick') ||
         // onclick property
         (el.onclick !== null && el.onclick !== undefined) ||
-        // cursor: pointer
-        window.getComputedStyle(el).cursor === 'pointer' ||
+        // cursor: pointer (only if explicitly set, not inherited)
+        hasCursorPointerExplicit(el) ||
         // tabindex (except -1)
         (el.hasAttribute('tabindex') && el.getAttribute('tabindex') !== '-1') ||
         // contenteditable
@@ -178,8 +208,9 @@ function buildAPOMTree(interactiveOnly = true) {
       return null;
     }
 
-    // Generate unique ID
+    // Generate unique ID and CSS selector
     const id = generateElementId(element);
+    const selector = generateSelector(element);
     elementIds.set(element, id);
 
     const currentPath = [...path, id];
@@ -193,26 +224,24 @@ function buildAPOMTree(interactiveOnly = true) {
     // Build node - minimize non-interactive parents
     const isInteractive = elementType.isInteractive;
 
-    const node = {
+    // For non-interactive parent elements, keep it minimal (only tag, id, and selector)
+    const node = isInteractive ? {
       id,
       tag: element.tagName.toLowerCase(),
-      selector: generateSelector(element),
+      selector,
       position,
+      type: elementType.type,
+      children: []
+    } : {
+      id,
+      tag: element.tagName.toLowerCase(),
+      selector,
       children: []
     };
 
-    // Add full info only for interactive elements
-    if (isInteractive) {
-      node.type = elementType.type;
-      node.bounds = getBounds(element);
-
-      // Add metadata based on element type
-      if (elementType.metadata) {
-        node.metadata = elementType.metadata;
-      }
-    } else {
-      // For containers (parents), keep it minimal
-      node.type = elementType.type;
+    // Add metadata only for interactive elements
+    if (isInteractive && elementType.metadata) {
+      node.metadata = elementType.metadata;
     }
 
     // Update metadata counters
@@ -353,9 +382,8 @@ function buildAPOMTree(interactiveOnly = true) {
       return { isInteractive: true, reason: 'onclick-prop' };
     }
 
-    // 5. Elements with cursor: pointer
-    const computedStyle = window.getComputedStyle(element);
-    if (computedStyle.cursor === 'pointer') {
+    // 5. Elements with cursor: pointer (only if explicitly set, not inherited)
+    if (hasCursorPointerExplicit(element)) {
       return { isInteractive: true, reason: 'cursor-pointer' };
     }
 
@@ -379,6 +407,48 @@ function buildAPOMTree(interactiveOnly = true) {
   }
 
   /**
+   * Detect framework-specific attributes on element
+   * Returns framework info or null
+   */
+  function detectFramework(element) {
+    // Check for React
+    const reactKeys = Object.keys(element).filter(key =>
+      key.startsWith('__react') || key.startsWith('_react')
+    );
+    if (reactKeys.length > 0) {
+      return { name: 'react', version: null };
+    }
+
+    // Check for Vue
+    const vueKeys = Object.keys(element).filter(key =>
+      key.startsWith('__vue') || key.startsWith('_vue')
+    );
+    if (vueKeys.length > 0) {
+      return { name: 'vue', version: null };
+    }
+
+    // Check for Angular
+    const attributes = element.getAttributeNames();
+    const angularAttrs = attributes.filter(attr =>
+      attr.startsWith('_ngcontent-') ||
+      attr.startsWith('_nghost-') ||
+      attr.startsWith('ng-reflect-') ||
+      attr === 'ng-version'
+    );
+
+    if (angularAttrs.length > 0) {
+      const ngVersion = element.getAttribute('ng-version');
+      return {
+        name: 'angular',
+        version: ngVersion || null,
+        attributes: angularAttrs.length > 0 ? angularAttrs.slice(0, 3) : undefined // Limit to 3 for brevity
+      };
+    }
+
+    return null;
+  }
+
+  /**
    * Determine element type and metadata
    */
   function determineElementType(element) {
@@ -386,16 +456,26 @@ function buildAPOMTree(interactiveOnly = true) {
     const type = element.type?.toLowerCase();
     const role = element.getAttribute('role');
 
+    // Detect framework-specific attributes (optional - can be slow)
+    const frameworkInfo = detectFrameworks ? detectFramework(element) : null;
+
     // Form
     if (tag === 'form') {
+      const metadata = {
+        method: element.method?.toUpperCase() || 'GET',
+        action: element.action || '',
+        name: element.name || null
+      };
+
+      // Add framework info if detected
+      if (frameworkInfo) {
+        metadata.framework = frameworkInfo;
+      }
+
       return {
         type: 'form',
         isInteractive: true,
-        metadata: {
-          method: element.method?.toUpperCase() || 'GET',
-          action: element.action || '',
-          name: element.name || null
-        }
+        metadata
       };
     }
 
@@ -562,11 +642,25 @@ function buildAPOMTree(interactiveOnly = true) {
 
   /**
    * Generate unique CSS selector
+   * Excludes framework-specific dynamic attributes (React, Vue, Angular)
    */
   function generateSelector(element) {
     // Use ID if available and unique
     if (element.id && document.querySelectorAll(`#${element.id}`).length === 1) {
       return `#${element.id}`;
+    }
+
+    // Try to find stable class name (excluding framework-specific dynamic classes)
+    const stableClass = getStableClassName(element);
+    if (stableClass) {
+      const classSelector = `.${stableClass}`;
+      // Verify it's unique within parent context
+      if (element.parentElement) {
+        const matches = element.parentElement.querySelectorAll(classSelector);
+        if (matches.length === 1 && matches[0] === element) {
+          return classSelector;
+        }
+      }
     }
 
     // Build path from parent
@@ -575,6 +669,12 @@ function buildAPOMTree(interactiveOnly = true) {
 
     while (current && current !== document.body) {
       let selector = current.tagName.toLowerCase();
+
+      // Add stable class if available
+      const stableClass = getStableClassName(current);
+      if (stableClass) {
+        selector += `.${stableClass}`;
+      }
 
       // Add nth-of-type if needed
       if (current.parentElement) {
@@ -592,6 +692,39 @@ function buildAPOMTree(interactiveOnly = true) {
     }
 
     return path.join(' > ');
+  }
+
+  /**
+   * Get stable class name excluding framework-specific dynamic classes
+   * Returns first stable class or null
+   */
+  function getStableClassName(element) {
+    if (!element.className || typeof element.className !== 'string') {
+      return null;
+    }
+
+    const classes = element.className.split(/\s+/).filter(c => c);
+
+    // Filter out framework-specific classes
+    const stableClasses = classes.filter(className => {
+      // React: CSS Modules, Styled Components, Emotion
+      if (/^[a-zA-Z0-9_-]+-[a-zA-Z0-9_-]{5,}$/.test(className)) return false;
+      if (/^css-[a-z0-9]+(-[a-z0-9]+)?$/i.test(className)) return false;
+      if (/^sc-[a-z0-9]+-[a-z0-9]+$/i.test(className)) return false;
+
+      // Vue: scoped styles
+      if (/^data-v-[a-f0-9]{8}$/i.test(className)) return false;
+
+      // Angular: component styles (no classes starting with _ng)
+      if (/^_ng/.test(className)) return false;
+
+      // Generic hash patterns
+      if (/^[a-z0-9]{32,}$/i.test(className)) return false;
+
+      return true;
+    });
+
+    return stableClasses.length > 0 ? stableClasses[0] : null;
   }
 }
 
