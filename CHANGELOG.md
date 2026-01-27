@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.3] - 2026-01-27
+
+### Removed
+- **Reverted experimental features** — Removed `resolveComponentPaths` and `detectFrameworks` due to technical limitations
+  - Component path resolution was unreliable across different build configurations
+  - Framework detection removed from analyzePage tool
+  - Simplified codebase and improved performance
+
 ## [3.2.2] - 2026-01-27
 
 ### Fixed
