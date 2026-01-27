@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.3] - 2026-01-27
+
+### Changed
+- **README.md installation section reorganization** — Improved installation documentation
+  - Moved Installation section to the top for better visibility
+  - Added Claude Code (CLI) installation with `claude mcp add chrometools-mcp` command
+  - Separated installation instructions by client type (Claude Code, Claude Desktop, Cursor, Antigravity, Other MCP Clients)
+  - Added detailed step-by-step instructions for Cursor IDE (MCP Settings via Command Palette)
+  - Added detailed step-by-step instructions for Google Antigravity (MCP Store → Manage → View raw config)
+  - Added configuration file paths for Claude Desktop (macOS/Linux/Windows)
+  - Added notes about Antigravity's 100-tool limit and optimal configuration
+  - Removed duplicate Installation/Usage sections
+
 ## [3.1.2] - 2026-01-26
 
 ### Added

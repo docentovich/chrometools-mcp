@@ -2,10 +2,116 @@
 
 MCP server for Chrome automation using Puppeteer with persistent browser sessions.
 
+## Installation
+
+### Claude Code (CLI)
+
+The easiest way to install for Claude Code users:
+
+```bash
+claude mcp add chrometools-mcp
+```
+
+This command will automatically configure the MCP server in your Claude Code settings.
+
+### Claude Desktop
+
+Add to your Claude Desktop configuration file:
+
+**macOS/Linux:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "chrometools": {
+      "command": "npx",
+      "args": ["-y", "chrometools-mcp"]
+    }
+  }
+}
+```
+
+### Cursor
+
+**Step 1:** Open MCP Settings
+- Press `Cmd + Shift + P` (Mac) or `Ctrl + Shift + P` (Windows/Linux)
+- Search for "MCP" and select **"View: Open MCP Settings"**
+
+**Step 2:** Choose configuration scope:
+- **Global** (all projects): Edit `~/.cursor/mcp.json`
+- **Project-specific**: Create `.cursor/mcp.json` in your project root
+
+**Step 3:** Add chrometools-mcp configuration:
+
+```json
+{
+  "mcpServers": {
+    "chrometools": {
+      "command": "npx",
+      "args": ["-y", "chrometools-mcp"]
+    }
+  }
+}
+```
+
+**Step 4:** Restart Cursor to apply changes
+
+### Google Antigravity
+
+**Step 1:** Open Agent session in Antigravity
+
+**Step 2:** Click the "**…**" dropdown at the top of the editor's side panel
+
+**Step 3:** Select **"MCP Servers"** to open the MCP Store
+
+**Step 4:** Click **"Manage MCP Servers"** at the top of the MCP Store
+
+**Step 5:** Click **"View raw config"** in the main tab
+
+**Step 6:** Edit `mcp_config.json` (located in `~/.gemini/antigravity/` directory):
+
+```json
+{
+  "mcpServers": {
+    "chrometools": {
+      "command": "npx",
+      "args": ["-y", "chrometools-mcp"]
+    }
+  }
+}
+```
+
+**Step 7:** Save the file and restart Antigravity
+
+**Note:** Antigravity has a limit of ~100 tools per session. If you have many MCP servers installed, consider reducing the number of active tools to ~25 for optimal performance.
+
+### Other MCP Clients
+
+For Cline, Continue, or other MCP-compatible clients, add to your MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "chrometools": {
+      "command": "npx",
+      "args": ["-y", "chrometools-mcp"]
+    }
+  }
+}
+```
+
+### Manual Installation
+
+You can also run directly without configuration:
+
+```bash
+npx -y chrometools-mcp
+```
+
 ## Table of Contents
 
 - [Installation](#installation)
-- [Usage](#usage)
 - [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
 - [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
 - [Available Tools](#available-tools) - **46+ Tools Total**
@@ -24,27 +130,6 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 - [Development](#development)
 - [Features](#features)
 - [Architecture](#architecture)
-
-## Installation
-
-```bash
-npx -y chrometools-mcp
-```
-
-## Usage
-
-Add to your MCP client configuration (e.g., Claude Desktop):
-
-```json
-{
-  "mcpServers": {
-    "chrometools": {
-      "command": "npx",
-      "args": ["-y", "chrometools-mcp"]
-    }
-  }
-}
-```
 
 ## AI Optimization Features
 
