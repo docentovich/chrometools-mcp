@@ -195,20 +195,19 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 
 - [Installation](#installation)
   - [Chrome Extension Setup](#chrome-extension-setup)
-- [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
-- [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
+- [AI Optimization Features](#ai-optimization-features)- [Scenario Recorder](#scenario-recorder)  - Visual UI-based recording with smart optimization
 - [Available Tools](#available-tools) - **46+ Tools Total**
-  - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getElementDetails, getAllInteractiveElements, findElementsByText
+  - [AI-Powered Tools](#ai-powered-tools)  - smartFindElement, analyzePage, getElementDetails, getAllInteractiveElements, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
-  - [Tab Management Tools](#5-tab-management-tools) ⭐ **NEW** - listTabs, switchTab
-  - [Recorder Tools](#7-recorder-tools) ⭐ **NEW** - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
+  - [Tab Management Tools](#5-tab-management-tools)  - listTabs, switchTab
+  - [Recorder Tools](#7-recorder-tools)  - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
-- [Multi-Instance Support](#multi-instance-support) ⭐ **NEW** - Run multiple MCP servers simultaneously
+- [Multi-Instance Support](#multi-instance-support)  - Run multiple MCP servers simultaneously
 - [WSL Setup Guide](#wsl-setup-guide) → [Full WSL Guide](WSL_SETUP.md)
 - [Development](#development)
 - [Features](#features)
@@ -216,7 +215,7 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 
 ## AI Optimization Features
 
-⭐ **NEW**: Dramatically reduce AI agent request cycles with intelligent element finding and page analysis.
+: Dramatically reduce AI agent request cycles with intelligent element finding and page analysis.
 
 ### Why This Matters
 
@@ -252,22 +251,17 @@ AI: smartFindElement("login button")
 
 ## Scenario Recorder
 
-⭐ **NEW**: Visual UI-based recorder for creating reusable test scenarios with automatic secret detection.
+: Visual UI-based recorder for creating reusable test scenarios with automatic secret detection.
 
 ### Features
 
 - **Visual Widget** - Floating recorder UI with compact mode (50x50px minimize button)
-- **Auto-Reinjection** - Recorder persists across page reloads/navigation automatically with duplicate prevention ⭐ **IMPROVED**
-- **Smart Click Detection** - Finds actual clickable parent elements with event listeners ⭐ **NEW**
-- **Smart Waiters** - 2s minimum + animation/network/DOM change detection after clicks ⭐ **NEW**
-- **Detailed Error Reports** - Comprehensive failure analysis with context and suggestions ⭐ **NEW**
-- **Smart Recording** - Captures clicks, typing, navigation with intelligent optimization
+- **Auto-Reinjection** - Recorder persists across page reloads/navigation automatically with duplicate prevention - **Smart Click Detection** - Finds actual clickable parent elements with event listeners- **Smart Waiters** - 2s minimum + animation/network/DOM change detection after clicks- **Detailed Error Reports** - Comprehensive failure analysis with context and suggestions- **Smart Recording** - Captures clicks, typing, navigation with intelligent optimization
 - **Secret Detection** - Auto-detects passwords/emails and stores them securely
 - **Action Optimization** - Combines sequential actions, removes duplicates
 - **Scenario Management** - Save, load, execute, search, and delete scenarios
 - **Dependencies** - Chain scenarios together with dependency resolution
-- **Multi-Instance Protection** - Prevents multiple recorder instances from interfering ⭐ **NEW**
-
+- **Multi-Instance Protection** - Prevents multiple recorder instances from interfering
 ### Quick Start
 
 ```javascript
@@ -318,8 +312,7 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
 
 ### AI-Powered Tools
 
-#### smartFindElement ⭐
-Find elements using natural language descriptions instead of CSS selectors.
+#### smartFindElementFind elements using natural language descriptions instead of CSS selectors.
 - **Parameters**:
   - `description` (required): Natural language (e.g., "login button", "email field")
   - `maxResults` (optional): Max candidates to return (default: 5)
@@ -343,10 +336,9 @@ Find elements using natural language descriptions instead of CSS selectors.
   }
   ```
 
-#### analyzePage ⭐ **USE FREQUENTLY**
-Get current page state and structure. Returns complete map of forms (with values), inputs, buttons, links with selectors.
+#### analyzePage Get current page state and structure. Returns complete map of forms (with values), inputs, buttons, links with selectors.
 
-**Enhanced Interactivity Detection** ⭐ **NEW** (v3.1.8):
+**Enhanced Interactivity Detection**  (v3.1.8):
 - Detects interactive elements via **8 different methods**:
   1. Native HTML tags (`button`, `a`, `input`, `select`, `textarea`)
   2. ARIA roles (`button`, `link`, `checkbox`, etc.)
@@ -370,17 +362,12 @@ Get current page state and structure. Returns complete map of forms (with values
   - `refresh` (optional): Force refresh cache to get CURRENT state after changes (default: false)
   - `includeAll` (optional): Include ALL page elements, not just interactive ones (default: false). Useful for layout work - find any element, get its selector, then use `getComputedCss` or `setStyles` on it.
   - `useLegacyFormat` (optional): Return legacy format instead of APOM (default: false - **APOM is now the default**) 🔄 **BREAKING CHANGE**
-  - `registerElements` (optional): Auto-register elements for ID-based usage (default: true) ⭐ **APOM**
-  - `groupBy` (optional): 'type' or 'flat' - how to group elements (default: 'type') ⭐ **APOM**
-- **Why better than screenshot**:
+  - `registerElements` (optional): Auto-register elements for ID-based usage (default: true)   - `groupBy` (optional): 'type' or 'flat' - how to group elements (default: 'type') - **Why better than screenshot**:
   - Shows actual data (form values, validation errors) not just visual
   - Uses 2-5k tokens vs screenshot 15-25k tokens
   - Returns structured data with **unique element IDs** for easy interaction
-  - **Detects UI frameworks** (MUI, Ant Design, Chakra, Bootstrap, Vuetify, Semantic UI) ⭐
-  - **Extracts dropdown options** from both native `<select>` and custom UI components ⭐
-- **Returns**:
-  - **APOM format** (default): Tree-structured Page Object Model with unique IDs ⭐ **NOW DEFAULT**
-    - `tree` - Hierarchical tree of page elements (optimized: ~82% smaller than flat format)
+  - **Detects UI frameworks** (MUI, Ant Design, Chakra, Bootstrap, Vuetify, Semantic UI)  - **Extracts dropdown options** from both native `<select>` and custom UI components- **Returns**:
+  - **APOM format** (default): Tree-structured Page Object Model with unique IDs     - `tree` - Hierarchical tree of page elements (optimized: ~82% smaller than flat format)
       - Each node: `{ tag, id?, type?, sel, ch?, bounds?, meta? }`
       - Interactive elements have `bounds` and full metadata
       - Parent containers have minimal info (position only)
@@ -392,9 +379,7 @@ Get current page state and structure. Returns complete map of forms (with values
   - **Use `getElementDetails({ id: "input_20" })`** to get full details for any element, or with `analyzeChildren: true` to get children tree structure
   - **Legacy format** (`useLegacyFormat: true`): Classic format for backward compatibility
     - Complete map of forms (with current values), inputs, buttons, links, navigation with selectors
-    - **Each element includes `uiFramework` info** (name, version, component type) ⭐
-    - **Select elements include `options` array** with value, text, index, selected, disabled, group ⭐
-    - With `includeAll: true`: Also includes `allElements` array with ALL visible page elements (divs, spans, headings, etc.) - each with selector, tag, text, classes, id
+    - **Each element includes `uiFramework` info** (name, version, component type)    - **Select elements include `options` array** with value, text, index, selected, disabled, group    - With `includeAll: true`: Also includes `allElements` array with ALL visible page elements (divs, spans, headings, etc.) - each with selector, tag, text, classes, id
 - **Example workflow**:
   1. `openBrowser({ url: "..." })`
   2. `analyzePage()` ← Initial analysis, returns elements with IDs
@@ -407,8 +392,7 @@ Get current page state and structure. Returns complete map of forms (with values
   3. `getComputedCss({ selector: "div.header" })` ← Get current styles
   4. `setStyles({ selector: "div.header", styles: [...] })` ← Apply new styles
 
-#### getElementDetails ⭐ **NEW**
-Get comprehensive details about a specific element by its APOM ID. Can optionally analyze children elements tree structure. Use when `analyzePage` output is simplified and you need complete element information or want to focus analysis on a specific section.
+#### getElementDetailsGet comprehensive details about a specific element by its APOM ID. Can optionally analyze children elements tree structure. Use when `analyzePage` output is simplified and you need complete element information or want to focus analysis on a specific section.
 - **Parameters**:
   - `id` (required): APOM element ID (e.g., `"input_20"`, `"button_45"`)
   - `analyzeChildren` (optional): Analyze children elements tree structure (default: false)
@@ -555,8 +539,7 @@ Select option in dropdown (HTML select elements). **PREFERRED**: Use APOM ID fro
   selectOption({ selector: "select[name='country']", text: "United States" })
   ```
 
-#### selectFromGroup ⭐ **NEW**
-Select option(s) from radio or checkbox group by name attribute. Works at abstract group level instead of individual clicks.
+#### selectFromGroupSelect option(s) from radio or checkbox group by name attribute. Works at abstract group level instead of individual clicks.
 - **Parameters**:
   - `name` (required): Name attribute of the radio/checkbox group (e.g., 'size', 'toppings')
   - `value` (optional): Single value to select (for radio or single checkbox)
@@ -779,8 +762,7 @@ Navigate to different URL while keeping browser instance.
 - **Use case**: Moving between pages in workflow
 - **Returns**: New page title
 
-### 5. Tab Management Tools ⭐ NEW
-
+### 5. Tab Management Tools 
 Tools for managing multiple browser tabs. New tabs opened via `window.open()`, `target="_blank"`, or user actions are automatically detected and tracked.
 
 #### listTabs
@@ -821,12 +803,10 @@ switchTab({ tab: 0 })
 switchTab({ tab: "google.com" })
 ```
 
-### 6. Figma Tools ⭐ ENHANCED
-
+### 6. Figma Tools 
 Design-to-code validation, file browsing, design system extraction, and comparison tools with automatic 3 MB compression.
 
-#### parseFigmaUrl ⭐ NEW
-Parse Figma URL to extract fileKey and nodeId automatically.
+#### parseFigmaUrl Parse Figma URL to extract fileKey and nodeId automatically.
 - **Parameters**:
   - `url` (required): Full Figma URL or just fileKey
 - **Supported formats**:
@@ -836,8 +816,7 @@ Parse Figma URL to extract fileKey and nodeId automatically.
 - **Use case**: No need to manually extract fileKey and nodeId from URLs
 - **Returns**: `{ fileKey, nodeId }` object
 
-#### listFigmaPages ⭐ NEW
-Browse entire Figma file structure: all pages and frames with IDs.
+#### listFigmaPages Browse entire Figma file structure: all pages and frames with IDs.
 - **Parameters**:
   - `figmaToken` (optional): Figma API token
   - `fileKey` (required): Figma file key or full URL
@@ -863,8 +842,7 @@ Browse entire Figma file structure: all pages and frames with IDs.
   }
   ```
 
-#### searchFigmaFrames ⭐ NEW
-Search frames/components by name across entire Figma file.
+#### searchFigmaFrames Search frames/components by name across entire Figma file.
 - **Parameters**:
   - `figmaToken` (optional): Figma API token
   - `fileKey` (required): Figma file key or full URL
@@ -873,16 +851,14 @@ Search frames/components by name across entire Figma file.
 - **Returns**: All matching nodes with IDs, names, types, pages, dimensions
 - **Example**: Search for "login" returns all frames containing "login" in name
 
-#### getFigmaComponents ⭐ NEW
-Extract all components from Figma file (Design System).
+#### getFigmaComponents Extract all components from Figma file (Design System).
 - **Parameters**:
   - `figmaToken` (optional): Figma API token
   - `fileKey` (required): Figma file key or full URL
 - **Use case**: Get complete list of design system components
 - **Returns**: All COMPONENT and COMPONENT_SET nodes with names, descriptions, dimensions
 
-#### getFigmaStyles ⭐ NEW
-Get all shared styles from Figma file (color, text, effect, grid styles).
+#### getFigmaStyles Get all shared styles from Figma file (color, text, effect, grid styles).
 - **Parameters**:
   - `figmaToken` (optional): Figma API token
   - `fileKey` (required): Figma file key or full URL
@@ -893,8 +869,7 @@ Get all shared styles from Figma file (color, text, effect, grid styles).
   - Effect styles (shadows, blur)
   - Grid styles
 
-#### getFigmaColorPalette ⭐ NEW
-Extract complete color palette with usage statistics.
+#### getFigmaColorPalette Extract complete color palette with usage statistics.
 - **Parameters**:
   - `figmaToken` (optional): Figma API token
   - `fileKey` (required): Figma file key or full URL
@@ -905,8 +880,7 @@ Extract complete color palette with usage statistics.
   - Usage examples (where the color is used)
   - Sorted by usage frequency
 
-#### convertFigmaToCode ⭐ NEW
-Convert Figma designs to React/Tailwind code with AI assistance.
+#### convertFigmaToCode Convert Figma designs to React/Tailwind code with AI assistance.
 - **Parameters**:
   - `figmaToken` (optional): Figma API token
   - `fileKey` (required): Figma file key
@@ -967,8 +941,7 @@ Extract detailed design specifications from Figma including text content, colors
   - **Dimensions**: Width, height, x, y coordinates
   - **Children**: Recursive tree with text extraction from all child elements
 
-### 7. Recorder Tools ⭐ NEW
-
+### 7. Recorder Tools 
 **URL-Based Storage (v2.1+)**: Scenarios are automatically organized by website domain in `~/.config/chrometools-mcp/projects/{domain}/scenarios/`.
 
 **Automatic Domain Detection**: Project ID is extracted from the URL where recording starts:
@@ -1112,8 +1085,7 @@ Delete a scenario and its associated secrets. Searches all projects to find the 
 - **Use case**: Clean up unused scenarios
 - **Returns**: Success confirmation
 
-#### exportScenarioAsCode ⭐ **NEW**
-Export recorded scenario as executable test code for creating a **NEW** test file. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Optionally generates Page Object class. Returns JSON with code and suggested filename - Claude Code will create the file. To add tests to **EXISTING** files, use `appendScenarioToFile` instead.
+#### exportScenarioAsCodeExport recorded scenario as executable test code for creating a **NEW** test file. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Optionally generates Page Object class. Returns JSON with code and suggested filename - Claude Code will create the file. To add tests to **EXISTING** files, use `appendScenarioToFile` instead.
 
 - **Parameters**:
   - `scenarioName` (required): Name of scenario to export
@@ -1181,7 +1153,7 @@ Export recorded scenario as executable test code for creating a **NEW** test fil
   - Hash suffixes: `component_a1b2c3d` → removed
   - Prefers stable selectors: `data-testid`, `role`, `aria-label`, semantic attributes
 
-#### appendScenarioToFile ⭐ **NEW v2.3.0**
+#### appendScenarioToFile
 Append recorded scenario as test code to an **EXISTING** test file. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Optionally generates Page Object class. Returns JSON with test code (without imports) - Claude Code will read the file, append the test, and write back. To create **NEW** test files, use `exportScenarioAsCode` instead.
 
 - **Parameters**:
@@ -1273,8 +1245,7 @@ Append recorded scenario as test code to an **EXISTING** test file. Automaticall
   }
   ```
 
-#### generatePageObject ⭐ **NEW**
-Generate Page Object Model (POM) class from current page structure. Analyzes page, extracts interactive elements, and generates framework-specific code with smart naming and helper methods.
+#### generatePageObjectGenerate Page Object Model (POM) class from current page structure. Analyzes page, extracts interactive elements, and generates framework-specific code with smart naming and helper methods.
 
 - **Parameters**:
   - `className` (optional): Page Object class name (auto-generated from page title/URL if not provided)
@@ -1632,25 +1603,19 @@ npx @modelcontextprotocol/inspector node index.js
   - Interaction: click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
   - Inspection: getElement, getComputedCss, getBoxModel, screenshot, saveScreenshot
   - Advanced: executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo, waitForElement
-  - AI-Powered: smartFindElement, analyzePage, getElementDetails (with children analysis), getAllInteractiveElements, findElementsByText ⭐ **NEW**
-  - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
+  - AI-Powered: smartFindElement, analyzePage, getElementDetails (with children analysis), getAllInteractiveElements, findElementsByText  - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
   - Figma: getFigmaFrame, compareFigmaToElement, getFigmaSpecs, parseFigmaUrl, listFigmaPages, searchFigmaFrames, getFigmaComponents, getFigmaStyles, getFigmaColorPalette, convertFigmaToCode
-- **UI Framework Detection**: Automatic detection of MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI ⭐ **NEW**
-- **Smart Dropdown Handling**: Extracts options from both native `<select>` and custom UI framework components ⭐ **NEW**
-- **APOM (Agent Page Object Model)**: Automatic element ID assignment for reliable interaction ⭐ **NEW**
-  - `analyzePage()` returns elements with unique IDs (e.g., `input_20`, `button_45`)
+- **UI Framework Detection**: Automatic detection of MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI- **Smart Dropdown Handling**: Extracts options from both native `<select>` and custom UI framework components- **APOM (Agent Page Object Model)**: Automatic element ID assignment for reliable interaction  - `analyzePage()` returns elements with unique IDs (e.g., `input_20`, `button_45`)
   - Use `id` parameter in click/type/hover/selectOption for stable targeting
   - Use `getElementDetails()` to get detailed element info
 - **Console Log Capture**: Automatic JavaScript console monitoring
 - **Network Request Monitoring**: Track all HTTP/API requests (XHR, Fetch, etc.)
 - **Persistent Browser Sessions**: Browser tabs remain open between requests
-- **Multi-Instance Support**: Run multiple MCP servers simultaneously with automatic discovery ⭐ **NEW**
-  - Dynamic port allocation (9223-9227)
+- **Multi-Instance Support**: Run multiple MCP servers simultaneously with automatic discovery  - Dynamic port allocation (9223-9227)
   - Chrome Extension port scanning every 20s
   - Broadcast pattern for parallel AI clients
   - Graceful handling of ungraceful shutdowns
-- **Auto-Sync Active Tab**: MCP server automatically syncs to user's currently active tab ⭐ **NEW**
-- **Visual Browser (GUI Mode)**: See automation in real-time
+- **Auto-Sync Active Tab**: MCP server automatically syncs to user's currently active tab- **Visual Browser (GUI Mode)**: See automation in real-time
 - **Cross-platform**: Works on Windows/WSL, Linux, macOS
 - **Simple Installation**: One command with npx
 - **CDP Integration**: Uses Chrome DevTools Protocol for precision
@@ -1659,7 +1624,7 @@ npx @modelcontextprotocol/inspector node index.js
 
 ## Multi-Instance Support
 
-⭐ **NEW**: Run up to 8 MCP servers simultaneously, connecting/disconnecting at any time without coordination.
+: Run up to 8 MCP servers simultaneously, connecting/disconnecting at any time without coordination.
 
 ### Overview
 
