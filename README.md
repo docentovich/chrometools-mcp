@@ -147,28 +147,39 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 - Open Chrome Extensions page: `chrome://extensions`
 - Toggle **Developer mode** (switch in top-right corner)
 
-**Step 3:** Load the Extension
-- Click **"Load unpacked"** button
-- Navigate to the ChromeTools extension directory:
-  - **After npx install:** `~/.npm/_npx/.../node_modules/chrometools-mcp/chrome-extension`
-  - **After global install:** `<npm-global-path>/node_modules/chrometools-mcp/chrome-extension`
-  - **From source:** `<repo-path>/chrome-extension`
-- Select the `chrome-extension` folder and click **"Select Folder"**
+**Step 3:** Download and Extract the Extension
 
-**Step 4:** Verify Installation
+**Option A - Download from GitHub (Recommended):**
+1. Download the extension archive: [chrome-extension.zip](https://github.com/modelcontextprotocol/servers/raw/main/src/chrometools/chrome-extension.zip)
+2. Extract the ZIP file to a folder on your computer
+3. Remember the extraction path (you'll need it in the next step)
+
+**Option B - Use from node_modules (if you know the path):**
+- **After npx install:** `~/.npm/_npx/.../node_modules/chrometools-mcp/extension`
+- **After global install:** `<npm-global-path>/node_modules/chrometools-mcp/extension`
+- **From source:** `<repo-path>/extension`
+
+**Step 4:** Load the Extension
+- Click **"Load unpacked"** button
+- Navigate to the extracted extension folder (from Step 3)
+- Select the folder and click **"Select Folder"**
+
+**Step 5:** Verify Installation
 - You should see "ChromeTools MCP" extension appear in your extensions list
 - Look for the ChromeTools icon (CT) in your Chrome toolbar
 - The extension is now ready to use for scenario recording
 
-**Step 5:** Pin the Extension (Optional but Recommended)
+**Step 6:** Pin the Extension (Optional but Recommended)
 - Click the puzzle piece icon in Chrome toolbar
 - Find "ChromeTools MCP" in the list
 - Click the pin icon to keep it visible in toolbar
 
 **Troubleshooting:**
-- If you can't find the extension folder after `npx` install, run `npm list -g chrometools-mcp` to find the installation path
+- **Recommended:** Use Option A (download from GitHub) to avoid searching in node_modules
+- If using Option B and can't find the extension folder after `npx` install, run `npm list -g chrometools-mcp` to find the installation path
 - The extension only works with Chrome instances launched by ChromeTools
 - If Chrome closes and reopens, the extension should still be loaded (developer mode persists)
+- When ChromeTools first opens Chrome, it automatically shows a prompt with the extension path in node_modules
 
 ## Table of Contents
 
