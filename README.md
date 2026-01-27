@@ -9,7 +9,7 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 The easiest way to install for Claude Code users:
 
 ```bash
-claude mcp add chrometools -- npx -y chrometools-mcp
+claude mcp add chrometools -- npx chrometools-mcp
 ```
 
 This command will automatically configure the MCP server in your Claude Code settings.
@@ -26,7 +26,7 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "chrometools": {
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"]
+      "args": ["chrometools-mcp"]
     }
   }
 }
@@ -47,7 +47,7 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "chrometools": {
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"]
+      "args": ["chrometools-mcp"]
     }
   }
 }
@@ -64,7 +64,7 @@ Add to your Claude Desktop configuration file:
     },
     "chrometools": {
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"]
+      "args": ["chrometools-mcp"]
     }
   }
 }
@@ -99,7 +99,7 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "chrometools": {
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"]
+      "args": ["chrometools-mcp"]
     }
   }
 }
@@ -118,7 +118,7 @@ For Cline, Continue, or other MCP-compatible clients, add to your MCP configurat
   "mcpServers": {
     "chrometools": {
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"]
+      "args": ["chrometools-mcp"]
     }
   }
 }
@@ -129,12 +129,51 @@ For Cline, Continue, or other MCP-compatible clients, add to your MCP configurat
 You can also run directly without configuration:
 
 ```bash
-npx -y chrometools-mcp
+npx chrometools-mcp
 ```
+
+### Chrome Extension Setup
+
+The Chrome Extension is **required** for scenario recording and other advanced features. Follow these steps to install it:
+
+**Important:** ChromeTools opens Chrome with a separate user profile, so you must install the extension **after** ChromeTools starts Chrome for the first time.
+
+**Step 1:** Start ChromeTools MCP server first
+- Make sure ChromeTools is running through your MCP client (Claude Desktop, Cursor, etc.)
+- Or run it manually: `npx chrometools-mcp`
+- This will launch Chrome with ChromeTools' isolated profile
+
+**Step 2:** Enable Developer Mode in Chrome
+- Open Chrome Extensions page: `chrome://extensions`
+- Toggle **Developer mode** (switch in top-right corner)
+
+**Step 3:** Load the Extension
+- Click **"Load unpacked"** button
+- Navigate to the ChromeTools extension directory:
+  - **After npx install:** `~/.npm/_npx/.../node_modules/chrometools-mcp/chrome-extension`
+  - **After global install:** `<npm-global-path>/node_modules/chrometools-mcp/chrome-extension`
+  - **From source:** `<repo-path>/chrome-extension`
+- Select the `chrome-extension` folder and click **"Select Folder"**
+
+**Step 4:** Verify Installation
+- You should see "ChromeTools MCP" extension appear in your extensions list
+- Look for the ChromeTools icon (CT) in your Chrome toolbar
+- The extension is now ready to use for scenario recording
+
+**Step 5:** Pin the Extension (Optional but Recommended)
+- Click the puzzle piece icon in Chrome toolbar
+- Find "ChromeTools MCP" in the list
+- Click the pin icon to keep it visible in toolbar
+
+**Troubleshooting:**
+- If you can't find the extension folder after `npx` install, run `npm list -g chrometools-mcp` to find the installation path
+- The extension only works with Chrome instances launched by ChromeTools
+- If Chrome closes and reopens, the extension should still be loaded (developer mode persists)
 
 ## Table of Contents
 
 - [Installation](#installation)
+  - [Chrome Extension Setup](#chrome-extension-setup)
 - [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
 - [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
 - [Available Tools](#available-tools) - **46+ Tools Total**
@@ -1327,7 +1366,7 @@ Add the MCP server to your MCP client configuration file:
   "mcpServers": {
     "chrometools": {
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"]
+      "args": ["chrometools-mcp"]
     }
   }
 }
@@ -1341,7 +1380,7 @@ Add the MCP server to your MCP client configuration file:
     "chrometools": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"],
+      "args": ["chrometools-mcp"],
       "env": {}
     }
   }
@@ -1415,7 +1454,7 @@ Each tool definition is sent to the AI in every request, consuming context token
   "mcpServers": {
     "chrometools": {
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"],
+      "args": ["chrometools-mcp"],
       "env": {
         "ENABLED_TOOLS": "core,interaction,inspection"
       }
@@ -1432,7 +1471,7 @@ Each tool definition is sent to the AI in every request, consuming context token
     "chrometools": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"],
+      "args": ["chrometools-mcp"],
       "env": {
         "ENABLED_TOOLS": "core,interaction,advanced"
       }
@@ -1499,7 +1538,7 @@ To use Figma tools, you need to configure your Figma Personal Access Token.
   "mcpServers": {
     "chrometools": {
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"],
+      "args": ["chrometools-mcp"],
       "env": {
         "FIGMA_TOKEN": "your-figma-token-here"
       }
@@ -1516,7 +1555,7 @@ To use Figma tools, you need to configure your Figma Personal Access Token.
     "chrometools": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "chrometools-mcp"],
+      "args": ["chrometools-mcp"],
       "env": {
         "FIGMA_TOKEN": "your-figma-token-here"
       }
