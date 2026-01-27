@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.4] - 2026-01-27
+
+### Performance
+- **Compact APOM format** — Reduced analyzePage output size by ~70%
+  - Containers now use `"tag_id": [children]` format (instead of `{id, tag, selector, children}`)
+  - Selectors removed from output (registered internally for getElementDetails/click/type)
+  - Bottom-up pruning removes container branches without interactive elements
+  - Example: Google Search reduced from ~33K tokens (281 elements) to ~10K tokens (~80 elements)
+  - `includeAll: true` retains full format with selectors for debugging
+
 ## [3.2.3] - 2026-01-27
 
 ### Removed

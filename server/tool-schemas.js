@@ -260,7 +260,7 @@ export const SmartFindElementSchema = z.object({
 
 export const AnalyzePageSchema = z.object({
   refresh: z.boolean().optional().describe("Force refresh of cached analysis (default: false)"),
-  includeAll: z.boolean().optional().describe("Include all elements on page, not just interactive ones (default: false). Useful for layout work and finding non-interactive elements to style."),
+  includeAll: z.boolean().optional().describe("Include all elements on page, not just interactive ones (default: false). When false (default), returns compact format: containers as \"tag_id\":[children], interactive elements without selectors. When true, returns full format with selectors for debugging."),
   useLegacyFormat: z.boolean().optional().describe("Return legacy format instead of APOM (default: false - APOM is now the default format)"),
   registerElements: z.boolean().optional().describe("Automatically register elements in selector resolver (default: true)"),
   groupBy: z.enum(['type', 'flat']).optional().describe("Group elements by type or return flat structure (default: 'type')"),

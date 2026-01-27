@@ -43,6 +43,11 @@ function buildAPOMTree(interactiveOnly = true) {
   // Build tree from body
   result.tree = buildNode(document.body, null, 0, []);
 
+  // Prune empty branches (containers without interactive elements)
+  if (interactiveOnly && result.tree) {
+    result.tree = pruneEmptyBranches(result.tree);
+  }
+
   // Collect radio and checkbox groups for easier agent access
   result.groups = collectInputGroups(result.tree);
 
@@ -99,6 +104,48 @@ function buildAPOMTree(interactiveOnly = true) {
       radio: Object.keys(radioGroups).length > 0 ? radioGroups : undefined,
       checkbox: Object.keys(checkboxGroups).length > 0 ? checkboxGroups : undefined
     };
+  }
+
+  /**
+   * Prune empty branches (containers without interactive elements)
+   * Bottom-up traversal: remove container branches that don't end with interactive leaves
+   */
+  function pruneEmptyBranches(node) {
+    if (!node) return null;
+
+    // Handle compact format containers
+    if (typeof node === 'object' && !node.id && !node.tag) {
+      // Compact format: { "tag_id": [children] }
+      const keys = Object.keys(node);
+      if (keys.length === 1 && Array.isArray(node[keys[0]])) {
+        const key = keys[0];
+        const prunedChildren = node[key]
+          .map(child => pruneEmptyBranches(child))
+          .filter(child => child !== null);
+
+        // If no children left after pruning, remove this container
+        if (prunedChildren.length === 0) {
+          return null;
+        }
+
+        return { [key]: prunedChildren };
+      }
+    }
+
+    // Handle regular format (interactive elements or full-mode containers)
+    if (node.children && Array.isArray(node.children)) {
+      // Prune children recursively
+      node.children = node.children
+        .map(child => pruneEmptyBranches(child))
+        .filter(child => child !== null);
+    }
+
+    // If this is a container (no type = not interactive) with no children, remove it
+    if (!node.type && node.children && node.children.length === 0) {
+      return null;
+    }
+
+    return node;
   }
 
   /**
@@ -212,6 +259,12 @@ function buildAPOMTree(interactiveOnly = true) {
     const selector = generateSelector(element);
     elementIds.set(element, id);
 
+    // Register element in selector resolver (internal only)
+    if (typeof window !== 'undefined' && typeof window.registerElement === 'function') {
+      const tag = element.tagName.toLowerCase();
+      window.registerElement(id, selector, { tag, depth });
+    }
+
     const currentPath = [...path, id];
 
     // Get positioning info
@@ -223,24 +276,47 @@ function buildAPOMTree(interactiveOnly = true) {
     // Build node - minimize non-interactive parents
     const isInteractive = elementType.isInteractive;
 
-    // For non-interactive parent elements, keep it minimal (only tag, id, and selector)
-    const node = isInteractive ? {
-      id,
-      tag: element.tagName.toLowerCase(),
-      selector,
-      position,
-      type: elementType.type,
-      children: []
-    } : {
-      id,
-      tag: element.tagName.toLowerCase(),
-      selector,
-      children: []
-    };
+    // Build node structure based on mode
+    let node;
 
-    // Add metadata only for interactive elements
-    if (isInteractive && elementType.metadata) {
-      node.metadata = elementType.metadata;
+    if (isInteractive) {
+      // Interactive elements: full structure without selector (unless includeAll)
+      node = {
+        id,
+        tag: element.tagName.toLowerCase(),
+        position,
+        type: elementType.type,
+        children: []
+      };
+
+      // Add selector only in includeAll mode
+      if (!interactiveOnly) {
+        node.selector = selector;
+      }
+
+      // Add metadata for interactive elements
+      if (elementType.metadata) {
+        node.metadata = elementType.metadata;
+      }
+    } else {
+      // Containers: compact format "tag_id": [children] when interactiveOnly
+      // or full format when includeAll
+      if (interactiveOnly) {
+        // Compact format - will be converted after processing children
+        node = {
+          _compact: true,
+          _key: `${element.tagName.toLowerCase()}_${id}`,
+          children: []
+        };
+      } else {
+        // Full format with selector
+        node = {
+          id,
+          tag: element.tagName.toLowerCase(),
+          selector,
+          children: []
+        };
+      }
     }
 
     // Update metadata counters
@@ -266,6 +342,14 @@ function buildAPOMTree(interactiveOnly = true) {
       if (childNode) {
         node.children.push(childNode);
       }
+    }
+
+    // Convert compact containers to final format
+    if (node._compact) {
+      // Return compact format: { "tag_id": [children] }
+      const compactNode = {};
+      compactNode[node._key] = node.children;
+      return compactNode;
     }
 
     return node;
