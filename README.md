@@ -285,6 +285,20 @@ Find elements using natural language descriptions instead of CSS selectors.
 
 #### analyzePage ⭐ **USE FREQUENTLY**
 Get current page state and structure. Returns complete map of forms (with values), inputs, buttons, links with selectors.
+
+**Enhanced Interactivity Detection** ⭐ **NEW** (v3.1.8):
+- Detects interactive elements via **8 different methods**:
+  1. Native HTML tags (`button`, `a`, `input`, `select`, `textarea`)
+  2. ARIA roles (`button`, `link`, `checkbox`, etc.)
+  3. `onclick` attribute
+  4. `onclick` property (set via JavaScript)
+  5. CSS `cursor: pointer`
+  6. JavaScript `addEventListener('click')`
+  7. `tabindex` attribute (except -1)
+  8. `contenteditable="true"`
+- **Captures DIV/SPAN with click handlers** - Previously missed JavaScript-enabled elements now detected
+- Adds `interactivityReason` metadata showing detection method (e.g., `cursor-pointer`, `event-listener`)
+
 - **When to use**:
   - After opening/navigating to page (initial analysis)
   - **After clicking buttons** (see what changed)

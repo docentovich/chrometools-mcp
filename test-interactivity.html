@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactivity Detection Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+    }
+    .test-section {
+      margin: 30px 0;
+      padding: 20px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+    }
+    .test-section h3 {
+      margin-top: 0;
+      color: #333;
+    }
+    .clickable-div {
+      cursor: pointer;
+      padding: 10px;
+      background: #e3f2fd;
+      border: 1px solid #2196F3;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+    .clickable-div:hover {
+      background: #bbdefb;
+    }
+    .clickable-span {
+      cursor: pointer;
+      color: #1976D2;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 Interactivity Detection Test</h1>
+  <p>This page tests various methods of element interactivity detection.</p>
+
+  <!-- Test 1: Native HTML elements -->
+  <div class="test-section">
+    <h3>✅ Test 1: Native HTML Interactive Elements</h3>
+    <button>Native Button</button>
+    <a href="#test">Native Link</a>
+    <input type="text" placeholder="Native Input">
+  </div>
+
+  <!-- Test 2: CSS cursor: pointer -->
+  <div class="test-section">
+    <h3>🖱️ Test 2: CSS cursor: pointer</h3>
+    <div class="clickable-div">DIV with cursor: pointer</div>
+    <span class="clickable-span">SPAN with cursor: pointer</span>
+  </div>
+
+  <!-- Test 3: onclick attribute -->
+  <div class="test-section">
+    <h3>📝 Test 3: onclick Attribute</h3>
+    <div onclick="alert('Clicked!')">DIV with onclick attribute</div>
+    <span onclick="console.log('Span clicked')">SPAN with onclick attribute</span>
+  </div>
+
+  <!-- Test 4: JavaScript event listener -->
+  <div class="test-section">
+    <h3>🎧 Test 4: JavaScript Event Listener</h3>
+    <div id="js-listener-div">DIV with addEventListener</div>
+    <span id="js-listener-span">SPAN with addEventListener</span>
+  </div>
+
+  <!-- Test 5: ARIA roles -->
+  <div class="test-section">
+    <h3>♿ Test 5: ARIA Roles</h3>
+    <div role="button">DIV with role="button"</div>
+    <span role="link">SPAN with role="link"</span>
+  </div>
+
+  <!-- Test 6: tabindex -->
+  <div class="test-section">
+    <h3>⌨️ Test 6: tabindex</h3>
+    <div tabindex="0">DIV with tabindex="0"</div>
+    <span tabindex="1">SPAN with tabindex="1"</span>
+  </div>
+
+  <!-- Test 7: onclick property (via JS) -->
+  <div class="test-section">
+    <h3>⚙️ Test 7: onclick Property (set via JavaScript)</h3>
+    <div id="onclick-prop-div">DIV with onclick property</div>
+    <span id="onclick-prop-span">SPAN with onclick property</span>
+  </div>
+
+  <!-- Test 8: contenteditable -->
+  <div class="test-section">
+    <h3>✏️ Test 8: contenteditable</h3>
+    <div contenteditable="true">Editable DIV (contenteditable="true")</div>
+  </div>
+
+  <!-- Test 9: Non-interactive elements (should NOT be detected) -->
+  <div class="test-section">
+    <h3>❌ Test 9: Non-Interactive Elements</h3>
+    <div>Plain DIV (should not be interactive)</div>
+    <span>Plain SPAN (should not be interactive)</span>
+    <p>Plain paragraph (should not be interactive)</p>
+  </div>
+
+  <script>
+    // Test 4: Add event listeners via JavaScript
+    document.getElementById('js-listener-div').addEventListener('click', function() {
+      alert('DIV clicked via event listener!');
+    });
+
+    document.getElementById('js-listener-span').addEventListener('click', function() {
+      console.log('SPAN clicked via event listener!');
+    });
+
+    // Test 7: Set onclick property via JavaScript
+    document.getElementById('onclick-prop-div').onclick = function() {
+      alert('DIV clicked via onclick property!');
+    };
+
+    document.getElementById('onclick-prop-span').onclick = function() {
+      console.log('SPAN clicked via onclick property!');
+    };
+
+    // Logging
+    console.log('✅ Test page loaded successfully');
+    console.log('📊 All interactive elements should be detected by analyzePage');
+  </script>
+</body>
+</html>

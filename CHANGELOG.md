@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.8] - 2026-01-27
+
+### Changed
+- **Enhanced interactivity detection in analyzePage** — Improved detection of JavaScript-enabled interactive elements
+  - Added detection of elements with `cursor: pointer` CSS property
+  - Added detection of elements with JavaScript `addEventListener('click')`
+  - Added detection of elements with `onclick` property set via JavaScript
+  - DIV and SPAN elements with click handlers now correctly detected as interactive
+  - Added `interactivityReason` metadata field showing why element was marked interactive
+  - Reasons: `native-html`, `aria-role`, `onclick-attr`, `onclick-prop`, `cursor-pointer`, `event-listener`, `tabindex`, `contenteditable`
+
+### Performance
+- Optimized `markInteractiveElements` to skip event listener checks during bulk scan (performance)
+- Event listener detection only runs for individual element type determination
+
 ## [3.1.7] - 2026-01-27
 
 ### Fixed

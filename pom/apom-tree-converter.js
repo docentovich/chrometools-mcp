@@ -103,28 +103,37 @@ function buildAPOMTree(interactiveOnly = true) {
 
   /**
    * Mark interactive elements and their ancestors
+   * NOTE: This function is defined before checkInteractivity,
+   * so we need to inline the checks or move function definitions
    */
   function markInteractiveElements(root) {
-    const interactiveTags = new Set([
-      'A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL', 'FORM'
-    ]);
-
-    const interactiveRoles = new Set([
-      'button', 'link', 'textbox', 'checkbox', 'radio', 'combobox', 'listbox',
-      'menuitem', 'tab', 'switch', 'slider', 'searchbox'
-    ]);
-
-    // Find all interactive elements
+    // Find all interactive elements using the same logic as checkInteractivity
     const elements = root.querySelectorAll('*');
     const interactiveList = [];
 
     elements.forEach(el => {
-      const isInteractive =
-        interactiveTags.has(el.tagName) ||
-        interactiveRoles.has(el.getAttribute('role')) ||
+      // Use inline checks (same logic as checkInteractivity)
+      const tag = el.tagName.toLowerCase();
+      const role = el.getAttribute('role');
+
+      const isInteractive = (
+        // Native HTML interactive elements
+        ['a', 'button', 'input', 'select', 'textarea', 'label', 'form'].includes(tag) ||
+        // Interactive ARIA roles
+        (role && ['button', 'link', 'checkbox', 'radio', 'tab', 'menuitem', 'option', 'switch', 'textbox'].includes(role)) ||
+        // onclick attribute
         el.hasAttribute('onclick') ||
-        el.hasAttribute('tabindex') && el.getAttribute('tabindex') !== '-1' ||
-        (el.tagName === 'DIV' && el.getAttribute('contenteditable') === 'true');
+        // onclick property
+        (el.onclick !== null && el.onclick !== undefined) ||
+        // cursor: pointer
+        window.getComputedStyle(el).cursor === 'pointer' ||
+        // tabindex (except -1)
+        (el.hasAttribute('tabindex') && el.getAttribute('tabindex') !== '-1') ||
+        // contenteditable
+        el.getAttribute('contenteditable') === 'true'
+        // Note: We skip event listener check here for performance
+        // as querySelectorAll can return thousands of elements
+      );
 
       if (isInteractive && isVisible(el)) {
         interactiveList.push(el);
@@ -292,6 +301,84 @@ function buildAPOMTree(interactiveOnly = true) {
   }
 
   /**
+   * Check if element has click event listeners
+   */
+  function hasClickListener(element) {
+    try {
+      // Check for getEventListeners (available in Chrome DevTools context)
+      if (typeof getEventListeners === 'function') {
+        const listeners = getEventListeners(element);
+        return listeners && listeners.click && listeners.click.length > 0;
+      }
+
+      // Fallback: check for common event listener markers
+      // Note: This is not 100% reliable but catches common cases
+      return element._events?.click ||
+             element.__listeners?.click ||
+             element.__eventListeners?.click;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * Check if element is interactive based on various signals
+   */
+  function checkInteractivity(element) {
+    const tag = element.tagName.toLowerCase();
+    const role = element.getAttribute('role');
+
+    // 1. Standard interactive HTML elements
+    const interactiveTags = ['a', 'button', 'input', 'select', 'textarea'];
+    if (interactiveTags.includes(tag)) {
+      return { isInteractive: true, reason: 'native-html' };
+    }
+
+    // 2. Interactive ARIA roles
+    const interactiveRoles = [
+      'button', 'link', 'checkbox', 'radio', 'tab',
+      'menuitem', 'option', 'switch', 'textbox'
+    ];
+    if (role && interactiveRoles.includes(role)) {
+      return { isInteractive: true, reason: 'aria-role' };
+    }
+
+    // 3. Elements with onclick attribute
+    if (element.hasAttribute('onclick')) {
+      return { isInteractive: true, reason: 'onclick-attr' };
+    }
+
+    // 4. Elements with onclick property set via JavaScript
+    if (element.onclick !== null && element.onclick !== undefined) {
+      return { isInteractive: true, reason: 'onclick-prop' };
+    }
+
+    // 5. Elements with cursor: pointer
+    const computedStyle = window.getComputedStyle(element);
+    if (computedStyle.cursor === 'pointer') {
+      return { isInteractive: true, reason: 'cursor-pointer' };
+    }
+
+    // 6. Elements with click event listeners
+    if (hasClickListener(element)) {
+      return { isInteractive: true, reason: 'event-listener' };
+    }
+
+    // 7. Elements with tabindex (except -1)
+    const tabindex = element.getAttribute('tabindex');
+    if (tabindex !== null && tabindex !== '-1') {
+      return { isInteractive: true, reason: 'tabindex' };
+    }
+
+    // 8. Contenteditable elements
+    if (element.getAttribute('contenteditable') === 'true') {
+      return { isInteractive: true, reason: 'contenteditable' };
+    }
+
+    return { isInteractive: false, reason: null };
+  }
+
+  /**
    * Determine element type and metadata
    */
   function determineElementType(element) {
@@ -450,20 +537,26 @@ function buildAPOMTree(interactiveOnly = true) {
 
     // Container with semantic role
     if (role) {
+      const interactivityCheck = checkInteractivity(element);
       return {
         type: role,
-        isInteractive: false,
+        isInteractive: interactivityCheck.isInteractive,
         metadata: {
-          ariaLabel: element.getAttribute('aria-label') || null
+          ariaLabel: element.getAttribute('aria-label') || null,
+          interactivityReason: interactivityCheck.reason || undefined
         }
       };
     }
 
-    // Generic container
+    // Generic container - check for JavaScript interactivity
+    const interactivityCheck = checkInteractivity(element);
     return {
       type: 'container',
-      isInteractive: false,
-      metadata: null
+      isInteractive: interactivityCheck.isInteractive,
+      metadata: interactivityCheck.isInteractive ? {
+        text: element.textContent?.trim().substring(0, 100) || '',
+        interactivityReason: interactivityCheck.reason
+      } : null
     };
   }
 
