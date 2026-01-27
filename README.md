@@ -175,6 +175,8 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 - Look for the ChromeTools icon (CT) in your Chrome toolbar
 - The extension is now ready to use for scenario recording
 
+![Installed Extension Screenshot](docs/extension-installed.png)
+
 > **Note:** After installation, the extension card will appear on the `chrome://extensions` page alongside other installed extensions. The extension should show as "Enabled" with a blue toggle switch.
 
 **Step 6:** Pin the Extension (Optional but Recommended)
