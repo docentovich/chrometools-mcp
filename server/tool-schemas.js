@@ -264,10 +264,14 @@ export const AnalyzePageSchema = z.object({
   useLegacyFormat: z.boolean().optional().describe("Return legacy format instead of APOM (default: false - APOM is now the default format)"),
   registerElements: z.boolean().optional().describe("Automatically register elements in selector resolver (default: true)"),
   groupBy: z.enum(['type', 'flat']).optional().describe("Group elements by type or return flat structure (default: 'type')"),
+  detectFrameworks: z.boolean().optional().describe("Detect UI frameworks (React/Vue/Angular) on elements (default: false). Can slow down analysis on large pages."),
 });
 
-export const GetElementByApomIdSchema = z.object({
+export const GetElementDetailsSchema = z.object({
   id: z.string().describe("APOM element ID (e.g., 'input_20', 'button_45') from analyzePage result"),
+  analyzeChildren: z.boolean().optional().describe("Analyze children elements tree structure (default: false)"),
+  includeAll: z.boolean().optional().describe("When analyzing children, include all elements, not just interactive ones (default: false)"),
+  refresh: z.boolean().optional().describe("Force refresh of cached analysis (default: false)"),
 });
 
 export const GetAllInteractiveElementsSchema = z.object({

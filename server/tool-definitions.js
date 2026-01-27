@@ -500,12 +500,15 @@ export const toolDefinitions = [
         },
       },
       {
-        name: "getElementByApomId",
-        description: "Get detailed information about element by its APOM ID from analyzePage. Returns full element details including bounds, position, attributes, computed styles. Use this to inspect specific elements without re-analyzing entire page.",
+        name: "getElementDetails",
+        description: "Get detailed information about element by its APOM ID. Returns full element details including bounds, CSS selector, position, attributes, and computed styles. Can also analyze children elements tree structure. Use this when analyzePage output was simplified and you need complete information about specific element or analyze specific sections in detail.",
         inputSchema: {
           type: "object",
           properties: {
             id: { type: "string", description: "APOM element ID (e.g., 'input_20', 'button_45') from analyzePage result" },
+            analyzeChildren: { type: "boolean", description: "Analyze children elements tree structure (default: false)" },
+            includeAll: { type: "boolean", description: "When analyzing children, include all elements, not just interactive ones (default: false)" },
+            refresh: { type: "boolean", description: "Force refresh of cached analysis (default: false)" },
           },
           required: ["id"],
         },

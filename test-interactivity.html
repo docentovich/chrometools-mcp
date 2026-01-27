@@ -1,134 +1,178 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Interactivity Detection Test</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 800px;
-      margin: 50px auto;
-      padding: 20px;
-    }
-    .test-section {
-      margin: 30px 0;
-      padding: 20px;
-      border: 2px solid #ddd;
-      border-radius: 8px;
-    }
-    .test-section h3 {
-      margin-top: 0;
-      color: #333;
-    }
-    .clickable-div {
-      cursor: pointer;
-      padding: 10px;
-      background: #e3f2fd;
-      border: 1px solid #2196F3;
-      border-radius: 4px;
-      margin: 10px 0;
-    }
-    .clickable-div:hover {
-      background: #bbdefb;
-    }
-    .clickable-span {
-      cursor: pointer;
-      color: #1976D2;
-      text-decoration: underline;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactivity Detection Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .section {
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+        }
+        h2 {
+            margin-top: 0;
+            color: #333;
+        }
+        .test-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+        }
+        .clickable-div {
+            cursor: pointer;
+            padding: 10px;
+            background: #4CAF50;
+            color: white;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        .hover-div {
+            padding: 10px;
+            background: #2196F3;
+            color: white;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        .hover-div:hover {
+            background: #0b7dda;
+        }
+    </style>
 </head>
 <body>
-  <h1>🧪 Interactivity Detection Test</h1>
-  <p>This page tests various methods of element interactivity detection.</p>
+    <h1>🧪 Interactivity Detection Test Suite</h1>
 
-  <!-- Test 1: Native HTML elements -->
-  <div class="test-section">
-    <h3>✅ Test 1: Native HTML Interactive Elements</h3>
-    <button>Native Button</button>
-    <a href="#test">Native Link</a>
-    <input type="text" placeholder="Native Input">
-  </div>
+    <!-- 1. Standard Interactive Elements -->
+    <div class="section">
+        <h2>1️⃣ Standard Interactive Elements</h2>
+        <div class="test-item">
+            <button id="standard-button">Standard Button</button>
+        </div>
+        <div class="test-item">
+            <a href="#test" id="standard-link">Standard Link</a>
+        </div>
+        <div class="test-item">
+            <input type="text" id="standard-input" placeholder="Standard Input">
+        </div>
+        <div class="test-item">
+            <select id="standard-select">
+                <option>Option 1</option>
+                <option>Option 2</option>
+            </select>
+        </div>
+    </div>
 
-  <!-- Test 2: CSS cursor: pointer -->
-  <div class="test-section">
-    <h3>🖱️ Test 2: CSS cursor: pointer</h3>
-    <div class="clickable-div">DIV with cursor: pointer</div>
-    <span class="clickable-span">SPAN with cursor: pointer</span>
-  </div>
+    <!-- 2. JavaScript Event Listeners -->
+    <div class="section">
+        <h2>2️⃣ Elements with JS Event Listeners</h2>
+        <div class="test-item">
+            <div id="click-listener" class="clickable-div">DIV with Click Listener</div>
+        </div>
+        <div class="test-item">
+            <span id="mousedown-listener" class="clickable-div">SPAN with Mousedown Listener</span>
+        </div>
+        <div class="test-item">
+            <p id="multiple-listeners" class="clickable-div">P with Multiple Listeners (click, mousedown, mouseup)</p>
+        </div>
+    </div>
 
-  <!-- Test 3: onclick attribute -->
-  <div class="test-section">
-    <h3>📝 Test 3: onclick Attribute</h3>
-    <div onclick="alert('Clicked!')">DIV with onclick attribute</div>
-    <span onclick="console.log('Span clicked')">SPAN with onclick attribute</span>
-  </div>
+    <!-- 3. React-style Synthetic Events (inline onclick) -->
+    <div class="section">
+        <h2>3️⃣ Inline Event Handlers</h2>
+        <div class="test-item">
+            <div onclick="alert('Clicked!')" class="clickable-div">DIV with onclick attribute</div>
+        </div>
+        <div class="test-item">
+            <span onmousedown="console.log('mousedown')" class="clickable-div">SPAN with onmousedown attribute</span>
+        </div>
+    </div>
 
-  <!-- Test 4: JavaScript event listener -->
-  <div class="test-section">
-    <h3>🎧 Test 4: JavaScript Event Listener</h3>
-    <div id="js-listener-div">DIV with addEventListener</div>
-    <span id="js-listener-span">SPAN with addEventListener</span>
-  </div>
+    <!-- 4. Pointer Cursor Elements -->
+    <div class="section">
+        <h2>4️⃣ Elements with cursor: pointer</h2>
+        <div class="test-item">
+            <div class="clickable-div" style="cursor: pointer;">DIV with cursor:pointer (no JS)</div>
+        </div>
+        <div class="test-item">
+            <span style="cursor: pointer; padding: 5px; background: #FF9800; color: white; border-radius: 4px;">
+                SPAN with cursor:pointer (no JS)
+            </span>
+        </div>
+    </div>
 
-  <!-- Test 5: ARIA roles -->
-  <div class="test-section">
-    <h3>♿ Test 5: ARIA Roles</h3>
-    <div role="button">DIV with role="button"</div>
-    <span role="link">SPAN with role="link"</span>
-  </div>
+    <!-- 5. Hover Effects (CSS only) -->
+    <div class="section">
+        <h2>5️⃣ Elements with CSS :hover Effects</h2>
+        <div class="test-item">
+            <div class="hover-div">DIV with :hover CSS (no JS)</div>
+        </div>
+    </div>
 
-  <!-- Test 6: tabindex -->
-  <div class="test-section">
-    <h3>⌨️ Test 6: tabindex</h3>
-    <div tabindex="0">DIV with tabindex="0"</div>
-    <span tabindex="1">SPAN with tabindex="1"</span>
-  </div>
+    <!-- 6. Contenteditable -->
+    <div class="section">
+        <h2>6️⃣ Contenteditable Elements</h2>
+        <div class="test-item">
+            <div contenteditable="true" style="border: 1px solid #999; padding: 10px; min-height: 50px;">
+                Editable DIV - type here!
+            </div>
+        </div>
+    </div>
 
-  <!-- Test 7: onclick property (via JS) -->
-  <div class="test-section">
-    <h3>⚙️ Test 7: onclick Property (set via JavaScript)</h3>
-    <div id="onclick-prop-div">DIV with onclick property</div>
-    <span id="onclick-prop-span">SPAN with onclick property</span>
-  </div>
+    <!-- 7. Complex Nested Interactive Elements -->
+    <div class="section">
+        <h2>7️⃣ Nested Interactive Elements</h2>
+        <div class="test-item">
+            <div id="parent-clickable" class="clickable-div">
+                Parent DIV with click listener
+                <button id="nested-button" style="margin-left: 10px;">Nested Button</button>
+            </div>
+        </div>
+    </div>
 
-  <!-- Test 8: contenteditable -->
-  <div class="test-section">
-    <h3>✏️ Test 8: contenteditable</h3>
-    <div contenteditable="true">Editable DIV (contenteditable="true")</div>
-  </div>
+    <!-- 8. False Positives Check -->
+    <div class="section">
+        <h2>8️⃣ Non-Interactive Elements (Should NOT be detected)</h2>
+        <div class="test-item">
+            <p>Regular paragraph - not interactive</p>
+        </div>
+        <div class="test-item">
+            <div style="padding: 10px; background: #ddd;">Regular DIV - not interactive</div>
+        </div>
+        <div class="test-item">
+            <span>Regular SPAN - not interactive</span>
+        </div>
+    </div>
 
-  <!-- Test 9: Non-interactive elements (should NOT be detected) -->
-  <div class="test-section">
-    <h3>❌ Test 9: Non-Interactive Elements</h3>
-    <div>Plain DIV (should not be interactive)</div>
-    <span>Plain SPAN (should not be interactive)</span>
-    <p>Plain paragraph (should not be interactive)</p>
-  </div>
+    <script>
+        // Add event listeners to test elements
+        document.getElementById('click-listener').addEventListener('click', function() {
+            console.log('Click listener triggered');
+        });
 
-  <script>
-    // Test 4: Add event listeners via JavaScript
-    document.getElementById('js-listener-div').addEventListener('click', function() {
-      alert('DIV clicked via event listener!');
-    });
+        document.getElementById('mousedown-listener').addEventListener('mousedown', function() {
+            console.log('Mousedown listener triggered');
+        });
 
-    document.getElementById('js-listener-span').addEventListener('click', function() {
-      console.log('SPAN clicked via event listener!');
-    });
+        const multiListener = document.getElementById('multiple-listeners');
+        multiListener.addEventListener('click', () => console.log('click'));
+        multiListener.addEventListener('mousedown', () => console.log('mousedown'));
+        multiListener.addEventListener('mouseup', () => console.log('mouseup'));
 
-    // Test 7: Set onclick property via JavaScript
-    document.getElementById('onclick-prop-div').onclick = function() {
-      alert('DIV clicked via onclick property!');
-    };
+        document.getElementById('parent-clickable').addEventListener('click', function(e) {
+            if (e.target === this) {
+                console.log('Parent clicked');
+            }
+        });
 
-    document.getElementById('onclick-prop-span').onclick = function() {
-      console.log('SPAN clicked via onclick property!');
-    };
-
-    // Logging
-    console.log('✅ Test page loaded successfully');
-    console.log('📊 All interactive elements should be detected by analyzePage');
-  </script>
+        console.log('✅ Test page loaded successfully');
+    </script>
 </body>
 </html>

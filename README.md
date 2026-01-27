@@ -138,7 +138,7 @@ npx -y chrometools-mcp
 - [AI Optimization Features](#ai-optimization-features) ⭐ **NEW**
 - [Scenario Recorder](#scenario-recorder) ⭐ **NEW** - Visual UI-based recording with smart optimization
 - [Available Tools](#available-tools) - **46+ Tools Total**
-  - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getElementByApomId, getAllInteractiveElements, findElementsByText
+  - [AI-Powered Tools](#ai-powered-tools) ⭐ **NEW** - smartFindElement, analyzePage, getElementDetails, getAllInteractiveElements, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
@@ -299,6 +299,15 @@ Get current page state and structure. Returns complete map of forms (with values
 - **Captures DIV/SPAN with click handlers** - Previously missed JavaScript-enabled elements now detected
 - Adds `interactivityReason` metadata showing detection method (e.g., `cursor-pointer`, `event-listener`)
 
+**Framework Detection & Stable Selectors** ⭐ **NEW** (v3.1.9):
+- **Detects frontend frameworks**: React, Vue, Angular with version information
+- **Framework metadata** added to elements (e.g., `framework: { name: "angular", version: "17.0.0" }`)
+- **Smart selector generation** excludes framework-specific dynamic attributes:
+  - React: CSS Modules (`component-abc123`), Styled Components (`sc-abc-xyz`), Emotion (`css-abc123`)
+  - Vue: Scoped styles (`data-v-12345678`)
+  - Angular: Dynamic attributes (`_ngcontent-*`, `_nghost-*`), dynamic classes
+- **More stable selectors** across page reloads and framework re-renders
+
 - **When to use**:
   - After opening/navigating to page (initial analysis)
   - **After clicking buttons** (see what changed)
@@ -329,7 +338,7 @@ Get current page state and structure. Returns complete map of forms (with values
     - Elements automatically registered - use IDs with `click({ id: "..." })`, `type({ id: "..." })`, etc.
     - **Token-optimized**: Minified JSON, simplified parents, no redundant data
     - Example: `analyzePage()` returns APOM, then use `click({ id: "button_45" })` or `type({ id: "input_20", text: "..." })`
-  - **Use `getElementByApomId({ id: "input_20" })`** to get full details for any element
+  - **Use `getElementDetails({ id: "input_20" })`** to get full details for any element, or with `analyzeChildren: true` to get children tree structure
   - **Legacy format** (`useLegacyFormat: true`): Classic format for backward compatibility
     - Complete map of forms (with current values), inputs, buttons, links, navigation with selectors
     - **Each element includes `uiFramework` info** (name, version, component type) ⭐
@@ -347,26 +356,32 @@ Get current page state and structure. Returns complete map of forms (with values
   3. `getComputedCss({ selector: "div.header" })` ← Get current styles
   4. `setStyles({ selector: "div.header", styles: [...] })` ← Apply new styles
 
-#### getElementByApomId ⭐ **NEW**
-Get detailed information about a specific element by its APOM ID from `analyzePage`. Use this to inspect elements without re-analyzing the entire page.
+#### getElementDetails ⭐ **NEW**
+Get comprehensive details about a specific element by its APOM ID. Can optionally analyze children elements tree structure. Use when `analyzePage` output is simplified and you need complete element information or want to focus analysis on a specific section.
 - **Parameters**:
   - `id` (required): APOM element ID (e.g., `"input_20"`, `"button_45"`)
-- **Use case**: Get full details for a specific element (bounds, attributes, computed styles)
-- **Returns**: Element details including:
+  - `analyzeChildren` (optional): Analyze children elements tree structure (default: false)
+  - `includeAll` (optional): When analyzing children, include all elements, not just interactive ones (default: false)
+  - `refresh` (optional): Force refresh of cached analysis (default: false)
+- **Use case**:
+  - Get full details including bounds, CSS selector, attributes, computed styles
+  - Focus analysis on specific section (modal, form, sidebar, etc.) with `analyzeChildren: true`
+- **Returns**: Complete element details including:
   - `id`: Element APOM ID
-  - `selector`: CSS selector
+  - `selector`: CSS selector for the element
   - `tag`: HTML tag name
-  - `type`: Input type (for inputs)
+  - `type`: Element type (input, button, link, etc.)
   - `text`: Visible text content
-  - `bounds`: `{ x, y, width, height }` position and size
-  - `attributes`: All HTML attributes
-  - `computedStyles`: Key CSS properties (display, visibility, color, background, etc.)
-  - `isVisible`: Whether element is visible
-  - `isEnabled`: Whether element is enabled (not disabled)
+  - `bounds`: Position and size `{ x, y, width, height, top, right, bottom, left }`
+  - `attributes`: All HTML attributes (id, class, name, placeholder, href, etc.)
+  - `computed`: Key CSS properties (display, visibility, cursor, color, fontSize, etc.)
+  - `metadata`: Element metadata from APOM analysis
+  - `visible`: Whether element is visible
+  - `childrenTree` (optional): APOM tree structure of children elements when `analyzeChildren: true`
 - **Example**:
   ```javascript
-  // Get details for specific input field
-  getElementByApomId({ id: "input_20" })
+  // Get complete details for specific input field
+  getElementDetails({ id: "input_20" })
 
   // Returns:
   {
@@ -376,12 +391,16 @@ Get detailed information about a specific element by its APOM ID from `analyzePa
     "tag": "input",
     "type": "email",
     "text": "",
-    "bounds": { "x": 100, "y": 200, "width": 300, "height": 40 },
-    "attributes": { "name": "email", "placeholder": "Enter email" },
-    "computedStyles": { "display": "block", "visibility": "visible" },
-    "isVisible": true,
-    "isEnabled": true
+    "bounds": { "x": 100, "y": 200, "width": 300, "height": 40, "top": 200, "right": 400, "bottom": 240, "left": 100 },
+    "attributes": { "name": "email", "placeholder": "Enter email", "type": "email" },
+    "computed": { "display": "block", "visibility": "visible", "cursor": "text" },
+    "visible": true
   }
+
+  // Analyze modal contents after opening it
+  analyzePage() // Get initial page structure
+  click({ id: "button_45" }) // Open modal
+  getElementDetails({ id: "container_123", analyzeChildren: true, refresh: true }) // Analyze modal contents with children tree
   ```
 
 #### getAllInteractiveElements
@@ -1557,12 +1576,12 @@ npx @modelcontextprotocol/inspector node index.js
 
 ## Features
 
-- **44+ Powerful Tools**: Complete toolkit for browser automation
+- **48+ Powerful Tools**: Complete toolkit for browser automation
   - Core: ping, openBrowser
   - Interaction: click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
   - Inspection: getElement, getComputedCss, getBoxModel, screenshot, saveScreenshot
   - Advanced: executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo, waitForElement
-  - AI-Powered: smartFindElement, analyzePage, getElementByApomId, getAllInteractiveElements, findElementsByText ⭐ **NEW**
+  - AI-Powered: smartFindElement, analyzePage, getElementDetails (with children analysis), getAllInteractiveElements, findElementsByText ⭐ **NEW**
   - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
   - Figma: getFigmaFrame, compareFigmaToElement, getFigmaSpecs, parseFigmaUrl, listFigmaPages, searchFigmaFrames, getFigmaComponents, getFigmaStyles, getFigmaColorPalette, convertFigmaToCode
 - **UI Framework Detection**: Automatic detection of MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI ⭐ **NEW**
@@ -1570,7 +1589,9 @@ npx @modelcontextprotocol/inspector node index.js
 - **APOM (Agent Page Object Model)**: Automatic element ID assignment for reliable interaction ⭐ **NEW**
   - `analyzePage()` returns elements with unique IDs (e.g., `input_20`, `button_45`)
   - Use `id` parameter in click/type/hover/selectOption for stable targeting
-  - Use `getElementByApomId()` to get detailed element info
+  - Use `getElementDetails()` to get detailed element info
+  - **Framework-aware selector generation**: Excludes React/Vue/Angular dynamic attributes for stable selectors
+  - **Framework metadata**: Detects React, Vue, Angular apps with version information
 - **Console Log Capture**: Automatic JavaScript console monitoring
 - **Network Request Monitoring**: Track all HTTP/API requests (XHR, Fetch, etc.)
 - **Persistent Browser Sessions**: Browser tabs remain open between requests
