@@ -9,7 +9,7 @@ MCP server for Chrome automation using Puppeteer with persistent browser session
 The easiest way to install for Claude Code users:
 
 ```bash
-claude mcp add chrometools-mcp
+claude mcp add "npx -y chrometools-mcp"
 ```
 
 This command will automatically configure the MCP server in your Claude Code settings.
