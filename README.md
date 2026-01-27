@@ -1,6 +1,29 @@
 # chrometools-mcp
 
-MCP server for Chrome automation using Puppeteer with persistent browser sessions.
+> 🌐 [Русская версия README](./README.ru.md)
+
+**AI-powered Chrome automation through natural language.** No more fighting with CSS selectors, XPath expressions, or brittle test scripts. Just tell your AI assistant what you want to do on a web page, and ChromeTools MCP makes it happen.
+
+## Why ChromeTools MCP?
+
+**For AI Agents & Developers:**
+- 🎯 **54 specialized tools** for browser automation - from simple clicks to Figma comparisons
+- 🧠 **APOM (Agent Page Object Model)** - AI-friendly page representation (~8-10k tokens vs 15-25k for screenshots)
+- 🔄 **Persistent browser sessions** - pages stay open between commands for iterative workflows
+- ⚡ **Framework-aware** - handles React, Vue, Angular events and state updates automatically
+- 📸 **Visual testing** - compare designs pixel-by-pixel with Figma integration
+- 🎬 **Scenario recording** - record browser actions, replay them, or export as Playwright/Selenium tests
+- 🌍 **Cross-platform** - works seamlessly on Windows, WSL, Linux, and macOS
+
+**Perfect for:**
+- 🤖 Building AI agents that interact with web applications
+- 🧪 Automated testing without writing code - let AI generate tests from scenarios
+- 🔍 Web scraping and data extraction with natural language instructions
+- 🎨 Design validation - compare implemented UI with Figma designs
+- 🚀 Rapid prototyping - test user flows by describing them to AI
+- 📊 Monitoring and health checks for web applications
+
+Stop writing brittle automation scripts. Start describing what you want in plain English.
 
 ## Installation
 
