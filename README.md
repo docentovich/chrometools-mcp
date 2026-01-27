@@ -147,6 +147,8 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 - Open Chrome Extensions page: `chrome://extensions`
 - Toggle **Developer mode** (switch in top-right corner)
 
+![Developer Mode Screenshot](docs/extension-developer-mode.png)
+
 **Step 3:** Download and Extract the Extension
 
 **Option A - Download from GitHub (Recommended):**
@@ -165,9 +167,15 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 - Select the folder and click **"Select Folder"**
 
 **Step 5:** Verify Installation
-- You should see "ChromeTools MCP" extension appear in your extensions list
+- You should see "ChromeTools MCP" extension appear in your extensions list with:
+  - **Name:** ChromeTools MCP
+  - **Version:** (current version)
+  - **Description:** MCP server integration for Chrome automation
+  - **Status:** Toggle should be ON (blue)
 - Look for the ChromeTools icon (CT) in your Chrome toolbar
 - The extension is now ready to use for scenario recording
+
+> **Note:** After installation, the extension card will appear on the `chrome://extensions` page alongside other installed extensions. The extension should show as "Enabled" with a blue toggle switch.
 
 **Step 6:** Pin the Extension (Optional but Recommended)
 - Click the puzzle piece icon in Chrome toolbar
