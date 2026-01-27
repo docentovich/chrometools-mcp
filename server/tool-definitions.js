@@ -28,7 +28,7 @@ export const toolDefinitions = [
       },
       {
         name: "click",
-        description: "PRIMARY tool for clicking elements. PREFERRED: Use APOM ID (e.g., id: 'button_45') from analyzePage for reliable element targeting. ALTERNATIVE: CSS selector for ad-hoc usage. Works correctly with React/Vue/Angular synthetic events. DO NOT use executeScript for clicks - use this tool instead. Waits for animations and navigation.",
+        description: "Click element by APOM ID (preferred) or CSS selector. Handles React/Vue/Angular events, waits for navigation.",
         inputSchema: {
           type: "object",
           properties: {
@@ -42,7 +42,7 @@ export const toolDefinitions = [
       },
       {
         name: "type",
-        description: "PRIMARY tool for filling input fields. PREFERRED: Use APOM ID (e.g., id: 'input_20') from analyzePage for reliable element targeting. ALTERNATIVE: CSS selector for ad-hoc usage. Works correctly with React/Vue/Angular state management. DO NOT use executeScript for typing - use this tool instead. Automatically updates framework state (React hooks, Vue reactive data).",
+        description: "Type text into input by APOM ID (preferred) or CSS selector. Updates React/Vue/Angular state automatically.",
         inputSchema: {
           type: "object",
           properties: {
@@ -92,7 +92,7 @@ export const toolDefinitions = [
       },
       {
         name: "screenshot",
-        description: "Capture element image (15-25k tokens). For visual comparison. Use analyzePage for form data/validation (2-5k tokens).",
+        description: "Capture element image (15-25k tokens). Use analyzePage for form data/validation (8-10k tokens).",
         inputSchema: {
           type: "object",
           properties: {
@@ -213,7 +213,7 @@ export const toolDefinitions = [
       },
       {
         name: "hover",
-        description: "Hover over element. PREFERRED: Use APOM ID from analyzePage. ALTERNATIVE: CSS selector. For testing hover effects, tooltips, and CSS :hover states.",
+        description: "Hover over element by APOM ID or CSS selector. For hover effects, tooltips, :hover states.",
         inputSchema: {
           type: "object",
           properties: {
@@ -224,7 +224,7 @@ export const toolDefinitions = [
       },
       {
         name: "selectOption",
-        description: "Select option in dropdown. PREFERRED: Use APOM ID from analyzePage. ALTERNATIVE: CSS selector. Works with HTML select elements. Specify value, text, or index to choose option.",
+        description: "Select dropdown option by APOM ID or CSS selector. Specify value, text, or index.",
         inputSchema: {
           type: "object",
           properties: {
@@ -238,7 +238,7 @@ export const toolDefinitions = [
       },
       {
         name: "drag",
-        description: "Drag element by mouse (click-hold-move-release). Simulates real mouse drag in any direction. Works with interactive maps, Gantt charts, SVG diagrams, canvas, sliders. Does NOT work with standard overflow scrollbars - use scrollTo/scrollHorizontal instead.",
+        description: "Drag element in any direction. For maps, charts, SVG, canvas, sliders. Use scrollHorizontal for scrollbars.",
         inputSchema: {
           type: "object",
           properties: {
@@ -252,7 +252,7 @@ export const toolDefinitions = [
       },
       {
         name: "scrollHorizontal",
-        description: "Scroll element horizontally. For tables, carousels, and horizontally scrollable containers. Can scroll by pixels or to the end.",
+        description: "Scroll element horizontally by pixels or to end. For tables, carousels, scrollable containers.",
         inputSchema: {
           type: "object",
           properties: {
@@ -557,7 +557,7 @@ export const toolDefinitions = [
       },
       {
         name: "enableRecorder",
-        description: "Check ChromeTools Extension connection status for scenario recording. Recording is now handled via Chrome Extension popup (click CT icon in Chrome toolbar). Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/.",
+        description: "Check ChromeTools Extension connection for scenario recording. Use Chrome Extension popup (CT icon) for recording.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -565,7 +565,7 @@ export const toolDefinitions = [
       },
       {
         name: "startRecording",
-        description: "Start recording user actions into a scenario. Recording follows the active tab automatically. Use stopRecording to finish and save the scenario.",
+        description: "Start recording user actions. Follows active tab automatically. Use stopRecording to finish.",
         inputSchema: {
           type: "object",
           properties: {
@@ -634,7 +634,7 @@ export const toolDefinitions = [
       },
       {
         name: "executeScenario",
-        description: "Execute recorded scenario by name. Runs actions with dependency resolution. Scenarios are organized by domain in ~/.config/chrometools-mcp/projects/{domain}/scenarios/. If multiple scenarios have the same name across different domains, specify projectId to disambiguate.",
+        description: "Execute scenario by name with dependency resolution. Use projectId to disambiguate duplicate names.",
         inputSchema: {
           type: "object",
           properties: {
@@ -648,7 +648,7 @@ export const toolDefinitions = [
       },
       {
         name: "listScenarios",
-        description: "List all scenarios with metadata. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        description: "List all scenarios with metadata.",
         inputSchema: {
           type: "object",
           properties: {
@@ -658,7 +658,7 @@ export const toolDefinitions = [
       },
       {
         name: "searchScenarios",
-        description: "Search scenarios by text or tags. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        description: "Search scenarios by text or tags.",
         inputSchema: {
           type: "object",
           properties: {
@@ -670,7 +670,7 @@ export const toolDefinitions = [
       },
       {
         name: "getScenarioInfo",
-        description: "Get scenario details: actions, parameters, dependencies. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        description: "Get scenario details: actions, parameters, dependencies.",
         inputSchema: {
           type: "object",
           properties: {
@@ -682,7 +682,7 @@ export const toolDefinitions = [
       },
       {
         name: "deleteScenario",
-        description: "Delete scenario and secrets. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        description: "Delete scenario and secrets.",
         inputSchema: {
           type: "object",
           properties: {
@@ -693,7 +693,7 @@ export const toolDefinitions = [
       },
       {
         name: "exportScenarioAsCode",
-        description: "Export recorded scenario as executable test code for creating a NEW test file. Automatically cleans unstable selectors (CSS modules, styled-components). Optionally generates Page Object class. Returns JSON with code and suggested filename - Claude Code will create the file. To add tests to EXISTING files, use 'appendScenarioToFile' instead. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        description: "Export scenario as test code for NEW file. Cleans unstable selectors, optionally generates Page Object. Use appendScenarioToFile for existing files.",
         inputSchema: {
           type: "object",
           properties: {
@@ -728,7 +728,7 @@ export const toolDefinitions = [
       },
       {
         name: "appendScenarioToFile",
-        description: "Append recorded scenario as test code to an EXISTING test file. Automatically cleans unstable selectors (CSS modules, styled-components). Optionally generates Page Object class. Returns JSON with test code and target file - Claude Code will append to the file without overwriting existing tests. To create NEW test files, use 'exportScenarioAsCode' instead. Scenarios are stored in ~/.config/chrometools-mcp/projects/{projectName}/scenarios/. Use global index at ~/.config/chrometools-mcp/index.json to discover available projects and scenarios.",
+        description: "Append scenario as test code to EXISTING file. Cleans unstable selectors, optionally generates Page Object. Use exportScenarioAsCode for new files.",
         inputSchema: {
           type: "object",
           properties: {
