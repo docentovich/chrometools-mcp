@@ -175,7 +175,7 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 **Step 3:** Download and Extract the Extension
 
 **Option A - Download from GitHub (Recommended):**
-1. Download the extension archive: [chrome-extension.zip](https://github.com/modelcontextprotocol/servers/raw/main/src/chrometools/chrome-extension.zip)
+1. Download the extension archive: [chrome-extension.zip](https://github.com/docentovich/chrometools-mcp/raw/main/chrome-extension.zip)
 2. Extract the ZIP file to a folder on your computer
 3. Remember the extraction path (you'll need it in the next step)
 

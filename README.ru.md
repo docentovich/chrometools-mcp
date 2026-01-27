@@ -112,7 +112,7 @@ npx chrometools-mcp
 **Шаг 3:** Скачайте и распакуйте расширение
 
 **Вариант A - Скачать с GitHub (Рекомендуется):**
-1. Скачайте архив расширения: [chrome-extension.zip](https://github.com/modelcontextprotocol/servers/raw/main/src/chrometools/chrome-extension.zip)
+1. Скачайте архив расширения: [chrome-extension.zip](https://github.com/docentovich/chrometools-mcp/raw/main/chrome-extension.zip)
 2. Распакуйте ZIP файл в папку на вашем компьютере
 3. Запомните путь распаковки (он понадобится на следующем шаге)
 
