@@ -38,15 +38,41 @@ Add to your Claude Desktop configuration file:
 - Click on **Settings** (⚙️ icon or `Cmd + ,` / `Ctrl + ,`)
 - Navigate to **Cursor Settings** → **MCP**
 
-**Step 2:** Add New MCP Server
-- Click **"Add New MCP Server"** button
-- Fill in the fields:
-  - **Name:** `chrometools-mcp` (or any name you prefer)
-  - **Type:** Select `Command`
-  - **Command:** `npx -y chrometools-mcp`
+**Step 2:** Edit MCP Configuration
+- You'll see the MCP configuration JSON editor
+- Add `chrometools` to the `mcpServers` object:
 
-**Step 3:** Save and Refresh
-- Click **"Refresh"** to activate the MCP server
+```json
+{
+  "mcpServers": {
+    "chrometools": {
+      "command": "npx",
+      "args": ["-y", "chrometools-mcp"]
+    }
+  }
+}
+```
+
+**If you already have other MCP servers configured, just add chrometools to the existing list:**
+
+```json
+{
+  "mcpServers": {
+    "existing-server": {
+      "command": "npx",
+      "args": ["some-other-mcp"]
+    },
+    "chrometools": {
+      "command": "npx",
+      "args": ["-y", "chrometools-mcp"]
+    }
+  }
+}
+```
+
+**Step 3:** Save and Restart
+- Save the configuration file
+- Restart Cursor to apply changes
 - The chrometools-mcp tools will now be available in Cursor Agent
 
 **Step 4:** Test the Installation

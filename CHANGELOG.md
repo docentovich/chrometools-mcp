@@ -2,12 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.5] - 2026-01-27
+
+### Fixed
+- **Cursor installation instructions** — Corrected to show proper mcpServers JSON format
+  - Changed to use `mcpServers` object wrapper (not individual server object)
+  - Added example showing how to add to existing MCP configuration
+  - Updated with correct JSON structure matching Cursor's MCP configuration format
+  - Settings → Cursor Settings → MCP (edit JSON directly)
+
 ## [3.1.4] - 2026-01-27
 
 ### Fixed
-- **Cursor installation instructions** — Corrected the setup process to use Cursor UI instead of manual JSON editing
-  - Changed from Command Palette approach to Settings UI approach (Settings → Cursor Settings → MCP)
-  - Added proper field names (Name, Type, Command) for the "Add New MCP Server" dialog
+- **Cursor installation instructions** — Corrected to show JSON configuration format
+  - Changed from individual fields to complete JSON object
+  - Added proper JSON format with name, type, command, and args fields
+  - Settings → Cursor Settings → MCP → Add New MCP Server (paste JSON)
   - Added test instructions to verify installation in Cursor Agent mode
 
 ## [3.1.3] - 2026-01-27
