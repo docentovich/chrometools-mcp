@@ -10,10 +10,9 @@
  * Runs in browser context via page.evaluate()
  *
  * @param {boolean} interactiveOnly - Only include interactive elements and their parents
- * @param {boolean} detectFrameworks - Detect UI frameworks (React/Vue/Angular) - can be slow on large pages
  * @returns {Object} APOM tree structure
  */
-function buildAPOMTree(interactiveOnly = true, detectFrameworks = false) {
+function buildAPOMTree(interactiveOnly = true) {
   const pageId = `page_${btoa(window.location.href).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}_${Date.now()}`;
 
   const result = {
@@ -410,44 +409,6 @@ function buildAPOMTree(interactiveOnly = true, detectFrameworks = false) {
    * Detect framework-specific attributes on element
    * Returns framework info or null
    */
-  function detectFramework(element) {
-    // Check for React
-    const reactKeys = Object.keys(element).filter(key =>
-      key.startsWith('__react') || key.startsWith('_react')
-    );
-    if (reactKeys.length > 0) {
-      return { name: 'react', version: null };
-    }
-
-    // Check for Vue
-    const vueKeys = Object.keys(element).filter(key =>
-      key.startsWith('__vue') || key.startsWith('_vue')
-    );
-    if (vueKeys.length > 0) {
-      return { name: 'vue', version: null };
-    }
-
-    // Check for Angular
-    const attributes = element.getAttributeNames();
-    const angularAttrs = attributes.filter(attr =>
-      attr.startsWith('_ngcontent-') ||
-      attr.startsWith('_nghost-') ||
-      attr.startsWith('ng-reflect-') ||
-      attr === 'ng-version'
-    );
-
-    if (angularAttrs.length > 0) {
-      const ngVersion = element.getAttribute('ng-version');
-      return {
-        name: 'angular',
-        version: ngVersion || null,
-        attributes: angularAttrs.length > 0 ? angularAttrs.slice(0, 3) : undefined // Limit to 3 for brevity
-      };
-    }
-
-    return null;
-  }
-
   /**
    * Determine element type and metadata
    */
@@ -456,9 +417,6 @@ function buildAPOMTree(interactiveOnly = true, detectFrameworks = false) {
     const type = element.type?.toLowerCase();
     const role = element.getAttribute('role');
 
-    // Detect framework-specific attributes (optional - can be slow)
-    const frameworkInfo = detectFrameworks ? detectFramework(element) : null;
-
     // Form
     if (tag === 'form') {
       const metadata = {
@@ -466,11 +424,6 @@ function buildAPOMTree(interactiveOnly = true, detectFrameworks = false) {
         action: element.action || '',
         name: element.name || null
       };
-
-      // Add framework info if detected
-      if (frameworkInfo) {
-        metadata.framework = frameworkInfo;
-      }
 
       return {
         type: 'form',

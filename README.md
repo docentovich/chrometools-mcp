@@ -299,16 +299,7 @@ Get current page state and structure. Returns complete map of forms (with values
 - **Captures DIV/SPAN with click handlers** - Previously missed JavaScript-enabled elements now detected
 - Adds `interactivityReason` metadata showing detection method (e.g., `cursor-pointer`, `event-listener`)
 
-**Framework Detection & Stable Selectors** ⭐ **NEW** (v3.1.9):
-- **Detects frontend frameworks**: React, Vue, Angular with version information
-- **Framework metadata** added to elements (e.g., `framework: { name: "angular", version: "17.0.0" }`)
-- **Smart selector generation** excludes framework-specific dynamic attributes:
-  - React: CSS Modules (`component-abc123`), Styled Components (`sc-abc-xyz`), Emotion (`css-abc123`)
-  - Vue: Scoped styles (`data-v-12345678`)
-  - Angular: Dynamic attributes (`_ngcontent-*`, `_nghost-*`), dynamic classes
-- **More stable selectors** across page reloads and framework re-renders
-
-- **When to use**:
+**When to use**:
   - After opening/navigating to page (initial analysis)
   - **After clicking buttons** (see what changed)
   - **After form submissions** (check results, errors)
@@ -1590,8 +1581,6 @@ npx @modelcontextprotocol/inspector node index.js
   - `analyzePage()` returns elements with unique IDs (e.g., `input_20`, `button_45`)
   - Use `id` parameter in click/type/hover/selectOption for stable targeting
   - Use `getElementDetails()` to get detailed element info
-  - **Framework-aware selector generation**: Excludes React/Vue/Angular dynamic attributes for stable selectors
-  - **Framework metadata**: Detects React, Vue, Angular apps with version information
 - **Console Log Capture**: Automatic JavaScript console monitoring
 - **Network Request Monitoring**: Track all HTTP/API requests (XHR, Fetch, etc.)
 - **Persistent Browser Sessions**: Browser tabs remain open between requests

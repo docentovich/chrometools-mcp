@@ -264,7 +264,6 @@ export const AnalyzePageSchema = z.object({
   useLegacyFormat: z.boolean().optional().describe("Return legacy format instead of APOM (default: false - APOM is now the default format)"),
   registerElements: z.boolean().optional().describe("Automatically register elements in selector resolver (default: true)"),
   groupBy: z.enum(['type', 'flat']).optional().describe("Group elements by type or return flat structure (default: 'type')"),
-  detectFrameworks: z.boolean().optional().describe("Detect UI frameworks (React/Vue/Angular) on elements (default: false). Can slow down analysis on large pages."),
 });
 
 export const GetElementDetailsSchema = z.object({

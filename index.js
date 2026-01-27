@@ -2079,14 +2079,14 @@ Start coding now.`;
       const pageUrl = page.url();
 
       // APOM Tree format (default) - v2 with tree structure and positioning
-      const apomResult = await page.evaluate((apomTreeConverterCode, selectorResolverCode, shouldRegister, includeAll, detectFrameworks) => {
+      const apomResult = await page.evaluate((apomTreeConverterCode, selectorResolverCode, shouldRegister, includeAll) => {
         // Inject utilities
         eval(apomTreeConverterCode);
         eval(selectorResolverCode);
 
         // Build APOM tree
         // interactiveOnly = !includeAll (if includeAll is true, we want ALL elements)
-        const apomData = buildAPOMTree(!includeAll, detectFrameworks);
+        const apomData = buildAPOMTree(!includeAll);
 
         // Register elements in selector resolver if requested
         if (shouldRegister) {
@@ -2119,7 +2119,7 @@ Start coding now.`;
         }
 
         return apomData;
-      }, apomTreeConverter, selectorResolver, validatedArgs.registerElements !== false, validatedArgs.includeAll || false, validatedArgs.detectFrameworks || false);
+      }, apomTreeConverter, selectorResolver, validatedArgs.registerElements !== false, validatedArgs.includeAll || false);
 
       return {
         content: [{
