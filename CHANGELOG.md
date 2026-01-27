@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.4] - 2026-01-27
+
+### Fixed
+- **Cursor installation instructions** — Corrected the setup process to use Cursor UI instead of manual JSON editing
+  - Changed from Command Palette approach to Settings UI approach (Settings → Cursor Settings → MCP)
+  - Added proper field names (Name, Type, Command) for the "Add New MCP Server" dialog
+  - Added test instructions to verify installation in Cursor Agent mode
+
 ## [3.1.3] - 2026-01-27
 
 ### Changed
@@ -9,7 +17,7 @@ All notable changes to this project will be documented in this file.
   - Moved Installation section to the top for better visibility
   - Added Claude Code (CLI) installation with `claude mcp add chrometools-mcp` command
   - Separated installation instructions by client type (Claude Code, Claude Desktop, Cursor, Antigravity, Other MCP Clients)
-  - Added detailed step-by-step instructions for Cursor IDE (MCP Settings via Command Palette)
+  - Added detailed step-by-step instructions for Cursor IDE (Settings → Cursor Settings → MCP → Add New MCP Server)
   - Added detailed step-by-step instructions for Google Antigravity (MCP Store → Manage → View raw config)
   - Added configuration file paths for Claude Desktop (macOS/Linux/Windows)
   - Added notes about Antigravity's 100-tool limit and optimal configuration

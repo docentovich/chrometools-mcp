@@ -34,28 +34,25 @@ Add to your Claude Desktop configuration file:
 
 ### Cursor
 
-**Step 1:** Open MCP Settings
-- Press `Cmd + Shift + P` (Mac) or `Ctrl + Shift + P` (Windows/Linux)
-- Search for "MCP" and select **"View: Open MCP Settings"**
+**Step 1:** Open MCP Settings in Cursor
+- Click on **Settings** (⚙️ icon or `Cmd + ,` / `Ctrl + ,`)
+- Navigate to **Cursor Settings** → **MCP**
 
-**Step 2:** Choose configuration scope:
-- **Global** (all projects): Edit `~/.cursor/mcp.json`
-- **Project-specific**: Create `.cursor/mcp.json` in your project root
+**Step 2:** Add New MCP Server
+- Click **"Add New MCP Server"** button
+- Fill in the fields:
+  - **Name:** `chrometools-mcp` (or any name you prefer)
+  - **Type:** Select `Command`
+  - **Command:** `npx -y chrometools-mcp`
 
-**Step 3:** Add chrometools-mcp configuration:
+**Step 3:** Save and Refresh
+- Click **"Refresh"** to activate the MCP server
+- The chrometools-mcp tools will now be available in Cursor Agent
 
-```json
-{
-  "mcpServers": {
-    "chrometools": {
-      "command": "npx",
-      "args": ["-y", "chrometools-mcp"]
-    }
-  }
-}
-```
-
-**Step 4:** Restart Cursor to apply changes
+**Step 4:** Test the Installation
+- Open Cursor Chat
+- Select **Agent** mode
+- Try a command like: "Open browser and navigate to google.com"
 
 ### Google Antigravity
 
