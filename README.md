@@ -338,7 +338,7 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
 
 #### analyzePage Get current page state and structure. Returns complete map of forms (with values), inputs, buttons, links with selectors.
 
-**Enhanced Interactivity Detection**  (v3.1.8):
+**Interactivity Detection**:
 - Detects interactive elements via **8 different methods**:
   1. Native HTML tags (`button`, `a`, `input`, `select`, `textarea`)
   2. ARIA roles (`button`, `link`, `checkbox`, etc.)
@@ -348,7 +348,7 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
   6. JavaScript `addEventListener('click')`
   7. `tabindex` attribute (except -1)
   8. `contenteditable="true"`
-- **Captures DIV/SPAN with click handlers** - Previously missed JavaScript-enabled elements now detected
+- **Captures DIV/SPAN with click handlers** - JavaScript-enabled elements are detected
 - Adds `interactivityReason` metadata showing detection method (e.g., `cursor-pointer`, `event-listener`)
 
 **When to use**:
@@ -361,7 +361,7 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
 - **Parameters**:
   - `refresh` (optional): Force refresh cache to get CURRENT state after changes (default: false)
   - `includeAll` (optional): Include ALL page elements, not just interactive ones (default: false). Useful for layout work - find any element, get its selector, then use `getComputedCss` or `setStyles` on it.
-  - `useLegacyFormat` (optional): Return legacy format instead of APOM (default: false - **APOM is now the default**) 🔄 **BREAKING CHANGE**
+  - `useLegacyFormat` (optional): Return legacy format instead of APOM (default: false - APOM is the default)
   - `registerElements` (optional): Auto-register elements for ID-based usage (default: true)   - `groupBy` (optional): 'type' or 'flat' - how to group elements (default: 'type') - **Why better than screenshot**:
   - Shows actual data (form values, validation errors) not just visual
   - Uses 2-5k tokens vs screenshot 15-25k tokens
@@ -942,7 +942,7 @@ Extract detailed design specifications from Figma including text content, colors
   - **Children**: Recursive tree with text extraction from all child elements
 
 ### 7. Recorder Tools 
-**URL-Based Storage (v2.1+)**: Scenarios are automatically organized by website domain in `~/.config/chrometools-mcp/projects/{domain}/scenarios/`.
+**URL-Based Storage**: Scenarios are automatically organized by website domain in `~/.config/chrometools-mcp/projects/{domain}/scenarios/`.
 
 **Automatic Domain Detection**: Project ID is extracted from the URL where recording starts:
 - `https://www.google.com` → `google`
