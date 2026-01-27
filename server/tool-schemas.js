@@ -35,10 +35,6 @@ export const TypeSchema = z.object({
   message: "Either 'id' or 'selector' must be provided, but not both"
 });
 
-export const GetElementSchema = z.object({
-  selector: z.string().optional().describe("CSS selector (optional, defaults to body)"),
-});
-
 export const HoverSchema = z.object({
   id: z.string().optional().describe("APOM element ID from analyzePage. Mutually exclusive with selector."),
   selector: z.string().optional().describe("CSS selector for element to hover. Mutually exclusive with id."),

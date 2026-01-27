@@ -56,16 +56,6 @@ export const toolDefinitions = [
         },
       },
       {
-        name: "getElement",
-        description: "Get HTML markup of element. Prefer analyzePage for better efficiency.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: { type: "string", description: "CSS selector (default: body)" },
-          },
-        },
-      },
-      {
         name: "getComputedCss",
         description: "Get computed CSS styles for element. For layout debugging and responsive design.",
         inputSchema: {

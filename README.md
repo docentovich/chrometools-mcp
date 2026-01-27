@@ -1416,7 +1416,7 @@ By default, all tools are enabled. You can selectively enable only specific tool
 
 **Why filter tools?**
 
-Each tool definition is sent to the AI in every request, consuming context tokens. All 43 tools consume ~28k tokens (~14% of context window). By enabling only the groups you need, you can significantly reduce token usage:
+Each tool definition is sent to the AI in every request, consuming context tokens. Filtering tools can reduce token usage, improve focus, and lower API costs:
 
 - **Save tokens:** Fewer tools = less context consumed per request
 - **Reduce costs:** Lower token usage means lower API costs
@@ -1429,13 +1429,13 @@ Each tool definition is sent to the AI in every request, consuming context token
 |-------|-------------|---------------|
 | `core` | Basic tools | `ping`, `openBrowser` (2) |
 | `interaction` | User interaction | `click`, `type`, `scrollTo`, `waitForElement`, `hover` (5) |
-| `inspection` | Page inspection | `getElement`, `getComputedCss`, `getBoxModel`, `screenshot`, `saveScreenshot` (5) |
+| `inspection` | Page inspection | `getComputedCss`, `getBoxModel`, `screenshot`, `saveScreenshot` (4) |
 | `debug` | Debugging & network | `getConsoleLogs`, `listNetworkRequests`, `getNetworkRequest`, `filterNetworkRequests` (4) |
 | `advanced` | Advanced automation & AI | `executeScript`, `setStyles`, `setViewport`, `getViewport`, `navigateTo`, `smartFindElement`, `analyzePage`, `getAllInteractiveElements`, `findElementsByText` (9) |
 | `recorder` | Scenario recording | `enableRecorder`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`, `appendScenarioToFile`, `generatePageObject` (9) |
 | `figma` | Figma integration | `getFigmaFrame`, `compareFigmaToElement`, `getFigmaSpecs`, `parseFigmaUrl`, `listFigmaPages`, `searchFigmaFrames`, `getFigmaComponents`, `getFigmaStyles`, `getFigmaColorPalette`, `convertFigmaToCode` (10) |
 
-**Total:** 44 tools across 7 groups
+**Total:** 43 tools across 7 groups
 
 **Configuration:**
 

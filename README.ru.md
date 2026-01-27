@@ -199,7 +199,6 @@ npx chrometools-mcp
 
 ### Инструменты инспекции
 
-- `getElement` - Получает HTML-разметку элемента
 - `getComputedCss` - Получает вычисленные CSS стили
 - `getBoxModel` - Получает box model элемента (размеры, отступы)
 - `screenshot` - Делает скриншот элемента или страницы

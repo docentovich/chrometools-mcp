@@ -465,32 +465,6 @@ async function executeToolInternal(name, args) {
       };
     }
 
-    if (name === "getElement") {
-      const validatedArgs = schemas.GetElementSchema.parse(args);
-      const page = await getLastOpenPage();
-
-      const client = await page.target().createCDPSession();
-      await client.send('DOM.enable');
-
-      const { root } = await client.send('DOM.getDocument');
-      const useSelector = (validatedArgs.selector && validatedArgs.selector.trim()) ? validatedArgs.selector : 'body';
-
-      const { nodeId } = await client.send('DOM.querySelector', {
-        selector: useSelector,
-        nodeId: root.nodeId
-      });
-
-      if (!nodeId) {
-        throw new Error(`Element not found: ${validatedArgs.selector}`);
-      }
-
-      const { outerHTML } = await client.send('DOM.getOuterHTML', { nodeId });
-
-      return {
-        content: [{ type: "text", text: outerHTML }],
-      };
-    }
-
     if (name === "getComputedCss") {
       const validatedArgs = schemas.GetComputedCssSchema.parse(args);
       const page = await getLastOpenPage();

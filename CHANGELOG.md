@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file.
   - Example: Google Search reduced from ~33K tokens (281 elements) to ~10K tokens (~80 elements)
   - `includeAll: true` retains full format with selectors for debugging
 
+### Removed
+- **getElement tool** — Redundant tool replaced by analyzePage (55 → 54 tools)
+
 ## [3.2.3] - 2026-01-27
 
 ### Removed
