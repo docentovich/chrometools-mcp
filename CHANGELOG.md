@@ -2,12 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.7] - 2026-01-27
+
+### Fixed
+- **Claude Code installation command** — Corrected to proper `claude mcp add` syntax
+  - Fixed to use: `claude mcp add chrometools -- npx -y chrometools-mcp`
+  - Format: `claude mcp add <name> -- <command> [args...]`
+  - Added `--scope user` option for global installation
+
 ## [3.1.6] - 2026-01-27
 
 ### Fixed
-- **Claude Code installation command** — Corrected `claude mcp add` syntax
-  - Changed from `claude mcp add chrometools-mcp` to `claude mcp add "npx -y chrometools-mcp"`
-  - The command requires full command string, not just package name
+- **Claude Code installation command** — Incorrect syntax attempt
 
 ## [3.1.5] - 2026-01-27
 
