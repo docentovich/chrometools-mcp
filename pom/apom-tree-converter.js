@@ -231,13 +231,26 @@ function buildAPOMTree(interactiveOnly = true) {
 
   /**
    * Check if element is visible
+   * More reliable check that works with position:fixed elements (Angular Material, etc.)
    */
   function isVisible(el) {
-    if (!el.offsetParent && el !== document.body) return false;
+    // Check dimensions first (works for fixed position elements)
+    if (el.offsetWidth === 0 || el.offsetHeight === 0) return false;
+
+    // Check computed styles
     const style = window.getComputedStyle(el);
-    return style.display !== 'none' &&
-           style.visibility !== 'hidden' &&
-           style.opacity !== '0';
+    if (style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        style.opacity === '0') {
+      return false;
+    }
+
+    // For body element, always consider visible if dimensions > 0
+    if (el === document.body) return true;
+
+    // Additional check: element should be in viewport or have offsetParent
+    // This handles elements inside position:fixed containers (Angular Material)
+    return el.offsetParent !== null || style.position === 'fixed' || style.position === 'sticky';
   }
 
   /**

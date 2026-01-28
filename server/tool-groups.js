@@ -24,7 +24,6 @@ export const toolGroups = {
     'getViewport',
     'smartFindElement',
     'analyzePage',
-    'getAllInteractiveElements',
     'findElementsByText'
   ],
 

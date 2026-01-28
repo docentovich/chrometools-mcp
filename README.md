@@ -220,7 +220,7 @@ The Chrome Extension is **required** for scenario recording and other advanced f
   - [Chrome Extension Setup](#chrome-extension-setup)
 - [AI Optimization Features](#ai-optimization-features)- [Scenario Recorder](#scenario-recorder)  - Visual UI-based recording with smart optimization
 - [Available Tools](#available-tools) - **46+ Tools Total**
-  - [AI-Powered Tools](#ai-powered-tools)  - smartFindElement, analyzePage, getElementDetails, getAllInteractiveElements, findElementsByText
+  - [AI-Powered Tools](#ai-powered-tools)  - smartFindElement, analyzePage, getElementDetails, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
@@ -261,7 +261,7 @@ AI: smartFindElement("login button")
 1. **`analyzePage`** - 🔥 **USE FREQUENTLY** - Get current page state after loads, clicks, submissions (cached, use refresh:true)
 2. **`smartFindElement`** - Natural language element search with multilingual support
 3. **AI Hints** - Automatic context in all tools (page type, available actions, suggestions)
-4. **Batch helpers** - `getAllInteractiveElements`, `findElementsByText`
+4. **Text search** - `findElementsByText` for finding elements by visible text
 
 **Performance:** 3-5x faster, 5-10x fewer requests
 
@@ -460,12 +460,6 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
   click({ id: "button_45" }) // Open modal
   getElementDetails({ id: "container_123", analyzeChildren: true, refresh: true }) // Analyze modal contents with children tree
   ```
-
-#### getAllInteractiveElements
-Get all clickable/fillable elements with their selectors.
-- **Parameters**:
-  - `includeHidden` (optional): Include hidden elements (default: false)
-- **Returns**: Array of all interactive elements with selectors and metadata
 
 #### findElementsByText
 Find elements by their visible text content.
@@ -1454,11 +1448,11 @@ Each tool definition is sent to the AI in every request, consuming context token
 | `interaction` | User interaction | `click`, `type`, `scrollTo`, `waitForElement`, `hover` (5) |
 | `inspection` | Page inspection | `getComputedCss`, `getBoxModel`, `screenshot`, `saveScreenshot` (4) |
 | `debug` | Debugging & network | `getConsoleLogs`, `listNetworkRequests`, `getNetworkRequest`, `filterNetworkRequests` (4) |
-| `advanced` | Advanced automation & AI | `executeScript`, `setStyles`, `setViewport`, `getViewport`, `navigateTo`, `smartFindElement`, `analyzePage`, `getAllInteractiveElements`, `findElementsByText` (9) |
+| `advanced` | Advanced automation & AI | `executeScript`, `setStyles`, `setViewport`, `getViewport`, `navigateTo`, `smartFindElement`, `analyzePage`, `findElementsByText` (8) |
 | `recorder` | Scenario recording | `enableRecorder`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`, `appendScenarioToFile`, `generatePageObject` (9) |
 | `figma` | Figma integration | `getFigmaFrame`, `compareFigmaToElement`, `getFigmaSpecs`, `parseFigmaUrl`, `listFigmaPages`, `searchFigmaFrames`, `getFigmaComponents`, `getFigmaStyles`, `getFigmaColorPalette`, `convertFigmaToCode` (10) |
 
-**Total:** 43 tools across 7 groups
+**Total:** 42 tools across 7 groups
 
 **Configuration:**
 
@@ -1626,7 +1620,7 @@ npx @modelcontextprotocol/inspector node index.js
   - Interaction: click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
   - Inspection: getElement, getComputedCss, getBoxModel, screenshot, saveScreenshot
   - Advanced: executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo, waitForElement
-  - AI-Powered: smartFindElement, analyzePage, getElementDetails (with children analysis), getAllInteractiveElements, findElementsByText  - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
+  - AI-Powered: smartFindElement, analyzePage, getElementDetails (with children analysis), findElementsByText  - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
   - Figma: getFigmaFrame, compareFigmaToElement, getFigmaSpecs, parseFigmaUrl, listFigmaPages, searchFigmaFrames, getFigmaComponents, getFigmaStyles, getFigmaColorPalette, convertFigmaToCode
 - **UI Framework Detection**: Automatic detection of MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI- **Smart Dropdown Handling**: Extracts options from both native `<select>` and custom UI framework components- **APOM (Agent Page Object Model)**: Automatic element ID assignment for reliable interaction  - `analyzePage()` returns elements with unique IDs (e.g., `input_20`, `button_45`)
   - Use `id` parameter in click/type/hover/selectOption for stable targeting

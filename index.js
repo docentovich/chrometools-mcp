@@ -451,7 +451,7 @@ async function executeToolInternal(name, args) {
       // Use input model to handle the element appropriately
       const model = await getInputModel(element, page);
       const options = {
-        delay: validatedArgs.delay || 0,
+        delay: validatedArgs.delay !== undefined ? validatedArgs.delay : 30,
         clearFirst: validatedArgs.clearFirst !== undefined ? validatedArgs.clearFirst : true,
       };
 
@@ -2246,54 +2246,6 @@ Start coding now.`;
         content: [{
           type: 'text',
           text: JSON.stringify(result, null, 2)
-        }]
-      };
-    }
-
-    if (name === "getAllInteractiveElements") {
-      const validatedArgs = schemas.GetAllInteractiveElementsSchema.parse(args);
-      const page = await getLastOpenPage();
-
-      const elements = await page.evaluate((includeHidden, utilsCode) => {
-        eval(utilsCode);
-
-        const results = [];
-        const selector = 'button, a[href], input, select, textarea, [onclick], [role="button"], [tabindex]:not([tabindex="-1"])';
-
-        document.querySelectorAll(selector).forEach(el => {
-          const isVisible = el.offsetWidth > 0 && el.offsetHeight > 0;
-
-          if (!includeHidden && !isVisible) return;
-
-          const text = (el.textContent || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim();
-
-          results.push({
-            selector: getUniqueSelectorInPage(el),
-            type: el.tagName.toLowerCase(),
-            text: text.substring(0, 100),
-            visible: isVisible,
-            attributes: {
-              id: el.id || null,
-              class: el.className || null,
-              role: el.getAttribute('role') || null,
-              type: el.type || null,
-            }
-          });
-        });
-
-        return results;
-      }, validatedArgs.includeHidden || false, elementFinderUtils);
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            count: elements.length,
-            elements,
-            hints: {
-              suggestion: 'Use these selectors directly with click, type, or other tools'
-            }
-          }, null, 2)
         }]
       };
     }

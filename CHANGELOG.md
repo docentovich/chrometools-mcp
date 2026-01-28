@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.6] - 2026-01-28
+
+### Removed
+- **getAllInteractiveElements tool** — Removed redundant tool, fully replaced by analyzePage (54 → 53 tools)
+  - `analyzePage` provides superior functionality: hierarchical tree, element registration, APOM IDs, metadata
+  - `getAllInteractiveElements` only returned flat list with CSS selectors
+  - Affected files: `index.js`, `server/tool-definitions.js`, `server/tool-schemas.js`, `server/tool-groups.js`, `README.md`
+
+### Fixed
+- **analyzePage visibility detection** — Fixed critical bug where analyzePage returned tree: null with interactiveCount: 0 on Angular Material pages
+  - Changed `isVisible()` check from `offsetParent` to `offsetWidth/offsetHeight > 0`
+  - Now correctly detects elements inside `position: fixed` containers (Angular Material overlays, dialogs, selects)
+  - Handles `position: sticky` elements properly
+  - Testing on my-autotests.segmento.ru: interactiveCount increased from 0 → 329 elements
+  - Affected file: `pom/apom-tree-converter.js`
+- **type() text corruption** — Fixed text input corruption (duplicated/swapped characters)
+  - Changed default keystroke delay from 0ms to 30ms
+  - Prevents character corruption on fast-reacting inputs (Google Search, autocomplete fields)
+  - Example: "puppeteer automation" no longer becomes "ppuuppppeetteeeerr baruotwosmeart"
+  - Affected file: `index.js:454`
+
 ## [3.2.5] - 2026-01-28
 
 ### Fixed

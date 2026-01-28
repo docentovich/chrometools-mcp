@@ -29,7 +29,7 @@ export const TypeSchema = z.object({
   id: z.string().optional().describe("APOM element ID from analyzePage (e.g., 'input_20', 'input_33'). Mutually exclusive with selector."),
   selector: z.string().optional().describe("CSS selector for input element. Mutually exclusive with id."),
   text: z.string().describe("Text to type"),
-  delay: z.number().optional().describe("Delay between keystrokes in ms (default: 0)"),
+  delay: z.number().optional().describe("Delay between keystrokes in ms (default: 30)"),
   clearFirst: z.boolean().optional().describe("Clear field before typing (default: true)"),
 }).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
   message: "Either 'id' or 'selector' must be provided, but not both"
@@ -267,10 +267,6 @@ export const GetElementDetailsSchema = z.object({
   analyzeChildren: z.boolean().optional().describe("Analyze children elements tree structure (default: false)"),
   includeAll: z.boolean().optional().describe("When analyzing children, include all elements, not just interactive ones (default: false)"),
   refresh: z.boolean().optional().describe("Force refresh of cached analysis (default: false)"),
-});
-
-export const GetAllInteractiveElementsSchema = z.object({
-  includeHidden: z.boolean().optional().describe("Include hidden elements (default: false)"),
 });
 
 export const FindElementsByTextSchema = z.object({

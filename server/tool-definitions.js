@@ -49,7 +49,7 @@ export const toolDefinitions = [
             id: { type: "string", description: "APOM element ID from analyzePage (e.g., 'input_20'). Either id or selector required." },
             selector: { type: "string", description: "CSS selector (e.g., '#email'). Either id or selector required." },
             text: { type: "string", description: "Text to type" },
-            delay: { type: "number", description: "Keystroke delay ms (default: 0)" },
+            delay: { type: "number", description: "Keystroke delay ms (default: 30)" },
             clearFirst: { type: "boolean", description: "Clear first (default: true)" },
           },
           required: ["text"],
@@ -501,16 +501,6 @@ export const toolDefinitions = [
             refresh: { type: "boolean", description: "Force refresh of cached analysis (default: false)" },
           },
           required: ["id"],
-        },
-      },
-      {
-        name: "getAllInteractiveElements",
-        description: "Get all interactive elements with selectors. For understanding available actions.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            includeHidden: { type: "boolean", description: "Include hidden (default: false)" },
-          },
         },
       },
       {
