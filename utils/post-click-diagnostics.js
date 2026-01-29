@@ -116,12 +116,27 @@ export function collectErrors(sinceTimestamp = null, maxConsoleErrors = 15, maxN
 
 /**
  * Full post-click diagnostics: wait for requests and collect errors
+ * @param {Page} page - Puppeteer page instance
  * @param {number} beforeClickTimestamp - Timestamp before click (to filter errors)
  * @returns {Promise<Object>} Diagnostics result with errors and network info
  */
-export async function runPostClickDiagnostics(beforeClickTimestamp) {
+export async function runPostClickDiagnostics(page, beforeClickTimestamp) {
   // Wait for network requests
   const networkInfo = await waitForPendingRequests(500, 5000);
+
+  // Check for chrome error page (ERR_CONNECTION_REFUSED, etc.)
+  const url = page.url();
+  let chromeErrorInfo = null;
+  if (url.startsWith('chrome-error://')) {
+    chromeErrorInfo = await page.evaluate(() => {
+      const errorCode = document.querySelector('#error-code');
+      const suggestionText = document.querySelector('.suggestions');
+      return {
+        errorCode: errorCode?.textContent || 'UNKNOWN_ERROR',
+        suggestion: suggestionText?.textContent?.trim() || 'Connection failed'
+      };
+    }).catch(() => ({ errorCode: 'PAGE_LOAD_ERROR', suggestion: 'Navigation failed' }));
+  }
 
   // Collect errors that occurred after the click
   const errors = collectErrors(beforeClickTimestamp);
@@ -134,6 +149,7 @@ export async function runPostClickDiagnostics(beforeClickTimestamp) {
       stillPending: networkInfo.stillPending,
       waitedMs: networkInfo.waitedMs
     },
+    chromeError: chromeErrorInfo,
     errors: {
       consoleErrors: errors.consoleErrors,
       networkErrors: errors.networkErrors,
@@ -141,7 +157,7 @@ export async function runPostClickDiagnostics(beforeClickTimestamp) {
       networkErrorsOmitted: errors.networkErrorsOmitted,
       totalErrors: errors.consoleErrors.length + errors.networkErrors.length
     },
-    hasErrors: (errors.consoleErrors.length + errors.networkErrors.length) > 0
+    hasErrors: (errors.consoleErrors.length + errors.networkErrors.length) > 0 || chromeErrorInfo !== null
   };
 
   return diagnostics;
@@ -154,6 +170,14 @@ export async function runPostClickDiagnostics(beforeClickTimestamp) {
  */
 export function formatDiagnosticsForAI(diagnostics) {
   let output = '\n\n** POST-CLICK DIAGNOSTICS **';
+
+  // Chrome error page (connection refused, DNS failed, etc.)
+  if (diagnostics.chromeError) {
+    output += `\n\n🔴 CRITICAL: Navigation Failed`;
+    output += `\n   Error: ${diagnostics.chromeError.errorCode}`;
+    output += `\n   Suggestion: ${diagnostics.chromeError.suggestion}`;
+    output += `\n   → Backend likely not running or unreachable`;
+  }
 
   // Network activity
   if (diagnostics.networkActivity.hadPendingRequests) {

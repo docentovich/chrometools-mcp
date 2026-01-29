@@ -403,7 +403,7 @@ async function executeToolInternal(name, args) {
 
         // NEW POST-CLICK PATTERN:
         // 1. Run post-click diagnostics (waits 500ms, checks pending requests, collects errors)
-        const diagnostics = await runPostClickDiagnostics(beforeClickTimestamp);
+        const diagnostics = await runPostClickDiagnostics(page, beforeClickTimestamp);
 
         // 2. Generate AI hints after click
         const hints = await generateClickHints(page, identifier);

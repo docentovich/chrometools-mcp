@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.8] - 2026-01-29
+
+### Fixed
+- **Click timeout on network errors** — No more 30s timeout when backend unreachable
+  - Detects chrome-error:// pages (ERR_CONNECTION_REFUSED, DNS_PROBE_FINISHED_NXDOMAIN, etc.)
+  - Returns error details immediately after 500ms diagnostic wait
+  - Shows error code and suggestion: "Backend likely not running or unreachable"
+  - Reduces diagnosis from 3 API calls to 1
+  - Example: Form submits to localhost:8001 (not running) → instant error report instead of 30s timeout
+
 ## [3.2.7] - 2026-01-29
 
 ### Added
