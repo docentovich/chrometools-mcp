@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file.
   - Shows error code and suggestion: "Backend likely not running or unreachable"
   - Reduces diagnosis from 3 API calls to 1
   - Example: Form submits to localhost:8001 (not running) → instant error report instead of 30s timeout
+- **Network request tracking** — Now tracks ALL requests triggered by click, not just pending at 500ms
+  - Filters requests by timestamp (only those started AFTER click)
+  - Catches slow-starting requests that begin after initial 500ms wait
+  - Shows accurate count: completed/pending/total requests
+  - Prevents false "No network requests triggered" when requests start late
 
 ## [3.2.7] - 2026-01-29
 

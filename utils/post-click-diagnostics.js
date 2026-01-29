@@ -7,42 +7,51 @@ import { consoleLogs, networkRequests } from '../browser/page-manager.js';
 
 /**
  * Wait for pending network requests to complete
+ * @param {number} beforeClickTimestamp - Timestamp before click to track new requests
  * @param {number} initialWaitMs - Initial wait time before checking (default: 500ms)
  * @param {number} maxWaitMs - Maximum time to wait for requests (default: 5000ms)
- * @returns {Promise<{pendingFound: boolean, waitedMs: number, completedRequests: number}>}
+ * @returns {Promise<{pendingFound: boolean, waitedMs: number, completedRequests: number, totalRequests: number}>}
  */
-export async function waitForPendingRequests(initialWaitMs = 500, maxWaitMs = 5000) {
+export async function waitForPendingRequests(beforeClickTimestamp, initialWaitMs = 500, maxWaitMs = 5000) {
+  const startTime = Date.now();
+
   // Step 1: Wait initial period to let requests start
   await new Promise(resolve => setTimeout(resolve, initialWaitMs));
 
-  const startTime = Date.now();
-  let pendingFound = false;
-  let completedCount = 0;
+  // Step 2: Get requests that started AFTER click
+  const getPostClickRequests = () => {
+    const cutoffDate = new Date(beforeClickTimestamp).toISOString();
+    return networkRequests.filter(req => req.timestamp >= cutoffDate);
+  };
 
-  // Step 2: Check for pending requests
+  // Step 3: Check for pending requests (from post-click requests)
   const checkPending = () => {
-    return networkRequests.filter(req => req.status === 'pending');
+    return getPostClickRequests().filter(req => req.status === 'pending');
   };
 
   let pending = checkPending();
+  let allPostClickRequests = getPostClickRequests();
+  const initialPendingCount = pending.length;
 
-  if (pending.length > 0) {
-    pendingFound = true;
-
-    // Step 3: Wait for pending requests to complete (with timeout)
+  // Step 4: If there are pending requests OR new requests appeared, wait for completion
+  if (pending.length > 0 || allPostClickRequests.length > 0) {
+    // Wait for pending requests to complete (with timeout)
     while (pending.length > 0 && (Date.now() - startTime) < maxWaitMs) {
       await new Promise(resolve => setTimeout(resolve, 100)); // Check every 100ms
-      const stillPending = checkPending();
-      completedCount = pending.length - stillPending.length;
-      pending = stillPending;
+      pending = checkPending();
+      allPostClickRequests = getPostClickRequests(); // Update total count
     }
   }
 
+  const finalRequests = getPostClickRequests();
+  const completedRequests = finalRequests.filter(req => req.status === 'completed' || (typeof req.status === 'number'));
+
   return {
-    pendingFound,
+    pendingFound: initialPendingCount > 0,
     waitedMs: Date.now() - startTime,
-    completedRequests: completedCount,
-    stillPending: pending.length
+    completedRequests: completedRequests.length,
+    stillPending: pending.length,
+    totalRequests: finalRequests.length
   };
 }
 
@@ -121,8 +130,8 @@ export function collectErrors(sinceTimestamp = null, maxConsoleErrors = 15, maxN
  * @returns {Promise<Object>} Diagnostics result with errors and network info
  */
 export async function runPostClickDiagnostics(page, beforeClickTimestamp) {
-  // Wait for network requests
-  const networkInfo = await waitForPendingRequests(500, 5000);
+  // Wait for network requests (passing timestamp to track post-click requests)
+  const networkInfo = await waitForPendingRequests(beforeClickTimestamp, 500, 5000);
 
   // Check for chrome error page (ERR_CONNECTION_REFUSED, etc.)
   const url = page.url();
@@ -147,6 +156,7 @@ export async function runPostClickDiagnostics(page, beforeClickTimestamp) {
       hadPendingRequests: networkInfo.pendingFound,
       completedRequests: networkInfo.completedRequests,
       stillPending: networkInfo.stillPending,
+      totalRequests: networkInfo.totalRequests,
       waitedMs: networkInfo.waitedMs
     },
     chromeError: chromeErrorInfo,
@@ -180,10 +190,13 @@ export function formatDiagnosticsForAI(diagnostics) {
   }
 
   // Network activity
-  if (diagnostics.networkActivity.hadPendingRequests) {
-    output += `\n✓ Waited ${diagnostics.networkActivity.waitedMs}ms for ${diagnostics.networkActivity.completedRequests} network request(s)`;
-    if (diagnostics.networkActivity.stillPending > 0) {
-      output += ` (${diagnostics.networkActivity.stillPending} still pending - may be slow)`;
+  const netActivity = diagnostics.networkActivity;
+  if (netActivity.totalRequests > 0) {
+    output += `\n✓ Network: ${netActivity.completedRequests} completed`;
+    if (netActivity.stillPending > 0) {
+      output += `, ${netActivity.stillPending} pending (waited ${netActivity.waitedMs}ms)`;
+    } else {
+      output += ` (${netActivity.waitedMs}ms)`;
     }
   } else {
     output += '\n✓ No network requests triggered';
