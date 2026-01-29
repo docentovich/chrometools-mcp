@@ -133,6 +133,10 @@ export async function runPostClickDiagnostics(page, beforeClickTimestamp) {
   // Wait for network requests (passing timestamp to track post-click requests)
   const networkInfo = await waitForPendingRequests(beforeClickTimestamp, 500, 5000);
 
+  // Small delay to let pending requests update their error status
+  // (handles case where request completes with error right after maxWait expires)
+  await new Promise(resolve => setTimeout(resolve, 100));
+
   // Check for chrome error page (ERR_CONNECTION_REFUSED, etc.)
   const url = page.url();
   let chromeErrorInfo = null;
@@ -147,7 +151,7 @@ export async function runPostClickDiagnostics(page, beforeClickTimestamp) {
     }).catch(() => ({ errorCode: 'PAGE_LOAD_ERROR', suggestion: 'Navigation failed' }));
   }
 
-  // Collect errors that occurred after the click
+  // Collect errors that occurred after the click (including errors from just-completed requests)
   const errors = collectErrors(beforeClickTimestamp);
 
   // Combine into diagnostics report
@@ -192,7 +196,15 @@ export function formatDiagnosticsForAI(diagnostics) {
   // Network activity
   const netActivity = diagnostics.networkActivity;
   if (netActivity.totalRequests > 0) {
-    output += `\n✓ Network: ${netActivity.completedRequests} completed`;
+    const errorCount = diagnostics.errors.networkErrors.length;
+    const successCount = netActivity.completedRequests - errorCount;
+
+    if (errorCount > 0) {
+      output += `\n⚠️  Network: ${successCount} OK, ${errorCount} failed`;
+    } else {
+      output += `\n✓ Network: ${netActivity.completedRequests} completed`;
+    }
+
     if (netActivity.stillPending > 0) {
       output += `, ${netActivity.stillPending} pending (waited ${netActivity.waitedMs}ms)`;
     } else {

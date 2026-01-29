@@ -16,6 +16,11 @@ All notable changes to this project will be documented in this file.
   - Catches slow-starting requests that begin after initial 500ms wait
   - Shows accurate count: completed/pending/total requests
   - Prevents false "No network requests triggered" when requests start late
+- **Delayed error collection** — Errors from requests that complete during maxWait are now captured
+  - Added 100ms delay after network wait before collecting errors
+  - Catches errors from requests that finish right as timeout expires
+  - Network summary shows: "⚠️ Network: 2 OK, 1 failed" when errors present
+  - Ensures AI sees errors even if request completes at edge of timeout window
 
 ## [3.2.7] - 2026-01-29
 
