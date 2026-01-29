@@ -49,48 +49,64 @@ export async function waitForPendingRequests(initialWaitMs = 500, maxWaitMs = 50
 /**
  * Collect errors from console logs and network requests
  * @param {number} sinceTimestamp - Only collect errors after this timestamp (default: collect recent errors)
+ * @param {number} maxConsoleErrors - Maximum console errors to return (default: 15)
+ * @param {number} maxNetworkErrors - Maximum network errors to return (default: 15)
  * @returns {Object} Object with consoleErrors and networkErrors arrays
  */
-export function collectErrors(sinceTimestamp = null) {
+export function collectErrors(sinceTimestamp = null, maxConsoleErrors = 15, maxNetworkErrors = 15) {
   const errors = {
     consoleErrors: [],
     networkErrors: [],
-    jsExceptions: []
+    jsExceptions: [],
+    consoleErrorsOmitted: 0,
+    networkErrorsOmitted: 0
   };
 
   // If no timestamp provided, look back 10 seconds
   const cutoffTime = sinceTimestamp || (Date.now() - 10000);
   const cutoffDate = new Date(cutoffTime).toISOString();
 
-  // Collect console errors
+  // Collect console errors (with limit)
+  let consoleErrorCount = 0;
   consoleLogs.forEach(log => {
     if (log.type === 'error') {
       // Check if error is recent
       const logTime = new Date(log.timestamp || 0).toISOString();
       if (!sinceTimestamp || logTime >= cutoffDate) {
-        errors.consoleErrors.push({
-          message: log.text,
-          timestamp: log.timestamp,
-          location: log.location || 'unknown'
-        });
+        if (consoleErrorCount < maxConsoleErrors) {
+          errors.consoleErrors.push({
+            message: log.text,
+            timestamp: log.timestamp,
+            location: log.location || 'unknown'
+          });
+        } else {
+          errors.consoleErrorsOmitted++;
+        }
+        consoleErrorCount++;
       }
     }
   });
 
-  // Collect network errors (failed requests)
+  // Collect network errors (failed requests, with limit)
+  let networkErrorCount = 0;
   networkRequests.forEach(req => {
     if (req.status === 'failed' || (typeof req.status === 'number' && req.status >= 400)) {
       // Check if error is recent
       const reqTime = req.timestamp;
       if (!sinceTimestamp || reqTime >= cutoffDate) {
-        errors.networkErrors.push({
-          url: req.url,
-          method: req.method,
-          status: req.status,
-          statusText: req.statusText,
-          errorText: req.errorText,
-          timestamp: req.timestamp
-        });
+        if (networkErrorCount < maxNetworkErrors) {
+          errors.networkErrors.push({
+            url: req.url,
+            method: req.method,
+            status: req.status,
+            statusText: req.statusText,
+            errorText: req.errorText,
+            timestamp: req.timestamp
+          });
+        } else {
+          errors.networkErrorsOmitted++;
+        }
+        networkErrorCount++;
       }
     }
   });
@@ -121,6 +137,8 @@ export async function runPostClickDiagnostics(beforeClickTimestamp) {
     errors: {
       consoleErrors: errors.consoleErrors,
       networkErrors: errors.networkErrors,
+      consoleErrorsOmitted: errors.consoleErrorsOmitted,
+      networkErrorsOmitted: errors.networkErrorsOmitted,
       totalErrors: errors.consoleErrors.length + errors.networkErrors.length
     },
     hasErrors: (errors.consoleErrors.length + errors.networkErrors.length) > 0
@@ -160,6 +178,10 @@ export function formatDiagnosticsForAI(diagnostics) {
           output += ` [${err.location}]`;
         }
       });
+      // Show if some errors were omitted
+      if (diagnostics.errors.consoleErrorsOmitted > 0) {
+        output += `\n  ... and ${diagnostics.errors.consoleErrorsOmitted} more console error(s) (omitted to prevent spam)`;
+      }
     }
 
     // Network errors
@@ -172,6 +194,10 @@ export function formatDiagnosticsForAI(diagnostics) {
           output += `\n     Error: ${err.errorText}`;
         }
       });
+      // Show if some errors were omitted
+      if (diagnostics.errors.networkErrorsOmitted > 0) {
+        output += `\n  ... and ${diagnostics.errors.networkErrorsOmitted} more network error(s) (omitted to prevent spam)`;
+      }
     }
   } else {
     output += '\n✓ No errors detected';

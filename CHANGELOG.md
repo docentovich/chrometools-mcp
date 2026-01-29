@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
   - Waits 500ms after click to capture async events
   - Detects pending network requests and waits for completion (up to 5s)
   - Collects JavaScript console errors and network errors
+  - **Error limit**: Max 15 console errors + 15 network errors to prevent spam
+  - Shows omitted error count if limit exceeded
   - Returns diagnostics in click response for immediate AI feedback
   - Prevents AI from making blind follow-up requests when errors occur
   - New module: `utils/post-click-diagnostics.js`
@@ -19,6 +21,7 @@ All notable changes to this project will be documented in this file.
   - Errors displayed immediately in click response
   - AI can see what broke without additional tool calls
   - Better error context: timestamp, location, status codes
+  - Smart error limiting prevents overwhelming AI with hundreds of errors
 
 ## [3.2.6] - 2026-01-28
 
