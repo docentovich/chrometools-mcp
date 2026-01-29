@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.9] - 2026-01-29
+
+### Added
+- **navigateTo diagnostics** — Post-navigation diagnostics for navigateTo tool
+  - Detects chrome-error:// pages (unreachable servers, DNS failures)
+  - Waits 20s for slow page loads and network requests
+  - Reports JS console errors and network errors after navigation
+  - Shows pending requests if page loads slowly
+  - Same comprehensive diagnostics as click tool
+  - Example: Navigate to offline backend → instant error report instead of silent failure
+
+### Changed
+- **Diagnostics naming** — Renamed for clarity and universal use
+  - "POST-CLICK DIAGNOSTICS" → "POST-ACTION DIAGNOSTICS"
+  - Function parameters: beforeClickTimestamp → beforeActionTimestamp
+  - Comments updated to reflect use in both click and navigate actions
+  - File remains post-click-diagnostics.js for backward compatibility
+
 ## [3.2.8] - 2026-01-29
 
 ### Changed

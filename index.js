@@ -1355,6 +1355,9 @@ async function executeToolInternal(name, args) {
         browserOpened = true;
       }
 
+      // Capture timestamp BEFORE navigation for diagnostics
+      const beforeNavTimestamp = Date.now();
+
       // Navigate to the new URL (skip if we just created page with this URL)
       if (!browserOpened) {
         await page.goto(validatedArgs.url, { waitUntil: validatedArgs.waitUntil || 'networkidle2' });
@@ -1362,17 +1365,32 @@ async function executeToolInternal(name, args) {
 
       const title = await page.title();
 
+      // Run post-navigation diagnostics (same as post-click)
+      const diagnostics = await runPostClickDiagnostics(page, beforeNavTimestamp);
+
       // Generate AI hints
       const hints = await generateNavigationHints(page, validatedArgs.url);
+
+      // Format diagnostics for output
+      const diagnosticsText = formatDiagnosticsForAI(diagnostics);
 
       const message = browserOpened
         ? `Browser opened and navigated to: ${validatedArgs.url}`
         : `Navigated to: ${validatedArgs.url}`;
 
+      let hintsText = '\n\n** AI HINTS **';
+      hintsText += `\nPage type: ${hints.pageType}`;
+      if (hints.availableActions.length > 0) {
+        hintsText += `\nAvailable actions: ${hints.availableActions.join(', ')}`;
+      }
+      if (hints.suggestedNext.length > 0) {
+        hintsText += `\nSuggested next: ${hints.suggestedNext.join('; ')}`;
+      }
+
       return {
         content: [{
           type: "text",
-          text: `${message}\nPage title: ${title}\n\n** AI HINTS **\nPage type: ${hints.pageType}\nAvailable actions: ${hints.availableActions.join(', ')}\nSuggested next: ${hints.suggestedNext.join('; ')}`
+          text: `${message}\nPage title: ${title}${hintsText}${diagnosticsText}`
         }],
       };
     }

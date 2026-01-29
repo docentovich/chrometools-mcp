@@ -1,49 +1,49 @@
 /**
- * Post-Click Diagnostics
- * Collects errors and waits for network requests after click actions
+ * Post-Action Diagnostics
+ * Collects errors and waits for network requests after user actions (click, navigation, etc.)
  */
 
 import { consoleLogs, networkRequests } from '../browser/page-manager.js';
 
 /**
  * Wait for pending network requests to complete
- * @param {number} beforeClickTimestamp - Timestamp before click to track new requests
+ * @param {number} beforeActionTimestamp - Timestamp before action to track new requests
  * @param {number} initialWaitMs - Initial wait time before checking (default: 500ms)
  * @param {number} maxWaitMs - Maximum time to wait for requests (default: 5000ms)
  * @returns {Promise<{pendingFound: boolean, waitedMs: number, completedRequests: number, totalRequests: number}>}
  */
-export async function waitForPendingRequests(beforeClickTimestamp, initialWaitMs = 500, maxWaitMs = 5000) {
+export async function waitForPendingRequests(beforeActionTimestamp, initialWaitMs = 500, maxWaitMs = 5000) {
   const startTime = Date.now();
 
   // Step 1: Wait initial period to let requests start
   await new Promise(resolve => setTimeout(resolve, initialWaitMs));
 
-  // Step 2: Get requests that started AFTER click
-  const getPostClickRequests = () => {
-    const cutoffDate = new Date(beforeClickTimestamp).toISOString();
+  // Step 2: Get requests that started AFTER action
+  const getPostActionRequests = () => {
+    const cutoffDate = new Date(beforeActionTimestamp).toISOString();
     return networkRequests.filter(req => req.timestamp >= cutoffDate);
   };
 
-  // Step 3: Check for pending requests (from post-click requests)
+  // Step 3: Check for pending requests (from post-action requests)
   const checkPending = () => {
-    return getPostClickRequests().filter(req => req.status === 'pending');
+    return getPostActionRequests().filter(req => req.status === 'pending');
   };
 
   let pending = checkPending();
-  let allPostClickRequests = getPostClickRequests();
+  let allPostActionRequests = getPostActionRequests();
   const initialPendingCount = pending.length;
 
   // Step 4: If there are pending requests OR new requests appeared, wait for completion
-  if (pending.length > 0 || allPostClickRequests.length > 0) {
+  if (pending.length > 0 || allPostActionRequests.length > 0) {
     // Wait for pending requests to complete (with timeout)
     while (pending.length > 0 && (Date.now() - startTime) < maxWaitMs) {
       await new Promise(resolve => setTimeout(resolve, 100)); // Check every 100ms
       pending = checkPending();
-      allPostClickRequests = getPostClickRequests(); // Update total count
+      allPostActionRequests = getPostActionRequests(); // Update total count
     }
   }
 
-  const finalRequests = getPostClickRequests();
+  const finalRequests = getPostActionRequests();
   const completedRequests = finalRequests.filter(req => req.status === 'completed' || (typeof req.status === 'number'));
   const pendingRequests = pending.map(req => ({
     url: req.url,
@@ -130,15 +130,15 @@ export function collectErrors(sinceTimestamp = null, maxConsoleErrors = 15, maxN
 }
 
 /**
- * Full post-click diagnostics: wait for requests and collect errors
+ * Full post-action diagnostics: wait for requests and collect errors
  * @param {Page} page - Puppeteer page instance
- * @param {number} beforeClickTimestamp - Timestamp before click (to filter errors)
+ * @param {number} beforeActionTimestamp - Timestamp before action (to filter errors)
  * @returns {Promise<Object>} Diagnostics result with errors and network info
  */
-export async function runPostClickDiagnostics(page, beforeClickTimestamp) {
-  // Wait for network requests (passing timestamp to track post-click requests)
+export async function runPostClickDiagnostics(page, beforeActionTimestamp) {
+  // Wait for network requests (passing timestamp to track post-action requests)
   // maxWait = 20s to give slow APIs time to complete
-  const networkInfo = await waitForPendingRequests(beforeClickTimestamp, 500, 20000);
+  const networkInfo = await waitForPendingRequests(beforeActionTimestamp, 500, 20000);
 
   // Small delay to let pending requests update their error status
   // (handles case where request completes with error right after maxWait expires)
@@ -158,8 +158,8 @@ export async function runPostClickDiagnostics(page, beforeClickTimestamp) {
     }).catch(() => ({ errorCode: 'PAGE_LOAD_ERROR', suggestion: 'Navigation failed' }));
   }
 
-  // Collect errors that occurred after the click (including errors from just-completed requests)
-  const errors = collectErrors(beforeClickTimestamp);
+  // Collect errors that occurred after the action (including errors from just-completed requests)
+  const errors = collectErrors(beforeActionTimestamp);
 
   // Combine into diagnostics report
   const diagnostics = {
@@ -191,7 +191,7 @@ export async function runPostClickDiagnostics(page, beforeClickTimestamp) {
  * @returns {string} Formatted text for AI
  */
 export function formatDiagnosticsForAI(diagnostics) {
-  let output = '\n\n** POST-CLICK DIAGNOSTICS **';
+  let output = '\n\n** POST-ACTION DIAGNOSTICS **';
 
   // Chrome error page (connection refused, DNS failed, etc.)
   if (diagnostics.chromeError) {
