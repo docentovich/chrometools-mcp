@@ -54,6 +54,8 @@ import {getToolsFromGroups, getAllGroupNames} from './server/tool-groups.js';
 import {executeElementAction} from './utils/element-actions.js';
 // Import hints generator
 import {generateClickHints, generateNavigationHints} from './utils/hints-generator.js';
+// Import post-click diagnostics
+import {runPostClickDiagnostics, formatDiagnosticsForAI} from './utils/post-click-diagnostics.js';
 
 // Import Recorder modules
 // Note: injectRecorder removed - now using Chrome Extension
@@ -380,6 +382,9 @@ async function executeToolInternal(name, args) {
           throw new Error(`Element not found: ${identifier}`);
         }
 
+        // Capture timestamp BEFORE click for error filtering
+        const beforeClickTimestamp = Date.now();
+
         // Try multiple click methods for better reliability
         try {
           // Method 1: Puppeteer click (most reliable for most cases)
@@ -395,11 +400,15 @@ async function executeToolInternal(name, args) {
             await element.evaluate(el => el.click());
           }
         }
-        await new Promise(resolve => setTimeout(resolve, validatedArgs.waitAfter || 1500));
 
-        // Generate AI hints after click
+        // NEW POST-CLICK PATTERN:
+        // 1. Run post-click diagnostics (waits 500ms, checks pending requests, collects errors)
+        const diagnostics = await runPostClickDiagnostics(beforeClickTimestamp);
+
+        // 2. Generate AI hints after click
         const hints = await generateClickHints(page, identifier);
 
+        // 3. Format output with hints and diagnostics
         let hintsText = '\n\n** AI HINTS **';
         if (hints.modalOpened) hintsText += '\nModal opened - interact with it or close';
         if (hints.newElements.length > 0) {
@@ -409,8 +418,11 @@ async function executeToolInternal(name, args) {
           hintsText += `\nSuggested next: ${hints.suggestedNext.join('; ')}`;
         }
 
+        // 4. Add diagnostics to output
+        const diagnosticsText = formatDiagnosticsForAI(diagnostics);
+
         const content = [
-          { type: "text", text: `Clicked: ${identifier}${hintsText}` }
+          { type: "text", text: `Clicked: ${identifier}${hintsText}${diagnosticsText}` }
         ];
 
         // Only add screenshot if requested

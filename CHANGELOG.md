@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.7] - 2026-01-29
+
+### Added
+- **Post-click diagnostics** — Click tool now automatically detects and reports errors
+  - Waits 500ms after click to capture async events
+  - Detects pending network requests and waits for completion (up to 5s)
+  - Collects JavaScript console errors and network errors
+  - Returns diagnostics in click response for immediate AI feedback
+  - Prevents AI from making blind follow-up requests when errors occur
+  - New module: `utils/post-click-diagnostics.js`
+
+### Changed
+- **Click behavior** — Enhanced UX for AI agents
+  - Click now includes network activity summary (requests completed, timing)
+  - Errors displayed immediately in click response
+  - AI can see what broke without additional tool calls
+  - Better error context: timestamp, location, status codes
+
 ## [3.2.6] - 2026-01-28
 
 ### Removed
