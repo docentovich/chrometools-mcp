@@ -30,6 +30,21 @@ export const consoleLogs = [];
 // Network requests storage
 export const networkRequests = [];
 
+// Maximum number of network requests to keep in memory (prevent unbounded growth)
+const MAX_NETWORK_REQUESTS = 500;
+
+/**
+ * Clean old network requests to prevent memory leak
+ * Keeps only the most recent MAX_NETWORK_REQUESTS requests
+ */
+function cleanOldNetworkRequests() {
+  if (networkRequests.length > MAX_NETWORK_REQUESTS) {
+    // Remove oldest requests (keep most recent)
+    const removeCount = networkRequests.length - MAX_NETWORK_REQUESTS;
+    networkRequests.splice(0, removeCount);
+  }
+}
+
 // Page analysis cache
 export const pageAnalysisCache = new Map();
 
@@ -52,6 +67,19 @@ export async function setupNetworkMonitoring(page) {
 
   client.on('Network.requestWillBeSent', (event) => {
     const timestamp = new Date().toISOString();
+
+    // Check if request already exists (prevent duplicates from redirects/retries)
+    const existingReq = networkRequests.find(r => r.requestId === event.requestId);
+    if (existingReq) {
+      // Update existing request instead of creating duplicate
+      existingReq.url = event.request.url;
+      existingReq.method = event.request.method;
+      existingReq.headers = event.request.headers;
+      existingReq.postData = event.request.postData;
+      existingReq.timestamp = timestamp;
+      return;
+    }
+
     networkRequests.push({
       requestId: event.requestId,
       url: event.request.url,
@@ -64,6 +92,9 @@ export async function setupNetworkMonitoring(page) {
       status: 'pending',
       documentURL: event.documentURL
     });
+
+    // Clean old requests to prevent unbounded memory growth
+    cleanOldNetworkRequests();
   });
 
   client.on('Network.responseReceived', (event) => {

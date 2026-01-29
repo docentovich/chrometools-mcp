@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.10] - 2026-01-29
+
+### Fixed
+- **Network request deduplication** — Fixed duplicate pending requests in diagnostics
+  - Prevented same requestId from being added multiple times during redirects/retries
+  - Added deduplication check in Network.requestWillBeSent event handler
+  - Updates existing request instead of creating duplicate entry
+  - Example: example.com showed 4 pending (2 URLs × 2 duplicates) → now shows 2 pending (correct count)
+- **Memory leak prevention** — Limited networkRequests array growth
+  - Keeps maximum 500 most recent network requests in memory
+  - Automatically removes oldest requests when limit exceeded
+  - Prevents unbounded memory growth during long browser sessions
+  - Example: After 100 page navigations, memory stays bounded
+
 ## [3.2.9] - 2026-01-29
 
 ### Added
