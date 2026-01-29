@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [3.2.8] - 2026-01-29
 
+### Changed
+- **Network wait timeout** — Increased from 5s to 20s for slow APIs
+  - Gives slow backend APIs time to complete before timeout
+  - AI gets complete success/error status instead of "pending unknown"
+  - Pending requests after 20s are reported with details (URL, method, runtime)
+  - Clear warning: "Status unknown - may complete successfully or fail"
+
 ### Fixed
 - **Click timeout on network errors** — No more 30s timeout when backend unreachable
   - Detects chrome-error:// pages (ERR_CONNECTION_REFUSED, DNS_PROBE_FINISHED_NXDOMAIN, etc.)
@@ -21,6 +28,10 @@ All notable changes to this project will be documented in this file.
   - Catches errors from requests that finish right as timeout expires
   - Network summary shows: "⚠️ Network: 2 OK, 1 failed" when errors present
   - Ensures AI sees errors even if request completes at edge of timeout window
+- **Pending request reporting** — AI now sees details about slow/hanging requests
+  - Lists pending requests with URL, method, and elapsed time
+  - Suggests backend performance check or network connectivity issues
+  - Example: "POST /api/slow - Running for: 20145ms"
 
 ## [3.2.7] - 2026-01-29
 

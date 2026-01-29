@@ -45,12 +45,18 @@ export async function waitForPendingRequests(beforeClickTimestamp, initialWaitMs
 
   const finalRequests = getPostClickRequests();
   const completedRequests = finalRequests.filter(req => req.status === 'completed' || (typeof req.status === 'number'));
+  const pendingRequests = pending.map(req => ({
+    url: req.url,
+    method: req.method,
+    timestamp: req.timestamp
+  }));
 
   return {
     pendingFound: initialPendingCount > 0,
     waitedMs: Date.now() - startTime,
     completedRequests: completedRequests.length,
     stillPending: pending.length,
+    pendingRequests: pendingRequests,
     totalRequests: finalRequests.length
   };
 }
@@ -131,7 +137,8 @@ export function collectErrors(sinceTimestamp = null, maxConsoleErrors = 15, maxN
  */
 export async function runPostClickDiagnostics(page, beforeClickTimestamp) {
   // Wait for network requests (passing timestamp to track post-click requests)
-  const networkInfo = await waitForPendingRequests(beforeClickTimestamp, 500, 5000);
+  // maxWait = 20s to give slow APIs time to complete
+  const networkInfo = await waitForPendingRequests(beforeClickTimestamp, 500, 20000);
 
   // Small delay to let pending requests update their error status
   // (handles case where request completes with error right after maxWait expires)
@@ -160,6 +167,7 @@ export async function runPostClickDiagnostics(page, beforeClickTimestamp) {
       hadPendingRequests: networkInfo.pendingFound,
       completedRequests: networkInfo.completedRequests,
       stillPending: networkInfo.stillPending,
+      pendingRequests: networkInfo.pendingRequests,
       totalRequests: networkInfo.totalRequests,
       waitedMs: networkInfo.waitedMs
     },
@@ -199,16 +207,16 @@ export function formatDiagnosticsForAI(diagnostics) {
     const errorCount = diagnostics.errors.networkErrors.length;
     const successCount = netActivity.completedRequests - errorCount;
 
-    if (errorCount > 0) {
-      output += `\n⚠️  Network: ${successCount} OK, ${errorCount} failed`;
-    } else {
-      output += `\n✓ Network: ${netActivity.completedRequests} completed`;
-    }
-
+    // Show warning if there are pending requests after timeout
     if (netActivity.stillPending > 0) {
-      output += `, ${netActivity.stillPending} pending (waited ${netActivity.waitedMs}ms)`;
+      output += `\n⚠️  Network: ${successCount} OK, ${errorCount} failed, ${netActivity.stillPending} PENDING`;
+      output += `\n   ⏱️  Timeout: Stopped waiting after ${netActivity.waitedMs}ms`;
+      output += `\n   → ${netActivity.stillPending} request(s) still running - status unknown`;
+      output += `\n   → May complete successfully or fail - cannot determine outcome`;
+    } else if (errorCount > 0) {
+      output += `\n⚠️  Network: ${successCount} OK, ${errorCount} failed (${netActivity.waitedMs}ms)`;
     } else {
-      output += ` (${netActivity.waitedMs}ms)`;
+      output += `\n✓ Network: ${netActivity.completedRequests} completed (${netActivity.waitedMs}ms)`;
     }
   } else {
     output += '\n✓ No network requests triggered';
@@ -250,6 +258,19 @@ export function formatDiagnosticsForAI(diagnostics) {
     }
   } else {
     output += '\n✓ No errors detected';
+  }
+
+  // Pending requests (if any still running after timeout)
+  if (netActivity.stillPending > 0 && netActivity.pendingRequests.length > 0) {
+    output += `\n\n⏳ PENDING REQUESTS (${netActivity.stillPending} still running):`;
+    netActivity.pendingRequests.forEach((req, idx) => {
+      output += `\n  ${idx + 1}. ${req.method} ${req.url}`;
+      const elapsed = Date.now() - new Date(req.timestamp).getTime();
+      output += `\n     Running for: ${elapsed}ms`;
+    });
+    output += `\n\n💡 Suggestion: These requests may be slow or hanging`;
+    output += `\n   → Check backend performance or network connectivity`;
+    output += `\n   → Consider using getNetworkRequest() to monitor progress`;
   }
 
   return output;
