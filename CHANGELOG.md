@@ -12,6 +12,12 @@ All notable changes to this project will be documented in this file.
   - Shows pending requests if page loads slowly
   - Same comprehensive diagnostics as click tool
   - Example: Navigate to offline backend → instant error report instead of silent failure
+- **openBrowser diagnostics** — Post-navigation diagnostics for openBrowser tool
+  - Same comprehensive diagnostics as navigateTo and click
+  - Critical for first action in session - shows errors immediately
+  - Detects chrome-error:// pages on initial load
+  - Reports network errors, console errors, pending requests
+  - Example: Open unreachable backend → instant error report with details
 
 ### Changed
 - **Diagnostics naming** — Renamed for clarity and universal use

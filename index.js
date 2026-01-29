@@ -315,11 +315,21 @@ async function executeToolInternal(name, args) {
 
     if (name === "openBrowser") {
       const validatedArgs = schemas.OpenBrowserSchema.parse(args);
+
+      // Capture timestamp BEFORE opening for diagnostics
+      const beforeOpenTimestamp = Date.now();
+
       const page = await getOrCreatePage(validatedArgs.url);
       const title = await page.title();
 
+      // Run post-navigation diagnostics (same as navigateTo)
+      const diagnostics = await runPostClickDiagnostics(page, beforeOpenTimestamp);
+
       // Generate AI hints
       const hints = await generateNavigationHints(page, validatedArgs.url);
+
+      // Format diagnostics for output
+      const diagnosticsText = formatDiagnosticsForAI(diagnostics);
 
       // Check if extension is connected
       const extensionConnected = isExtensionConnected();
@@ -331,11 +341,20 @@ async function executeToolInternal(name, args) {
         extensionNote = `\n\n⚠️ EXTENSION NOT CONNECTED\nConnected to existing Chrome - extension needs manual installation.\n${instructions.installSteps.join('\n')}\n\nAlternative: ${instructions.alternativeFix}`;
       }
 
+      let hintsText = '\n\n** AI HINTS **';
+      hintsText += `\nPage type: ${hints.pageType}`;
+      if (hints.availableActions.length > 0) {
+        hintsText += `\nAvailable actions: ${hints.availableActions.join(', ')}`;
+      }
+      if (hints.suggestedNext.length > 0) {
+        hintsText += `\nSuggested next: ${hints.suggestedNext.join('; ')}`;
+      }
+
       return {
         content: [
           {
             type: "text",
-            text: `Browser opened successfully!\nURL: ${validatedArgs.url}\nPage title: ${title}\n\nBrowser remains open for interaction.\n\n** AI HINTS **\nPage type: ${hints.pageType}\nAvailable actions: ${hints.availableActions.join(', ')}\nSuggested next: ${hints.suggestedNext.join('; ')}${extensionNote}`,
+            text: `Browser opened successfully!\nURL: ${validatedArgs.url}\nPage title: ${title}\n\nBrowser remains open for interaction.${hintsText}${diagnosticsText}${extensionNote}`,
           },
         ],
       };
