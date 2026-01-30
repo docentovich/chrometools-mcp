@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.5] - 2026-01-30
+
+### Fixed
+- **type/click: Intermittent timeout fix** — Added timeouts to internal operations
+  - `resolveSelector` now has 5s timeout (was unbounded)
+  - `getElementInfo` now has 5s timeout (was unbounded)
+  - `TextInputModel.setValue` operations have individual 5s timeouts
+  - Prevents indefinite hanging on unstable CDP sessions
+  - Error messages now show which specific operation timed out
+
 ## [3.3.4] - 2026-01-30
 
 ### Added

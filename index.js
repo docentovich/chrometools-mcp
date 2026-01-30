@@ -364,8 +364,8 @@ async function executeToolInternal(name, args) {
      * Helper: Resolve selector (ID or CSS selector)
      * Injects selector-resolver and resolves element identifier
      */
-    async function resolveSelector(page, identifier) {
-      return await page.evaluate((id, selectorResolverCode) => {
+    async function resolveSelector(page, identifier, timeoutMs = 5000) {
+      const evaluatePromise = page.evaluate((id, selectorResolverCode) => {
         // Inject selector resolver if not already loaded
         if (typeof resolveSelector === 'undefined') {
           eval(selectorResolverCode);
@@ -378,6 +378,12 @@ async function executeToolInternal(name, args) {
           found: document.querySelector(resolved.selector) !== null
         };
       }, identifier, selectorResolver);
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`resolveSelector timed out after ${timeoutMs}ms`)), timeoutMs)
+      );
+
+      return Promise.race([evaluatePromise, timeoutPromise]);
     }
 
     if (name === "click") {

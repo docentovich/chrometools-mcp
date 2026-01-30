@@ -39,17 +39,31 @@ const MODEL_REGISTRY = [
 ];
 
 /**
+ * Wrap operation with timeout to prevent hanging
+ */
+async function withTimeout(operation, timeoutMs, operationName) {
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`${operationName} timed out after ${timeoutMs}ms`)), timeoutMs)
+  );
+  return Promise.race([operation(), timeoutPromise]);
+}
+
+/**
  * Factory class for creating appropriate input models
  */
 export class InputModelFactory {
   /**
-   * Get element info (tagName, inputType)
+   * Get element info (tagName, inputType) with timeout
    */
-  static async getElementInfo(element) {
-    return await element.evaluate(el => ({
-      tagName: el.tagName.toLowerCase(),
-      inputType: el.type?.toLowerCase() || null,
-    }));
+  static async getElementInfo(element, timeoutMs = 5000) {
+    return await withTimeout(
+      () => element.evaluate(el => ({
+        tagName: el.tagName.toLowerCase(),
+        inputType: el.type?.toLowerCase() || null,
+      })),
+      timeoutMs,
+      'getElementInfo'
+    );
   }
 
   /**
