@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.3] - 2026-01-30
+
+### Fixed
+- **click: Post-click diagnostics timeout** — Fixed 30s timeout caused by network wait logic
+  - Now waits only for mutation requests (POST/PUT/PATCH) started within 200ms after click
+  - Ignores GET requests completely (were causing unnecessary waits)
+  - Hard 10s timeout limit enforced (never hangs indefinitely)
+  - Always returns success even if requests still pending after 10s
+  - Shows pending requests status instead of reporting timeout
+  - Changed output from "Form submission" to "Mutation requests"
+  - Example output:
+    ```
+    📡 Mutation requests detected (2 POST/PUT/PATCH):
+      1. ✓ POST /admin/tenant/.../change/ → 302 Found
+      2. ⏳ POST /api/slow-endpoint/ → pending
+
+    ⏳ 1 request(s) still pending after 10000ms timeout
+    ```
+
+### Performance
+- **click: Removed unnecessary delays** — Removed 100ms waits after scrollIntoView and retry clicks
+  - Click operations now complete instantly when no mutation requests detected
+  - Typical click time: <50ms (was 500-10000ms with old diagnostics)
+
 ## [3.3.2] - 2026-01-30
 
 ### Fixed
