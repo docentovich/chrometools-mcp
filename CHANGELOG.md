@@ -20,11 +20,12 @@ All notable changes to this project will be documented in this file.
   - Example: `type({ selector: 'input[name="url"]', text: 'value', timeout: 10000 })`
 
 ### Changed
-- **Reduced default network wait** — 20s → 3s for faster form interactions
-  - Default `maxWait` in `waitForPendingRequests`: 20000ms → 3000ms
-  - Speeds up click/type operations by 17 seconds on average
-  - Forms submit faster, no more 20s waits for simple pages
-  - Advanced users can increase via `networkWaitTimeout` parameter
+- **Optimized network wait timeout** — 20s → 10s for balanced performance
+  - Default `maxWait` in `waitForPendingRequests`: 20000ms → 10000ms
+  - Default `networkWaitTimeout` parameter: 10000ms
+  - Catches Django form POST responses (typically 1-3s)
+  - Ignores long-polling requests (ws_token, etc.) after 10s
+  - Advanced users can adjust via `networkWaitTimeout` parameter
 - **Type operation timeout protection** — Wrapped in Promise.race with configurable timeout
   - Prevents 120s hangs on problematic input fields
   - Returns clear error message: "Type operation timed out after Xms"

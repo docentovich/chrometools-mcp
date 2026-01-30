@@ -494,8 +494,8 @@ Click an element with optional result screenshot. **PREFERRED**: Use APOM ID fro
   - `waitAfter` (optional): Wait time in ms (default: 1500)
   - `screenshot` (optional): Capture screenshot (default: false for performance) ⚡
   - `timeout` (optional): Max operation time in ms (default: 30000)
-  - `skipNetworkWait` (optional): Skip waiting for network requests (default: false). **Use for Django forms/admin panels with WebSockets to avoid 30s timeouts.**
-  - `networkWaitTimeout` (optional): Custom network wait timeout in ms (default: 3000). Only used if skipNetworkWait is false.
+  - `skipNetworkWait` (optional): Skip waiting for network requests (default: false). **Use for pages with continuous long-polling to get instant response.**
+  - `networkWaitTimeout` (optional): Custom network wait timeout in ms (default: 10000). Only used if skipNetworkWait is false.
 - **Use case**: Buttons, links, form submissions, Django admin forms
 - **Returns**: Confirmation text + optional screenshot + network diagnostics
 - **Performance**: 2-10x faster without screenshot, instant with skipNetworkWait
