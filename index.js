@@ -430,7 +430,11 @@ async function executeToolInternal(name, args) {
         //   skipNetworkWait: validatedArgs.skipNetworkWait,
         //   networkWaitTimeout: validatedArgs.networkWaitTimeout
         // });
-        const diagnostics = { allRecentRequests: [], recentMutationRequests: [], errors: [], skipped: true };
+        const diagnostics = {
+          networkActivity: { allRecentRequests: [], mutationRequests: [] },
+          errors: [],
+          skipped: true
+        };
 
         // 2. Generate AI hints after click
         const hints = await generateClickHints(page, identifier);
