@@ -406,16 +406,17 @@ async function executeToolInternal(name, args) {
 
         // ALWAYS scroll to element first to ensure it's in viewport
         await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // COMMENTED FOR TESTING: await new Promise(resolve => setTimeout(resolve, 100));
 
         // Try multiple click methods for better reliability
         try {
           // Method 1: Puppeteer click (most reliable for most cases)
+          // TESTING: Just click without any navigation waiting
           await element.click();
         } catch (clickError) {
           // Method 2: Try click again after short delay
           try {
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // COMMENTED FOR TESTING: await new Promise(resolve => setTimeout(resolve, 100));
             await element.click();
           } catch (retryClickError) {
             // Method 3: JavaScript click (works for hidden/overlapping elements)
@@ -424,11 +425,12 @@ async function executeToolInternal(name, args) {
         }
 
         // NEW POST-CLICK PATTERN:
-        // 1. Run post-click diagnostics (waits 500ms, checks pending requests, collects errors)
-        const diagnostics = await runPostClickDiagnostics(page, beforeClickTimestamp, {
-          skipNetworkWait: validatedArgs.skipNetworkWait,
-          networkWaitTimeout: validatedArgs.networkWaitTimeout
-        });
+        // COMMENTED FOR TESTING: 1. Run post-click diagnostics (waits 500ms, checks pending requests, collects errors)
+        // const diagnostics = await runPostClickDiagnostics(page, beforeClickTimestamp, {
+        //   skipNetworkWait: validatedArgs.skipNetworkWait,
+        //   networkWaitTimeout: validatedArgs.networkWaitTimeout
+        // });
+        const diagnostics = { allRecentRequests: [], recentMutationRequests: [], errors: [], skipped: true };
 
         // 2. Generate AI hints after click
         const hints = await generateClickHints(page, identifier);
