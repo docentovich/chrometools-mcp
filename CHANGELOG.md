@@ -7,11 +7,10 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **click: skipNetworkWait parameter** — Skip network wait for forms with long-polling/WebSockets
   - New parameter: `skipNetworkWait: boolean` (default: false)
-  - Use case: Django forms, admin panels with active WebSockets
-  - Prevents 30s timeouts on form submissions
+  - Use case: Pages with continuous long-polling to get instant response
   - Example: `click({ selector: 'button[type="submit"]', skipNetworkWait: true })`
 - **click: networkWaitTimeout parameter** — Custom network wait timeout
-  - New parameter: `networkWaitTimeout: number` (default: 3000ms)
+  - New parameter: `networkWaitTimeout: number` (default: 10000ms)
   - Configurable per-click timeout for network requests
   - Example: `click({ selector: '.save-btn', networkWaitTimeout: 5000 })`
 - **type: timeout parameter** — Explicit timeout for type operations
@@ -20,12 +19,12 @@ All notable changes to this project will be documented in this file.
   - Example: `type({ selector: 'input[name="url"]', text: 'value', timeout: 10000 })`
 
 ### Changed
-- **Optimized network wait timeout** — 20s → 10s for balanced performance
-  - Default `maxWait` in `waitForPendingRequests`: 20000ms → 10000ms
-  - Default `networkWaitTimeout` parameter: 10000ms
-  - Catches Django form POST responses (typically 1-3s)
-  - Ignores long-polling requests (ws_token, etc.) after 10s
-  - Advanced users can adjust via `networkWaitTimeout` parameter
+- **Smart form submission tracking** — Only tracks POST/PATCH/PUT requests in 100ms window
+  - Filters mutation requests (POST/PATCH/PUT) that started within 100ms after click
+  - Waits ONLY for these mutation requests (up to 10s)
+  - Ignores all other requests (GET, polling, analytics, etc.)
+  - Shows form submission status: `✓ POST /admin/tenant/.../change/ → 302 Found`
+  - Example: Django form with 50 polling requests → only 1 POST tracked
 - **Type operation timeout protection** — Wrapped in Promise.race with configurable timeout
   - Prevents 120s hangs on problematic input fields
   - Returns clear error message: "Type operation timed out after Xms"
@@ -33,10 +32,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Django form timeout issues** — Fixed 30s click timeout and 120s type timeout
-  - Root cause: Long-polling/WebSockets kept page "busy" indefinitely
-  - Solution: `skipNetworkWait: true` bypasses network waiting
+  - Root cause: Long-polling/WebSockets created noise in network tracking
+  - Solution: Track only POST/PATCH/PUT requests within 100ms detection window
   - Type operations now have explicit timeout protection
-  - Example: Django Admin forms now work without timeouts
+  - Example: Django Admin forms now show reliable form submission status
 
 ## [3.2.11] - 2026-01-30
 
