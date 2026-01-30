@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.2] - 2026-01-30
+
+### Fixed
+- **click/type: Viewport scrolling** — Always scrolls to element before interaction
+  - Prevents 30s timeout when elements are outside viewport
+  - Moves scrollIntoView BEFORE first click/type attempt (was in fallback)
+  - Fixes Django admin forms hanging after multiple navigations
+  - Pattern: scroll → wait 100ms → interact
+  - Applied to both click and type tools
+
 ## [3.3.1] - 2026-01-30
 
 ### Added

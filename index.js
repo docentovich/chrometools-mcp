@@ -404,17 +404,20 @@ async function executeToolInternal(name, args) {
         // Capture timestamp BEFORE click for error filtering
         const beforeClickTimestamp = Date.now();
 
+        // ALWAYS scroll to element first to ensure it's in viewport
+        await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
+        await new Promise(resolve => setTimeout(resolve, 100));
+
         // Try multiple click methods for better reliability
         try {
           // Method 1: Puppeteer click (most reliable for most cases)
           await element.click();
         } catch (clickError) {
-          // Method 2: Scroll into view and try again
+          // Method 2: Try click again after short delay
           try {
-            await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
             await new Promise(resolve => setTimeout(resolve, 100));
             await element.click();
-          } catch (scrollClickError) {
+          } catch (retryClickError) {
             // Method 3: JavaScript click (works for hidden/overlapping elements)
             await element.evaluate(el => el.click());
           }
@@ -484,6 +487,10 @@ async function executeToolInternal(name, args) {
         if (!element) {
           throw new Error(`Element not found: ${identifier}`);
         }
+
+        // ALWAYS scroll to element first to ensure it's in viewport
+        await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
+        await new Promise(resolve => setTimeout(resolve, 100));
 
         // Use input model to handle the element appropriately
         const model = await getInputModel(element, page);
