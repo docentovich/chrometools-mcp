@@ -29,10 +29,16 @@ export async function listAngularComponents(page, includeHidden = false) {
 
         const component = ng.getComponent(el);
         if (component && component.constructor && component.constructor.name !== 'Object') {
-          // Get selector
+          // Get selector (filter out Tailwind classes with special characters)
           const tagName = el.tagName.toLowerCase();
-          const id = el.id ? `#${el.id}` : '';
-          const classes = el.className ? `.${el.className.split(' ').join('.')}` : '';
+          const id = el.id ? `#${CSS.escape(el.id)}` : '';
+          const stableClasses = el.className
+            ? el.className.split(' ')
+                .filter(c => c && !/[:\/\[\]]/.test(c))
+                .slice(0, 3)
+                .map(c => CSS.escape(c))
+            : [];
+          const classes = stableClasses.length > 0 ? `.${stableClasses.join('.')}` : '';
           const selector = id || `${tagName}${classes}` || tagName;
 
           // Get methods (public only by default)

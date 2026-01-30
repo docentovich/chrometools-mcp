@@ -149,8 +149,10 @@
 
     return Array.from(element.classList).filter(cls => {
       if (cls.length < 2) return false;
+      // Filter out Tailwind classes with special characters (colons, slashes, brackets)
+      if (/[:\/\[\]]/.test(cls)) return false;
       return !unstablePatterns.some(p => p.test(cls));
-    }).slice(0, 3);
+    }).slice(0, 3).map(cls => CSS.escape(cls));
   }
 
   function getNthChildPath(element, maxDepth = 5) {

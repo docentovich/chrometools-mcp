@@ -8,6 +8,20 @@
  */
 export function generateNavigationHints(page, url) {
   return page.evaluate(() => {
+    // Helper to get safe class selector (filters Tailwind special chars)
+    function getSafeClassSelector(element) {
+      if (!element.className || typeof element.className !== 'string') return null;
+      const classes = element.className.split(' ')
+        .filter(c => c && !/[:\/\[\]]/.test(c))
+        .slice(0, 1);
+      if (classes.length === 0) return null;
+      try {
+        return `.${CSS.escape(classes[0])}`;
+      } catch (e) {
+        return null;
+      }
+    }
+
     const hints = {
       pageType: 'unknown',
       availableActions: [],
@@ -64,7 +78,7 @@ export function generateNavigationHints(page, url) {
       hints.keyElements.push({
         type: 'primary-button',
         text: mainButton.textContent.trim(),
-        selector: mainButton.id ? `#${mainButton.id}` : `.${mainButton.className.split(' ')[0]}`,
+        selector: mainButton.id ? `#${CSS.escape(mainButton.id)}` : (getSafeClassSelector(mainButton) || 'button'),
       });
     }
 
@@ -74,7 +88,7 @@ export function generateNavigationHints(page, url) {
         hints.keyElements.push({
           type: 'notification',
           text: alert.textContent.trim().substring(0, 100),
-          selector: alert.className ? `.${alert.className.split(' ')[0]}` : 'notification',
+          selector: getSafeClassSelector(alert) || '[role="alert"]',
         });
       }
     });
@@ -91,6 +105,20 @@ export async function generateClickHints(page, selector) {
   await new Promise(resolve => setTimeout(resolve, 100));
 
   return page.evaluate((clickedSelector) => {
+    // Helper to get safe class selector (filters Tailwind special chars)
+    function getSafeClassSelector(element) {
+      if (!element.className || typeof element.className !== 'string') return null;
+      const classes = element.className.split(' ')
+        .filter(c => c && !/[:\/\[\]]/.test(c))
+        .slice(0, 1);
+      if (classes.length === 0) return null;
+      try {
+        return `.${CSS.escape(classes[0])}`;
+      } catch (e) {
+        return null;
+      }
+    }
+
     const hints = {
       pageChanged: false,
       newElements: [],
@@ -105,7 +133,7 @@ export async function generateClickHints(page, selector) {
         hints.modalOpened = true;
         hints.newElements.push({
           type: 'modal',
-          selector: modal.className ? `.${modal.className.split(' ')[0]}` : '[role="dialog"]',
+          selector: getSafeClassSelector(modal) || '[role="dialog"]',
         });
         hints.suggestedNext.push('Interact with modal or close it');
       }
@@ -145,6 +173,20 @@ export async function generateFormSubmitHints(page) {
   await new Promise(resolve => setTimeout(resolve, 500));
 
   return page.evaluate(() => {
+    // Helper to get safe class selector (filters Tailwind special chars)
+    function getSafeClassSelector(element) {
+      if (!element.className || typeof element.className !== 'string') return null;
+      const classes = element.className.split(' ')
+        .filter(c => c && !/[:\/\[\]]/.test(c))
+        .slice(0, 1);
+      if (classes.length === 0) return null;
+      try {
+        return `.${CSS.escape(classes[0])}`;
+      } catch (e) {
+        return null;
+      }
+    }
+
     const hints = {
       success: false,
       errors: [],
@@ -173,7 +215,7 @@ export async function generateFormSubmitHints(page) {
       if (el.offsetWidth > 0) {
         hints.errors.push({
           text: el.textContent.trim().substring(0, 100),
-          selector: el.className ? `.${el.className.split(' ')[0]}` : 'error-element',
+          selector: getSafeClassSelector(el) || '[aria-invalid="true"]',
         });
       }
     });

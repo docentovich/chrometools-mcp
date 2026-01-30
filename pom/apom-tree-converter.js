@@ -711,12 +711,17 @@ function buildAPOMTree(interactiveOnly = true) {
     // Try to find stable class name (excluding framework-specific dynamic classes)
     const stableClass = getStableClassName(element);
     if (stableClass) {
-      const classSelector = `.${stableClass}`;
+      const escapedClass = CSS.escape(stableClass);
+      const classSelector = `.${escapedClass}`;
       // Verify it's unique within parent context
       if (element.parentElement) {
-        const matches = element.parentElement.querySelectorAll(classSelector);
-        if (matches.length === 1 && matches[0] === element) {
-          return classSelector;
+        try {
+          const matches = element.parentElement.querySelectorAll(classSelector);
+          if (matches.length === 1 && matches[0] === element) {
+            return classSelector;
+          }
+        } catch (e) {
+          // Invalid selector, continue to path-based approach
         }
       }
     }
@@ -728,10 +733,10 @@ function buildAPOMTree(interactiveOnly = true) {
     while (current && current !== document.body) {
       let selector = current.tagName.toLowerCase();
 
-      // Add stable class if available
+      // Add stable class if available (escaped for CSS selector safety)
       const stableClass = getStableClassName(current);
       if (stableClass) {
-        selector += `.${stableClass}`;
+        selector += `.${CSS.escape(stableClass)}`;
       }
 
       // Add nth-of-type if needed
@@ -754,6 +759,7 @@ function buildAPOMTree(interactiveOnly = true) {
 
   /**
    * Get stable class name excluding framework-specific dynamic classes
+   * and Tailwind CSS utility classes with special characters
    * Returns first stable class or null
    */
   function getStableClassName(element) {
@@ -763,8 +769,14 @@ function buildAPOMTree(interactiveOnly = true) {
 
     const classes = element.className.split(/\s+/).filter(c => c);
 
-    // Filter out framework-specific classes
+    // Filter out framework-specific classes and Tailwind utilities
     const stableClasses = classes.filter(className => {
+      // Tailwind CSS: classes with special characters that break CSS selectors
+      // Colons for variants (hover:, focus:, md:, etc.)
+      // Slashes for fractions (w-1/2)
+      // Brackets for arbitrary values (bg-[#1da1f2])
+      if (/[:\/\[\]]/.test(className)) return false;
+
       // React: CSS Modules, Styled Components, Emotion
       if (/^[a-zA-Z0-9_-]+-[a-zA-Z0-9_-]{5,}$/.test(className)) return false;
       if (/^css-[a-z0-9]+(-[a-z0-9]+)?$/i.test(className)) return false;

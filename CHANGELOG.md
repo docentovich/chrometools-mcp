@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.11] - 2026-01-30
+
+### Fixed
+- **Tailwind CSS selector escape** — Fixed `analyzePage` failing on pages with Tailwind CSS
+  - Tailwind classes with colons (e.g., `hover:text-gray-800`) broke `querySelectorAll`
+  - Added filtering for classes containing special characters (`:`, `/`, `[`, `]`)
+  - Applied `CSS.escape()` to class names when building CSS selectors
+  - Fixed in: APOM tree builder, Angular tools, hints generator, content script
+  - Example: Page with Tailwind → no more "not a valid selector" errors
+
 ## [3.2.10] - 2026-01-29
 
 ### Fixed
