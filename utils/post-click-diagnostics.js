@@ -167,11 +167,11 @@ export function collectErrors(sinceTimestamp = null, maxConsoleErrors = 15, maxN
 export async function runPostClickDiagnostics(page, beforeActionTimestamp, options = {}) {
   const { skipNetworkWait = false, networkWaitTimeout = 10000 } = options;
 
-  // Wait for network requests (passing timestamp to track post-action requests)
+  // Wait for mutation requests (POST/PATCH/PUT within 100ms detection window)
   // Default maxWait = 10s (configurable via networkWaitTimeout parameter)
   const networkInfo = skipNetworkWait
-    ? { pendingFound: false, waitedMs: 0, completedRequests: 0, stillPending: 0, pendingRequests: [], totalRequests: 0 }
-    : await waitForPendingRequests(beforeActionTimestamp, 500, networkWaitTimeout);
+    ? { pendingFound: false, waitedMs: 0, completedRequests: 0, stillPending: 0, pendingRequests: [], totalRequests: 0, mutationRequests: [] }
+    : await waitForPendingRequests(beforeActionTimestamp, 100, networkWaitTimeout);
 
   // Small delay to let pending requests update their error status
   // (handles case where request completes with error right after maxWait expires)
