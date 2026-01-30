@@ -164,10 +164,11 @@ export function collectErrors(sinceTimestamp = null, maxConsoleErrors = 15, maxN
  * @param {Object} options - Options for diagnostics
  * @param {boolean} options.skipNetworkWait - Skip waiting for network requests (default: false)
  * @param {number} options.networkWaitTimeout - Custom timeout for network wait in ms (default: 10000)
+ * @param {string} options.urlBeforeAction - URL before action (to detect navigation/form submit)
  * @returns {Promise<Object>} Diagnostics result with errors and network info
  */
 export async function runPostClickDiagnostics(page, beforeActionTimestamp, options = {}) {
-  const { skipNetworkWait = false, networkWaitTimeout = 10000 } = options;
+  const { skipNetworkWait = false, networkWaitTimeout = 10000, urlBeforeAction = null } = options;
 
   // Wait for mutation requests (POST/PATCH/PUT within 100ms detection window)
   // Default maxWait = 10s (configurable via networkWaitTimeout parameter)
@@ -179,8 +180,19 @@ export async function runPostClickDiagnostics(page, beforeActionTimestamp, optio
   // (handles case where request completes with error right after maxWait expires)
   await new Promise(resolve => setTimeout(resolve, 100));
 
+  // Check for page navigation (indicates form submit in non-SPA apps)
+  const currentUrl = page.url();
+  let navigationDetected = null;
+  if (urlBeforeAction && currentUrl !== urlBeforeAction) {
+    navigationDetected = {
+      from: urlBeforeAction,
+      to: currentUrl,
+      likelyFormSubmit: true // Page URL changed after click - likely form POST with redirect
+    };
+  }
+
   // Check for chrome error page (ERR_CONNECTION_REFUSED, etc.)
-  const url = page.url();
+  const url = currentUrl;
   let chromeErrorInfo = null;
   if (url.startsWith('chrome-error://')) {
     chromeErrorInfo = await page.evaluate(() => {
@@ -208,6 +220,7 @@ export async function runPostClickDiagnostics(page, beforeActionTimestamp, optio
       mutationRequests: networkInfo.mutationRequests || [],
       allRecentRequests: networkInfo.allRecentRequests || []
     },
+    navigation: navigationDetected,
     chromeError: chromeErrorInfo,
     errors: {
       consoleErrors: errors.consoleErrors,
@@ -236,6 +249,14 @@ export function formatDiagnosticsForAI(diagnostics) {
     output += `\n   Error: ${diagnostics.chromeError.errorCode}`;
     output += `\n   Suggestion: ${diagnostics.chromeError.suggestion}`;
     output += `\n   → Backend likely not running or unreachable`;
+  }
+
+  // Page navigation detection (form submit in non-SPA apps)
+  if (diagnostics.navigation) {
+    output += `\n\n🔄 Page navigation detected (form submit):`;
+    output += `\n   From: ${diagnostics.navigation.from}`;
+    output += `\n   To: ${diagnostics.navigation.to}`;
+    output += `\n   → This indicates a successful form POST with page reload`;
   }
 
   // Network activity - show only MUTATION requests (POST/PUT/PATCH)

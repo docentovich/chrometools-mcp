@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.4] - 2026-01-30
+
+### Added
+- **click: Form submit detection for non-SPA apps** — Detect classic form submissions with page reload
+  - Tracks URL before and after click to detect page navigation
+  - Reports "Page navigation detected (form submit)" when URL changes
+  - Solves issue where POST requests were lost during page reload
+  - Works for Django, Rails, PHP and other server-rendered apps
+  - Example output: `🔄 Page navigation detected (form submit): /form → /success`
+
 ## [3.3.3] - 2026-01-30
 
 ### Fixed

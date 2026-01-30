@@ -401,8 +401,9 @@ async function executeToolInternal(name, args) {
           throw new Error(`Element not found: ${identifier}`);
         }
 
-        // Capture timestamp BEFORE click for error filtering
+        // Capture timestamp and URL BEFORE click for diagnostics
         const beforeClickTimestamp = Date.now();
+        const urlBeforeClick = page.url();
 
         // ALWAYS scroll to element first to ensure it's in viewport
         await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
@@ -425,7 +426,8 @@ async function executeToolInternal(name, args) {
         // 1. Run post-click diagnostics (waits for mutation requests within 200ms, max 10s timeout)
         const diagnostics = await runPostClickDiagnostics(page, beforeClickTimestamp, {
           skipNetworkWait: validatedArgs.skipNetworkWait,
-          networkWaitTimeout: validatedArgs.networkWaitTimeout
+          networkWaitTimeout: validatedArgs.networkWaitTimeout,
+          urlBeforeAction: urlBeforeClick
         });
 
         // 2. Generate AI hints after click
