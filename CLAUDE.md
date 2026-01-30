@@ -226,7 +226,10 @@ When adding a new tool like `getNetworkRequests`:
 3. ✅ **Update package.json**:
    - Increment version (e.g., 1.3.2 → 1.3.3)
 
-4. ❌ **DO NOT create**:
+4. ✅ **Update extension/manifest.json** (if extension was modified):
+   - Set version equal to package.json version (see Version Sync Rule below)
+
+5. ❌ **DO NOT create**:
    - `NETWORK_MONITORING.md`
    - `GET_NETWORK_REQUESTS_GUIDE.md`
    - Any other separate documentation files
@@ -246,3 +249,16 @@ When modifying an existing tool (e.g., making screenshots optional):
 
 3. ✅ **Update package.json**:
    - Increment version appropriately
+
+### Version Sync Rule: MCP and Chrome Extension
+
+**IMPORTANT**: When updating `extension/manifest.json` version, ALWAYS set it equal to the current `package.json` version.
+
+- The extension may not be updated for several releases
+- But when it IS updated, sync the version to match MCP
+- This ensures both components have matching versions when extension changes
+
+Example:
+- MCP package.json: `3.3.6`
+- Extension manifest.json (before): `3.1.2`
+- Extension manifest.json (after update): `3.3.6` ← sync to MCP version

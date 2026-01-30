@@ -4,36 +4,37 @@
  */
 
 import { consoleLogs, networkRequests } from '../browser/page-manager.js';
+import { getNetworkRequestsFromBridge, isBridgeConnected } from '../bridge/bridge-client.js';
 
 /**
- * Wait for mutation requests (POST/PATCH/PUT) to complete
- * Only tracks mutation requests that started within 200ms after action
+ * Wait for network requests to complete
+ * Tracks all requests (GET, POST, PUT, PATCH, DELETE) that started within detection window
  * @param {number} beforeActionTimestamp - Timestamp before action to track new requests
- * @param {number} detectionWindowMs - Time window to detect mutation requests (default: 200ms)
+ * @param {number} detectionWindowMs - Time window to detect requests (default: 200ms)
  * @param {number} maxWaitMs - Maximum time to wait for requests (default: 10000ms)
  * @returns {Promise<{pendingFound: boolean, waitedMs: number, completedRequests: number, totalRequests: number}>}
  */
 export async function waitForPendingRequests(beforeActionTimestamp, detectionWindowMs = 200, maxWaitMs = 10000) {
   const startTime = Date.now();
 
-  // Step 1: Wait for detection window to let mutation requests start
+  // Step 1: Wait for detection window to let requests start
   await new Promise(resolve => setTimeout(resolve, detectionWindowMs));
 
-  // Step 2: Find mutation requests (POST/PATCH/PUT) that started within detection window
+  // Step 2: Find all requests (GET, POST, PUT, PATCH, DELETE) that started within detection window
   const cutoffStart = new Date(beforeActionTimestamp).toISOString();
   const cutoffEnd = new Date(beforeActionTimestamp + detectionWindowMs).toISOString();
 
-  const mutationRequests = networkRequests.filter(req => {
-    // Only POST/PATCH/PUT requests (no GET!)
-    if (!['POST', 'PATCH', 'PUT'].includes(req.method)) {
+  const trackedRequests = networkRequests.filter(req => {
+    // Track all HTTP methods
+    if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
       return false;
     }
     // Only requests in detection window [T0, T0+200ms]
     return req.timestamp >= cutoffStart && req.timestamp <= cutoffEnd;
   });
 
-  // If no mutation requests found, return immediately
-  if (mutationRequests.length === 0) {
+  // If no requests found, return immediately
+  if (trackedRequests.length === 0) {
     return {
       pendingFound: false,
       waitedMs: Date.now() - startTime,
@@ -41,30 +42,30 @@ export async function waitForPendingRequests(beforeActionTimestamp, detectionWin
       stillPending: 0,
       pendingRequests: [],
       totalRequests: 0,
-      mutationRequests: []
+      trackedRequests: []
     };
   }
 
-  // Step 3: Wait for these specific mutation requests to complete (max 10s)
-  const mutationRequestIds = new Set(mutationRequests.map(req => req.requestId));
+  // Step 3: Wait for these specific requests to complete
+  const trackedRequestIds = new Set(trackedRequests.map(req => req.requestId));
 
   const checkPending = () => {
     return networkRequests.filter(req =>
-      mutationRequestIds.has(req.requestId) && req.status === 'pending'
+      trackedRequestIds.has(req.requestId) && req.status === 'pending'
     );
   };
 
   let pending = checkPending();
   const initialPendingCount = pending.length;
 
-  // Wait for mutation requests to complete (with 10s hard timeout)
+  // Wait for requests to complete (with configurable timeout)
   while (pending.length > 0 && (Date.now() - startTime) < maxWaitMs) {
     await new Promise(resolve => setTimeout(resolve, 100)); // Check every 100ms
     pending = checkPending();
   }
 
-  // Collect final results for mutation requests only
-  const finalRequests = networkRequests.filter(req => mutationRequestIds.has(req.requestId));
+  // Collect final results for tracked requests
+  const finalRequests = networkRequests.filter(req => trackedRequestIds.has(req.requestId));
   const completedRequests = finalRequests.filter(req => req.status === 'completed' || (typeof req.status === 'number'));
   const stillPendingRequests = pending.map(req => ({
     url: req.url,
@@ -80,7 +81,7 @@ export async function waitForPendingRequests(beforeActionTimestamp, detectionWin
     stillPending: pending.length,
     pendingRequests: stillPendingRequests,
     totalRequests: finalRequests.length,
-    mutationRequests: finalRequests.map(req => ({
+    trackedRequests: finalRequests.map(req => ({
       method: req.method,
       url: req.url,
       status: req.status,
@@ -170,11 +171,11 @@ export function collectErrors(sinceTimestamp = null, maxConsoleErrors = 15, maxN
 export async function runPostClickDiagnostics(page, beforeActionTimestamp, options = {}) {
   const { skipNetworkWait = false, networkWaitTimeout = 10000, urlBeforeAction = null } = options;
 
-  // Wait for mutation requests (POST/PATCH/PUT within 100ms detection window)
-  // Default maxWait = 10s (configurable via networkWaitTimeout parameter)
+  // Wait for network requests (all methods within 200ms detection window)
+  // Default maxWait = 10s for click, configurable via networkWaitTimeout parameter
   const networkInfo = skipNetworkWait
-    ? { pendingFound: false, waitedMs: 0, completedRequests: 0, stillPending: 0, pendingRequests: [], totalRequests: 0, mutationRequests: [], allRecentRequests: [] }
-    : await waitForPendingRequests(beforeActionTimestamp, 100, networkWaitTimeout);
+    ? { pendingFound: false, waitedMs: 0, completedRequests: 0, stillPending: 0, pendingRequests: [], totalRequests: 0, trackedRequests: [], allRecentRequests: [] }
+    : await waitForPendingRequests(beforeActionTimestamp, 200, networkWaitTimeout);
 
   // Small delay to let pending requests update their error status
   // (handles case where request completes with error right after maxWait expires)
@@ -189,6 +190,22 @@ export async function runPostClickDiagnostics(page, beforeActionTimestamp, optio
       to: currentUrl,
       likelyFormSubmit: true // Page URL changed after click - likely form POST with redirect
     };
+  }
+
+  // Fetch network requests from Bridge (Extension webRequest API)
+  // These persist across page navigations, unlike CDP requests
+  let bridgeRequests = [];
+  if (isBridgeConnected()) {
+    try {
+      const allBridgeRequests = await getNetworkRequestsFromBridge({ timeout: 2000 });
+      // Filter to requests after beforeActionTimestamp
+      const cutoffTime = beforeActionTimestamp - 1000; // 1s buffer
+      bridgeRequests = allBridgeRequests.filter(req =>
+        req.timestamp >= cutoffTime
+      );
+    } catch (e) {
+      // Bridge not available, continue without
+    }
   }
 
   // Check for chrome error page (ERR_CONNECTION_REFUSED, etc.)
@@ -217,8 +234,16 @@ export async function runPostClickDiagnostics(page, beforeActionTimestamp, optio
       pendingRequests: networkInfo.pendingRequests,
       totalRequests: networkInfo.totalRequests,
       waitedMs: networkInfo.waitedMs,
-      mutationRequests: networkInfo.mutationRequests || [],
-      allRecentRequests: networkInfo.allRecentRequests || []
+      trackedRequests: networkInfo.trackedRequests || [],
+      allRecentRequests: networkInfo.allRecentRequests || [],
+      // Bridge requests (from Extension webRequest API) - persist across page navigations
+      bridgeRequests: bridgeRequests.map(req => ({
+        method: req.method,
+        url: req.url,
+        type: req.type,
+        status: req.status,
+        timestamp: req.timestamp
+      }))
     },
     navigation: navigationDetected,
     chromeError: chromeErrorInfo,
@@ -259,14 +284,14 @@ export function formatDiagnosticsForAI(diagnostics) {
     output += `\n   → This indicates a successful form POST with page reload`;
   }
 
-  // Network activity - show only MUTATION requests (POST/PUT/PATCH)
+  // Network activity - show all tracked requests (GET/POST/PUT/PATCH/DELETE)
   const netActivity = diagnostics.networkActivity;
-  const mutationRequests = netActivity.mutationRequests || [];
+  const trackedRequests = netActivity.trackedRequests || [];
 
-  // Show mutation requests detected within 200ms after click
-  if (mutationRequests.length > 0) {
-    output += `\n\n📡 Mutation requests detected (${mutationRequests.length} POST/PUT/PATCH):`;
-    mutationRequests.forEach((req, idx) => {
+  // Show requests detected within 200ms after action
+  if (trackedRequests.length > 0) {
+    output += `\n\n📡 Network requests (${trackedRequests.length}):`;
+    trackedRequests.forEach((req, idx) => {
       const statusIcon = req.status === 'pending' ? '⏳' :
                         (req.status === 'completed' || (typeof req.status === 'number' && req.status < 400) ? '✓' : '✗');
       const statusText = req.statusText || req.status || 'pending';
@@ -274,12 +299,26 @@ export function formatDiagnosticsForAI(diagnostics) {
       output += `\n     → Status: ${statusText}`;
     });
 
-    // Show if some requests are still pending after 10s timeout
+    // Show if some requests are still pending after timeout
     if (netActivity.stillPending > 0) {
       output += `\n\n⏳ ${netActivity.stillPending} request(s) still pending after ${Math.round(netActivity.waitedMs)}ms timeout`;
     }
   } else {
-    output += '\n\n📡 No mutation requests detected (no POST/PUT/PATCH within 200ms)';
+    output += '\n\n📡 No network requests detected within 200ms';
+  }
+
+  // Bridge requests (from Extension - persist across page reloads)
+  const bridgeRequests = netActivity.bridgeRequests || [];
+  if (bridgeRequests.length > 0) {
+    output += `\n\n📡 Browser-level requests (via Extension):`;
+    bridgeRequests.forEach((req, idx) => {
+      const statusIcon = req.status === 'pending' ? '⏳' :
+                        (req.status === 'completed' || (typeof req.status === 'number' && req.status < 400) ? '✓' : '✗');
+      output += `\n  ${idx + 1}. ${statusIcon} ${req.method} ${req.url}`;
+      if (req.status !== 'pending') {
+        output += ` → ${req.status}`;
+      }
+    });
   }
 
   // Errors

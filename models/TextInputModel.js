@@ -23,7 +23,7 @@ export class TextInputModel extends BaseInputModel {
   }
 
   /**
-   * Type text into the input using keyboard simulation
+   * Type text into the input using keyboard simulation with JS fallback
    * @param {string} value - Text to type
    * @param {object} options - { delay, clearFirst }
    */
@@ -31,35 +31,51 @@ export class TextInputModel extends BaseInputModel {
     const { delay = 0, clearFirst = true } = options;
     const opTimeout = 5000; // 5s timeout per operation
 
-    // Focus element first
-    await withTimeout(
-      () => this.element.focus(),
-      opTimeout,
-      'focus'
-    );
-
-    if (clearFirst) {
-      // Triple-click to select all with timeout
+    // Method 1: Try Puppeteer typing (works for most cases)
+    try {
+      // Focus and clear using JS (most reliable)
       await withTimeout(
-        () => this.element.click({ clickCount: 3 }),
+        () => this.element.evaluate((el, shouldClear) => {
+          el.focus();
+          el.click();
+          if (shouldClear) {
+            el.select(); // Select all text
+          }
+        }, clearFirst),
         opTimeout,
-        'triple-click'
+        'focus-and-select'
       );
 
-      // Delete selected text
+      // Small delay to ensure focus is established
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Type the new value
+      const typeTimeout = Math.max(opTimeout, value.length * delay + 5000);
       await withTimeout(
-        () => this.page.keyboard.press('Backspace'),
-        opTimeout,
-        'backspace'
+        () => this.element.type(value, { delay }),
+        typeTimeout,
+        'type'
       );
+
+      // Verify the value was set
+      const actualValue = await this.element.evaluate(el => el.value);
+      if (actualValue.includes(value)) {
+        return; // Success
+      }
+    } catch (e) {
+      // Fall through to JS method
     }
 
-    // Type text with timeout (longer for long text)
-    const typeTimeout = Math.max(opTimeout, value.length * delay + 5000);
+    // Method 2: Fallback to direct JS value setting
     await withTimeout(
-      () => this.element.type(value, { delay }),
-      typeTimeout,
-      'type'
+      () => this.element.evaluate((el, newValue) => {
+        el.focus();
+        el.value = newValue;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, value),
+      opTimeout,
+      'js-set-value'
     );
   }
 

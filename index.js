@@ -361,11 +361,64 @@ async function executeToolInternal(name, args) {
     }
 
     /**
+     * Check if identifier looks like an APOM ID (e.g., button_8, input_4, form_1)
+     */
+    function isApomIdPattern(identifier) {
+      return /^[a-z]+_\d+$/.test(identifier);
+    }
+
+    /**
+     * Quick element registration - runs APOM analysis and registers elements
+     */
+    async function quickRegisterElements(page) {
+      await page.evaluate((apomTreeConverterCode, selectorResolverCode) => {
+        // Inject utilities
+        if (typeof buildAPOMTree === 'undefined') {
+          eval(apomTreeConverterCode);
+        }
+        if (typeof registerElements === 'undefined') {
+          eval(selectorResolverCode);
+        }
+
+        // Build APOM tree (interactive only for speed)
+        const apomData = buildAPOMTree(true);
+
+        // Flatten and register elements
+        const elementsArray = [];
+        function collectElements(node) {
+          if (!node) return;
+          if (node.id && node.selector) {
+            elementsArray.push({
+              id: node.id,
+              selector: node.selector,
+              metadata: { type: node.type, tag: node.tag }
+            });
+          }
+          if (node.children) {
+            node.children.forEach(child => collectElements(child));
+          }
+          // Also check for container keys (div_container_0, etc.)
+          Object.keys(node).forEach(key => {
+            if (Array.isArray(node[key])) {
+              node[key].forEach(child => collectElements(child));
+            }
+          });
+        }
+        collectElements(apomData.tree);
+
+        if (typeof registerElements !== 'undefined') {
+          registerElements(elementsArray);
+        }
+      }, apomTreeConverter, selectorResolver);
+    }
+
+    /**
      * Helper: Resolve selector (ID or CSS selector)
      * Injects selector-resolver and resolves element identifier
+     * Auto-refreshes element registry if APOM ID not found
      */
     async function resolveSelector(page, identifier, timeoutMs = 5000) {
-      const evaluatePromise = page.evaluate((id, selectorResolverCode) => {
+      const tryResolve = () => page.evaluate((id, selectorResolverCode) => {
         // Inject selector resolver if not already loaded
         if (typeof resolveSelector === 'undefined') {
           eval(selectorResolverCode);
@@ -383,7 +436,15 @@ async function executeToolInternal(name, args) {
         setTimeout(() => reject(new Error(`resolveSelector timed out after ${timeoutMs}ms`)), timeoutMs)
       );
 
-      return Promise.race([evaluatePromise, timeoutPromise]);
+      let resolved = await Promise.race([tryResolve(), timeoutPromise]);
+
+      // Auto-refresh: if looks like APOM ID but not found, re-register elements and retry
+      if (!resolved.found && isApomIdPattern(identifier)) {
+        await quickRegisterElements(page);
+        resolved = await Promise.race([tryResolve(), timeoutPromise]);
+      }
+
+      return resolved;
     }
 
     if (name === "click") {
@@ -414,30 +475,49 @@ async function executeToolInternal(name, args) {
         // ALWAYS scroll to element first to ensure it's in viewport
         await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
 
-        // Try multiple click methods for better reliability
-        try {
-          // Method 1: Puppeteer click (most reliable for most cases)
-          await element.click();
-        } catch (clickError) {
-          // Method 2: Try click again after short delay
-          try {
-            await element.click();
-          } catch (retryClickError) {
-            // Method 3: JavaScript click (works for hidden/overlapping elements)
-            await element.evaluate(el => el.click());
-          }
-        }
+        // Click with timeout to prevent hanging on navigation
+        const clickWithTimeout = async (timeoutMs = 5000) => {
+          const clickPromise = element.click().catch(() => {
+            // If Puppeteer click fails, fallback to JS click
+            return element.evaluate(el => el.click());
+          });
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('click timeout')), timeoutMs)
+          );
+          return Promise.race([clickPromise, timeoutPromise]).catch(() => {
+            // If click times out, try JS click as last resort
+            return element.evaluate(el => el.click());
+          });
+        };
+
+        await clickWithTimeout();
 
         // NEW POST-CLICK PATTERN:
-        // 1. Run post-click diagnostics (waits for mutation requests within 200ms, max 10s timeout)
-        const diagnostics = await runPostClickDiagnostics(page, beforeClickTimestamp, {
-          skipNetworkWait: validatedArgs.skipNetworkWait,
-          networkWaitTimeout: validatedArgs.networkWaitTimeout,
-          urlBeforeAction: urlBeforeClick
-        });
+        // 1. Run post-click diagnostics (waits for network requests within 200ms, max 10s timeout)
+        let diagnostics;
+        try {
+          diagnostics = await runPostClickDiagnostics(page, beforeClickTimestamp, {
+            skipNetworkWait: validatedArgs.skipNetworkWait,
+            networkWaitTimeout: validatedArgs.networkWaitTimeout,
+            urlBeforeAction: urlBeforeClick
+          });
+        } catch (diagError) {
+          // Diagnostics may fail if page navigated - create minimal diagnostics
+          diagnostics = {
+            networkActivity: { trackedRequests: [], bridgeRequests: [], stillPending: 0, pendingRequests: [] },
+            navigation: { from: urlBeforeClick, to: page.url(), likelyFormSubmit: true },
+            errors: { consoleErrors: [], networkErrors: [], totalErrors: 0 },
+            hasErrors: false
+          };
+        }
 
         // 2. Generate AI hints after click
-        const hints = await generateClickHints(page, identifier);
+        let hints;
+        try {
+          hints = await generateClickHints(page, identifier);
+        } catch (hintsError) {
+          hints = { modalOpened: false, newElements: [], suggestedNext: [] };
+        }
 
         // 3. Format output with hints and diagnostics
         let hintsText = '\n\n** AI HINTS **';
@@ -508,9 +588,18 @@ async function executeToolInternal(name, args) {
         await model.setValue(validatedArgs.text, options);
         const description = model.getActionDescription(validatedArgs.text, identifier);
 
+        // Capture timestamp AFTER typing finishes - requests should start within 200ms of this
+        const afterTypeTimestamp = Date.now();
+
+        // Run diagnostics with 3s timeout for type (shorter than click's 10s)
+        const diagnostics = await runPostClickDiagnostics(page, afterTypeTimestamp, {
+          networkWaitTimeout: 3000
+        });
+        const diagnosticsText = formatDiagnosticsForAI(diagnostics);
+
         return {
           content: [
-            { type: "text", text: description }
+            { type: "text", text: `${description}${diagnosticsText}` }
           ],
         };
       };
@@ -2488,6 +2577,9 @@ Start coding now.`;
       // Check if extension is connected
       const extensionConnected = isExtensionConnected();
       const debugInfo = getWsDebugInfo();
+
+      // Always log connection state for debugging
+      console.error(`[chrometools-mcp] enableRecorder check: bridgeConnected=${debugInfo.bridgeConnected}, extensionConnected=${extensionConnected}, wsState=${debugInfo.readyState}`);
 
       if (extensionConnected) {
         return {

@@ -21,6 +21,10 @@ let nativePort = null;
 let isConnected = false;
 const tabsState = new Map(); // tabId -> {url, title, active, windowId}
 
+// Network requests storage (persists across page navigations)
+const networkRequests = new Map(); // requestId -> request info
+const MAX_NETWORK_REQUESTS = 500;
+
 // Recorder state (persisted in storage)
 let recorderState = {
   isRecording: false,
@@ -150,6 +154,24 @@ function handleBridgeMessage(message) {
 
     case 'ping':
       sendToBridge({ type: 'pong', requestId: message.requestId });
+      break;
+
+    case 'get_network_requests':
+      // Return recent network requests
+      const requests = Array.from(networkRequests.values());
+      sendToBridge({
+        type: 'network_requests',
+        payload: { requests },
+        requestId: message.requestId
+      });
+      break;
+
+    case 'clear_network_requests':
+      networkRequests.clear();
+      sendToBridge({
+        type: 'network_requests_cleared',
+        requestId: message.requestId
+      });
       break;
 
     default:
@@ -292,6 +314,101 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     });
   }
 });
+
+// ============================================
+// Network Request Tracking (via webRequest API)
+// Persists across page navigations!
+// ============================================
+
+/**
+ * Clean old network requests to prevent memory leak
+ */
+function cleanOldNetworkRequests() {
+  if (networkRequests.size > MAX_NETWORK_REQUESTS) {
+    const entries = Array.from(networkRequests.entries());
+    const removeCount = entries.length - MAX_NETWORK_REQUESTS;
+    for (let i = 0; i < removeCount; i++) {
+      networkRequests.delete(entries[i][0]);
+    }
+  }
+}
+
+// Track when request starts (captures POST/PUT/PATCH before navigation)
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    // Only track mutation requests (POST, PUT, PATCH, DELETE)
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(details.method)) {
+      const requestInfo = {
+        requestId: details.requestId,
+        url: details.url,
+        method: details.method,
+        type: details.type, // main_frame, xmlhttprequest, etc.
+        tabId: details.tabId,
+        timestamp: Date.now(),
+        status: 'pending',
+        initiator: details.initiator || null
+      };
+
+      networkRequests.set(details.requestId, requestInfo);
+      cleanOldNetworkRequests();
+
+      // Send to Bridge
+      sendToBridge({
+        type: 'network_request_started',
+        payload: requestInfo
+      });
+
+      console.log(`[ChromeTools] Network: ${details.method} ${details.url}`);
+    }
+  },
+  { urls: ['<all_urls>'] }
+);
+
+// Track when request completes
+chrome.webRequest.onCompleted.addListener(
+  (details) => {
+    const request = networkRequests.get(details.requestId);
+    if (request) {
+      request.status = details.statusCode;
+      request.statusText = details.statusLine;
+      request.completedAt = Date.now();
+
+      // Send update to Bridge
+      sendToBridge({
+        type: 'network_request_completed',
+        payload: {
+          requestId: details.requestId,
+          status: details.statusCode,
+          statusText: details.statusLine
+        }
+      });
+
+      console.log(`[ChromeTools] Network completed: ${request.method} ${request.url} -> ${details.statusCode}`);
+    }
+  },
+  { urls: ['<all_urls>'] }
+);
+
+// Track request errors
+chrome.webRequest.onErrorOccurred.addListener(
+  (details) => {
+    const request = networkRequests.get(details.requestId);
+    if (request) {
+      request.status = 'failed';
+      request.error = details.error;
+      request.completedAt = Date.now();
+
+      sendToBridge({
+        type: 'network_request_failed',
+        payload: {
+          requestId: details.requestId,
+          error: details.error
+        }
+      });
+    }
+  },
+  { urls: ['<all_urls>'] }
+);
 
 // ============================================
 // Icon Management

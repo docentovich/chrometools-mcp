@@ -7,7 +7,7 @@
  *
  * - Launched by Chrome when Extension starts
  * - Maintains state (tabs, recordings, events)
- * - Accepts 0-8 WebSocket clients
+ * - Accepts up to 20 WebSocket clients (with dead connection cleanup)
  * - Clients get full state on connect + real-time updates
  */
 
@@ -24,7 +24,7 @@ const require = createRequire(import.meta.url);
 // ============================================
 
 const WS_PORT = 9223;
-const MAX_CLIENTS = 8;
+const MAX_CLIENTS = 20;  // Increased from 8 to handle multiple MCP restarts
 const HOST_NAME = 'com.chrometools.bridge';
 
 // ============================================
@@ -40,11 +40,13 @@ const state = {
     metadata: null,
     secrets: {}
   },
+  networkRequests: new Map(), // requestId -> request info (from Extension webRequest API)
   eventLog: [],              // Ring buffer of recent events (max 1000)
   extensionConnected: false
 };
 
 const MAX_EVENT_LOG = 1000;
+const MAX_NETWORK_REQUESTS = 500;
 
 // ============================================
 // WebSocket Server for Claude/MCP Clients
@@ -61,6 +63,14 @@ function startWebSocketServer() {
   });
 
   wss.on('connection', (ws) => {
+    // Clean up dead connections before checking limit
+    for (const client of clients) {
+      if (client.readyState !== 1) { // Not OPEN
+        clients.delete(client);
+        log(`Cleaned up dead client (readyState=${client.readyState})`);
+      }
+    }
+
     if (clients.size >= MAX_CLIENTS) {
       log(`Max clients (${MAX_CLIENTS}) reached, rejecting connection`);
       ws.close(1013, 'Max clients reached');
@@ -105,6 +115,7 @@ function getFullState() {
     tabs: Array.from(state.tabs.values()),
     recordings: state.recordings,
     recorderState: state.recorderState,
+    networkRequests: Array.from(state.networkRequests.values()),
     extensionConnected: state.extensionConnected,
     timestamp: Date.now()
   };
@@ -149,6 +160,25 @@ function handleClientMessage(ws, message) {
       sendToClient(ws, {
         type: 'recorder_state',
         payload: state.recorderState,
+        requestId: message.requestId
+      });
+      break;
+
+    case 'get_network_requests':
+      // Return network requests from state (collected via Extension webRequest API)
+      sendToClient(ws, {
+        type: 'network_requests',
+        payload: {
+          requests: Array.from(state.networkRequests.values())
+        },
+        requestId: message.requestId
+      });
+      break;
+
+    case 'clear_network_requests':
+      state.networkRequests.clear();
+      sendToClient(ws, {
+        type: 'network_requests_cleared',
         requestId: message.requestId
       });
       break;
@@ -293,6 +323,54 @@ function handleExtensionMessage(message) {
 
     case 'pong':
       broadcastToClients({ type: 'pong' });
+      break;
+
+    // Network request events (from Extension webRequest API)
+    case 'network_request_started':
+      state.networkRequests.set(message.payload.requestId, message.payload);
+      // Clean old requests
+      if (state.networkRequests.size > MAX_NETWORK_REQUESTS) {
+        const entries = Array.from(state.networkRequests.entries());
+        const removeCount = entries.length - MAX_NETWORK_REQUESTS;
+        for (let i = 0; i < removeCount; i++) {
+          state.networkRequests.delete(entries[i][0]);
+        }
+      }
+      broadcastToClients({ type: 'network_request_started', payload: message.payload });
+      break;
+
+    case 'network_request_completed':
+      if (state.networkRequests.has(message.payload.requestId)) {
+        const req = state.networkRequests.get(message.payload.requestId);
+        req.status = message.payload.status;
+        req.statusText = message.payload.statusText;
+        req.completedAt = Date.now();
+      }
+      broadcastToClients({ type: 'network_request_completed', payload: message.payload });
+      break;
+
+    case 'network_request_failed':
+      if (state.networkRequests.has(message.payload.requestId)) {
+        const req = state.networkRequests.get(message.payload.requestId);
+        req.status = 'failed';
+        req.error = message.payload.error;
+        req.completedAt = Date.now();
+      }
+      broadcastToClients({ type: 'network_request_failed', payload: message.payload });
+      break;
+
+    case 'network_requests':
+      // Response from extension with all network requests
+      broadcastToClients({
+        type: 'network_requests',
+        payload: message.payload,
+        requestId: message.requestId
+      });
+      break;
+
+    case 'network_requests_cleared':
+      state.networkRequests.clear();
+      broadcastToClients({ type: 'network_requests_cleared' });
       break;
 
     default:

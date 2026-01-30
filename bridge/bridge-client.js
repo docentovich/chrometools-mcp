@@ -12,8 +12,17 @@
  */
 
 import WebSocket from 'ws';
+import { appendFileSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 
 const BRIDGE_PORT = 9223;
+const LOG_FILE = join(homedir(), 'chrometools-bridge.log');
+
+function logToFile(message) {
+  const timestamp = new Date().toISOString();
+  appendFileSync(LOG_FILE, `${timestamp} ${message}\n`);
+}
 const RECONNECT_DELAY = 2000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
@@ -64,19 +73,24 @@ export function setActiveTabSyncHandler(handler) {
  */
 export async function connectToBridge() {
   return new Promise((resolve) => {
+    logToFile(`connectToBridge called, isConnected=${isConnected}, wsState=${ws?.readyState}`);
+
     if (isConnected && ws?.readyState === WebSocket.OPEN) {
       debugLog('Already connected to Bridge');
+      logToFile('Already connected, skipping');
       resolve(true);
       return;
     }
 
     debugLog(`Connecting to Bridge on port ${BRIDGE_PORT}...`);
+    logToFile(`Attempting connection to ws://127.0.0.1:${BRIDGE_PORT}`);
 
     try {
       ws = new WebSocket(`ws://127.0.0.1:${BRIDGE_PORT}`);
 
       const connectTimeout = setTimeout(() => {
-        debugLog('Connection timeout');
+        console.error('[chrometools-mcp] Bridge connection timeout (5s)');
+        logToFile('TIMEOUT: Connection timeout after 5s');
         ws?.close();
         resolve(false);
       }, 5000);
@@ -86,7 +100,8 @@ export async function connectToBridge() {
         isConnected = true;
         reconnectAttempts = 0;
         debugLog('Connected to Bridge');
-        console.error('[chrometools-mcp] Connected to Bridge Service');
+        console.error('[chrometools-mcp] Connected to Bridge Service (isConnected=true)');
+        logToFile('SUCCESS: WebSocket connected, isConnected=true');
         resolve(true);
       });
 
@@ -99,8 +114,9 @@ export async function connectToBridge() {
         }
       });
 
-      ws.on('close', () => {
-        debugLog('Disconnected from Bridge');
+      ws.on('close', (code, reason) => {
+        console.error(`[chrometools-mcp] Bridge disconnected (code=${code}, reason=${reason || 'none'})`);
+        logToFile(`CLOSE: WebSocket closed, code=${code}, reason=${reason || 'none'}`);
         isConnected = false;
         ws = null;
         scheduleReconnect();
@@ -108,12 +124,14 @@ export async function connectToBridge() {
 
       ws.on('error', (error) => {
         clearTimeout(connectTimeout);
-        debugLog('Connection error:', error.message);
+        console.error(`[chrometools-mcp] Bridge connection error: ${error.message}`);
+        logToFile(`ERROR: WebSocket error: ${error.message}`);
         resolve(false);
       });
 
     } catch (error) {
-      debugLog('Failed to create WebSocket:', error.message);
+      console.error(`[chrometools-mcp] Failed to create WebSocket: ${error.message}`);
+      logToFile(`EXCEPTION: Failed to create WebSocket: ${error.message}`);
       resolve(false);
     }
   });
@@ -125,7 +143,7 @@ export async function connectToBridge() {
 function scheduleReconnect() {
   if (reconnectTimer) return;
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    debugLog(`Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached`);
+    console.error(`[chrometools-mcp] Bridge: max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached, giving up`);
     return;
   }
 
@@ -360,6 +378,7 @@ export function isExtensionConnected() {
  * Check if connected to Bridge
  */
 export function isBridgeConnected() {
+  logToFile(`isBridgeConnected called, returning ${isConnected}`);
   return isConnected;
 }
 
@@ -469,4 +488,40 @@ export function getRecorderState() {
  */
 export function getRecordings() {
   return bridgeState.recordings;
+}
+
+/**
+ * Get network requests from Bridge (tracked via Extension webRequest API)
+ * These persist across page navigations unlike CDP-based tracking
+ */
+export async function getNetworkRequestsFromBridge(options = {}) {
+  if (!isConnected) {
+    debugLog('Cannot get network requests: not connected to Bridge');
+    return [];
+  }
+
+  try {
+    const response = await sendCommand('get_network_requests', {}, options.timeout || 5000);
+    return response.payload?.requests || [];
+  } catch (error) {
+    debugLog('Failed to get network requests:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Clear network requests in Bridge
+ */
+export async function clearNetworkRequestsFromBridge() {
+  if (!isConnected) {
+    return false;
+  }
+
+  try {
+    await sendCommand('clear_network_requests', {}, 5000);
+    return true;
+  } catch (error) {
+    debugLog('Failed to clear network requests:', error.message);
+    return false;
+  }
 }
