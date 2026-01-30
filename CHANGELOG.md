@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.1] - 2026-01-30
+
+### Added
+- **click: All network requests visibility** — Shows ALL requests started within 200ms after click
+  - AI agent now sees complete network activity picture after every click
+  - Shows: method, URL, and status code for each request
+  - Example output:
+    ```
+    📡 Network requests started within 200ms after click (15 total):
+      1. ✓ GET /api/auth/ws_token/ → 200 OK
+      2. ✓ GET /static/css/app.css → 200 OK
+      3. ✓ POST /admin/tenant/.../change/ → 302 Found
+    ```
+  - Helps AI understand what happened after click (form submission, navigation, polling, etc.)
+  - 200ms window captures both mutation requests and side-effect requests
+
+### Changed
+- **Enhanced diagnostics output** — Restructured to show all requests first, then mutation tracking
+  - Section 1: All requests in 200ms window (complete visibility)
+  - Section 2: Form submission status (POST/PATCH/PUT tracking)
+  - Clear icons: ✓ (success), ✗ (error), ⏳ (pending)
+  - Agent can immediately see if any requests occurred or not
+
 ## [3.3.0] - 2026-01-30
 
 ### Added

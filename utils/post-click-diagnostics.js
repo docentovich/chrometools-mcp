@@ -32,6 +32,12 @@ export async function waitForPendingRequests(beforeActionTimestamp, detectionWin
     return req.timestamp >= cutoffStart && req.timestamp <= cutoffEnd;
   });
 
+  // Also collect ALL requests in 200ms window for diagnostics (not just mutations)
+  const diagnosticWindowEnd = new Date(beforeActionTimestamp + 200).toISOString();
+  const allRecentRequests = networkRequests.filter(req => {
+    return req.timestamp >= cutoffStart && req.timestamp <= diagnosticWindowEnd;
+  });
+
   // If no mutation requests found, return immediately
   if (mutationRequests.length === 0) {
     return {
@@ -40,7 +46,13 @@ export async function waitForPendingRequests(beforeActionTimestamp, detectionWin
       completedRequests: 0,
       stillPending: 0,
       pendingRequests: [],
-      totalRequests: 0
+      totalRequests: 0,
+      allRecentRequests: allRecentRequests.map(req => ({
+        method: req.method,
+        url: req.url,
+        status: req.status,
+        statusText: req.statusText
+      }))
     };
   }
 
@@ -79,6 +91,12 @@ export async function waitForPendingRequests(beforeActionTimestamp, detectionWin
     pendingRequests: pendingRequests,
     totalRequests: finalRequests.length,
     mutationRequests: finalRequests.map(req => ({
+      method: req.method,
+      url: req.url,
+      status: req.status,
+      statusText: req.statusText
+    })),
+    allRecentRequests: allRecentRequests.map(req => ({
       method: req.method,
       url: req.url,
       status: req.status,
@@ -170,7 +188,7 @@ export async function runPostClickDiagnostics(page, beforeActionTimestamp, optio
   // Wait for mutation requests (POST/PATCH/PUT within 100ms detection window)
   // Default maxWait = 10s (configurable via networkWaitTimeout parameter)
   const networkInfo = skipNetworkWait
-    ? { pendingFound: false, waitedMs: 0, completedRequests: 0, stillPending: 0, pendingRequests: [], totalRequests: 0, mutationRequests: [] }
+    ? { pendingFound: false, waitedMs: 0, completedRequests: 0, stillPending: 0, pendingRequests: [], totalRequests: 0, mutationRequests: [], allRecentRequests: [] }
     : await waitForPendingRequests(beforeActionTimestamp, 100, networkWaitTimeout);
 
   // Small delay to let pending requests update their error status
@@ -203,7 +221,8 @@ export async function runPostClickDiagnostics(page, beforeActionTimestamp, optio
       pendingRequests: networkInfo.pendingRequests,
       totalRequests: networkInfo.totalRequests,
       waitedMs: networkInfo.waitedMs,
-      mutationRequests: networkInfo.mutationRequests || []
+      mutationRequests: networkInfo.mutationRequests || [],
+      allRecentRequests: networkInfo.allRecentRequests || []
     },
     chromeError: chromeErrorInfo,
     errors: {
@@ -235,24 +254,40 @@ export function formatDiagnosticsForAI(diagnostics) {
     output += `\n   → Backend likely not running or unreachable`;
   }
 
-  // Network activity - show only mutation requests (POST/PATCH/PUT)
+  // Network activity - show ALL requests in 200ms window first
   const netActivity = diagnostics.networkActivity;
+  const allRecentRequests = netActivity.allRecentRequests || [];
   const mutationRequests = netActivity.mutationRequests || [];
 
+  // Show all requests that started within 200ms after click
+  if (allRecentRequests.length > 0) {
+    output += `\n\n📡 Network requests started within 200ms after click (${allRecentRequests.length} total):`;
+    allRecentRequests.forEach((req, idx) => {
+      const statusIcon = req.status === 'completed' || (typeof req.status === 'number' && req.status < 400) ? '✓' :
+                        (req.status === 'pending' ? '⏳' : '✗');
+      const statusText = req.statusText || req.status || 'pending';
+      output += `\n  ${idx + 1}. ${statusIcon} ${req.method} ${req.url}`;
+      output += `\n     → Status: ${statusText}`;
+    });
+  } else {
+    output += '\n\n📡 No network requests detected within 200ms after click';
+  }
+
+  // Show mutation requests (form submissions) - these are the ones we wait for
   if (mutationRequests.length > 0) {
-    // Show mutation requests (form submissions)
+    output += `\n\n✅ Form submission detected (${mutationRequests.length} POST/PATCH/PUT):`;
     mutationRequests.forEach((req, idx) => {
       const statusIcon = req.status === 'completed' || (typeof req.status === 'number' && req.status < 400) ? '✓' : '✗';
       const statusText = req.statusText || req.status || 'pending';
-      output += `\n${statusIcon} ${req.method} ${req.url}`;
-      output += `\n   Status: ${statusText}`;
+      output += `\n  ${statusIcon} ${req.method} ${req.url}`;
+      output += `\n     Status: ${statusText}`;
     });
 
     if (netActivity.stillPending > 0) {
-      output += `\n⚠️  ${netActivity.stillPending} request(s) still pending after ${netActivity.waitedMs}ms`;
+      output += `\n\n⚠️  ${netActivity.stillPending} request(s) still pending after ${netActivity.waitedMs}ms`;
     }
   } else {
-    output += '\n✓ No form submission detected (no POST/PATCH/PUT within 100ms)';
+    output += '\n\n✅ No form submission detected (no POST/PATCH/PUT within 100ms)';
   }
 
   // Errors
