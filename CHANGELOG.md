@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.0] - 2026-01-30
+
+### Added
+- **click: skipNetworkWait parameter** — Skip network wait for forms with long-polling/WebSockets
+  - New parameter: `skipNetworkWait: boolean` (default: false)
+  - Use case: Django forms, admin panels with active WebSockets
+  - Prevents 30s timeouts on form submissions
+  - Example: `click({ selector: 'button[type="submit"]', skipNetworkWait: true })`
+- **click: networkWaitTimeout parameter** — Custom network wait timeout
+  - New parameter: `networkWaitTimeout: number` (default: 3000ms)
+  - Configurable per-click timeout for network requests
+  - Example: `click({ selector: '.save-btn', networkWaitTimeout: 5000 })`
+- **type: timeout parameter** — Explicit timeout for type operations
+  - New parameter: `timeout: number` (default: 30000ms)
+  - Prevents infinite hangs on input fields
+  - Example: `type({ selector: 'input[name="url"]', text: 'value', timeout: 10000 })`
+
+### Changed
+- **Reduced default network wait** — 20s → 3s for faster form interactions
+  - Default `maxWait` in `waitForPendingRequests`: 20000ms → 3000ms
+  - Speeds up click/type operations by 17 seconds on average
+  - Forms submit faster, no more 20s waits for simple pages
+  - Advanced users can increase via `networkWaitTimeout` parameter
+- **Type operation timeout protection** — Wrapped in Promise.race with configurable timeout
+  - Prevents 120s hangs on problematic input fields
+  - Returns clear error message: "Type operation timed out after Xms"
+  - Django forms: type now fails fast instead of hanging
+
+### Fixed
+- **Django form timeout issues** — Fixed 30s click timeout and 120s type timeout
+  - Root cause: Long-polling/WebSockets kept page "busy" indefinitely
+  - Solution: `skipNetworkWait: true` bypasses network waiting
+  - Type operations now have explicit timeout protection
+  - Example: Django Admin forms now work without timeouts
+
 ## [3.2.11] - 2026-01-30
 
 ### Fixed

@@ -494,9 +494,11 @@ Click an element with optional result screenshot. **PREFERRED**: Use APOM ID fro
   - `waitAfter` (optional): Wait time in ms (default: 1500)
   - `screenshot` (optional): Capture screenshot (default: false for performance) ⚡
   - `timeout` (optional): Max operation time in ms (default: 30000)
-- **Use case**: Buttons, links, form submissions
-- **Returns**: Confirmation text + optional screenshot
-- **Performance**: 2-10x faster without screenshot
+  - `skipNetworkWait` (optional): Skip waiting for network requests (default: false). **Use for Django forms/admin panels with WebSockets to avoid 30s timeouts.**
+  - `networkWaitTimeout` (optional): Custom network wait timeout in ms (default: 3000). Only used if skipNetworkWait is false.
+- **Use case**: Buttons, links, form submissions, Django admin forms
+- **Returns**: Confirmation text + optional screenshot + network diagnostics
+- **Performance**: 2-10x faster without screenshot, instant with skipNetworkWait
 - **Example**:
   ```javascript
   // PREFERRED: Using APOM ID
@@ -504,6 +506,12 @@ Click an element with optional result screenshot. **PREFERRED**: Use APOM ID fro
 
   // Alternative: Using CSS selector
   click({ selector: "button[type='submit']" })
+
+  // Django forms with WebSockets (prevents timeout)
+  click({ selector: ".submit-row input[type='submit']", skipNetworkWait: true })
+
+  // Custom network timeout for slow APIs
+  click({ id: "save_btn", networkWaitTimeout: 10000 })
   ```
 
 #### type
@@ -513,9 +521,10 @@ Type text into input fields with optional clearing and typing delay. **PREFERRED
   - `selector` (optional): CSS selector. Use when APOM ID is not available.
   - ⚠️ Either `id` OR `selector` required (mutually exclusive)
   - `text` (required): Text to type
-  - `delay` (optional): Delay between keystrokes in ms
+  - `delay` (optional): Delay between keystrokes in ms (default: 30)
   - `clearFirst` (optional): Clear field first (default: true)
-- **Use case**: Filling forms, search boxes, text inputs
+  - `timeout` (optional): Max operation time in ms (default: 30000). **Prevents infinite hangs on Django forms.**
+- **Use case**: Filling forms, search boxes, text inputs, Django admin forms
 - **Returns**: Confirmation text
 - **Example**:
   ```javascript

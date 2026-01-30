@@ -21,6 +21,8 @@ export const ClickSchema = z.object({
   waitAfter: z.number().optional().describe("Milliseconds to wait after click (default: 1500)"),
   screenshot: z.boolean().optional().describe("Capture screenshot after click (default: false for performance)"),
   timeout: z.number().optional().describe("Maximum time to wait for operation in ms (default: 30000)"),
+  skipNetworkWait: z.boolean().optional().describe("Skip waiting for network requests (default: false). Use for forms with long-polling/WebSockets to avoid timeouts."),
+  networkWaitTimeout: z.number().optional().describe("Maximum time to wait for network requests in ms (default: 3000). Only used if skipNetworkWait is false."),
 }).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
   message: "Either 'id' or 'selector' must be provided, but not both"
 });
@@ -31,6 +33,7 @@ export const TypeSchema = z.object({
   text: z.string().describe("Text to type"),
   delay: z.number().optional().describe("Delay between keystrokes in ms (default: 30)"),
   clearFirst: z.boolean().optional().describe("Clear field before typing (default: true)"),
+  timeout: z.number().optional().describe("Maximum time to wait for operation in ms (default: 30000)"),
 }).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
   message: "Either 'id' or 'selector' must be provided, but not both"
 });

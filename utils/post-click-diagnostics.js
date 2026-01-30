@@ -9,10 +9,10 @@ import { consoleLogs, networkRequests } from '../browser/page-manager.js';
  * Wait for pending network requests to complete
  * @param {number} beforeActionTimestamp - Timestamp before action to track new requests
  * @param {number} initialWaitMs - Initial wait time before checking (default: 500ms)
- * @param {number} maxWaitMs - Maximum time to wait for requests (default: 5000ms)
+ * @param {number} maxWaitMs - Maximum time to wait for requests (default: 3000ms, reduced from 20s for faster responses)
  * @returns {Promise<{pendingFound: boolean, waitedMs: number, completedRequests: number, totalRequests: number}>}
  */
-export async function waitForPendingRequests(beforeActionTimestamp, initialWaitMs = 500, maxWaitMs = 5000) {
+export async function waitForPendingRequests(beforeActionTimestamp, initialWaitMs = 500, maxWaitMs = 3000) {
   const startTime = Date.now();
 
   // Step 1: Wait initial period to let requests start
@@ -133,12 +133,19 @@ export function collectErrors(sinceTimestamp = null, maxConsoleErrors = 15, maxN
  * Full post-action diagnostics: wait for requests and collect errors
  * @param {Page} page - Puppeteer page instance
  * @param {number} beforeActionTimestamp - Timestamp before action (to filter errors)
+ * @param {Object} options - Options for diagnostics
+ * @param {boolean} options.skipNetworkWait - Skip waiting for network requests (default: false)
+ * @param {number} options.networkWaitTimeout - Custom timeout for network wait in ms (default: 3000)
  * @returns {Promise<Object>} Diagnostics result with errors and network info
  */
-export async function runPostClickDiagnostics(page, beforeActionTimestamp) {
+export async function runPostClickDiagnostics(page, beforeActionTimestamp, options = {}) {
+  const { skipNetworkWait = false, networkWaitTimeout = 3000 } = options;
+
   // Wait for network requests (passing timestamp to track post-action requests)
-  // maxWait = 20s to give slow APIs time to complete
-  const networkInfo = await waitForPendingRequests(beforeActionTimestamp, 500, 20000);
+  // Default maxWait = 3s (configurable via networkWaitTimeout parameter)
+  const networkInfo = skipNetworkWait
+    ? { pendingFound: false, waitedMs: 0, completedRequests: 0, stillPending: 0, pendingRequests: [], totalRequests: 0 }
+    : await waitForPendingRequests(beforeActionTimestamp, 500, networkWaitTimeout);
 
   // Small delay to let pending requests update their error status
   // (handles case where request completes with error right after maxWait expires)

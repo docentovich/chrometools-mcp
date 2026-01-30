@@ -422,7 +422,10 @@ async function executeToolInternal(name, args) {
 
         // NEW POST-CLICK PATTERN:
         // 1. Run post-click diagnostics (waits 500ms, checks pending requests, collects errors)
-        const diagnostics = await runPostClickDiagnostics(page, beforeClickTimestamp);
+        const diagnostics = await runPostClickDiagnostics(page, beforeClickTimestamp, {
+          skipNetworkWait: validatedArgs.skipNetworkWait,
+          networkWaitTimeout: validatedArgs.networkWaitTimeout
+        });
 
         // 2. Generate AI hints after click
         const hints = await generateClickHints(page, identifier);
@@ -464,36 +467,47 @@ async function executeToolInternal(name, args) {
     if (name === "type") {
       const validatedArgs = schemas.TypeSchema.parse(args);
       const page = await getLastOpenPage();
+      const timeout = validatedArgs.timeout || 30000;
 
-      // Get identifier (id or selector)
-      const identifier = validatedArgs.id || validatedArgs.selector;
+      // Wrap operation in timeout
+      const typeOperation = async () => {
+        // Get identifier (id or selector)
+        const identifier = validatedArgs.id || validatedArgs.selector;
 
-      // Resolve selector (supports both APOM ID and CSS selector)
-      const resolved = await resolveSelector(page, identifier);
-      if (!resolved.found) {
-        throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
-      }
+        // Resolve selector (supports both APOM ID and CSS selector)
+        const resolved = await resolveSelector(page, identifier);
+        if (!resolved.found) {
+          throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
+        }
 
-      const element = await page.$(resolved.selector);
-      if (!element) {
-        throw new Error(`Element not found: ${identifier}`);
-      }
+        const element = await page.$(resolved.selector);
+        if (!element) {
+          throw new Error(`Element not found: ${identifier}`);
+        }
 
-      // Use input model to handle the element appropriately
-      const model = await getInputModel(element, page);
-      const options = {
-        delay: validatedArgs.delay !== undefined ? validatedArgs.delay : 30,
-        clearFirst: validatedArgs.clearFirst !== undefined ? validatedArgs.clearFirst : true,
+        // Use input model to handle the element appropriately
+        const model = await getInputModel(element, page);
+        const options = {
+          delay: validatedArgs.delay !== undefined ? validatedArgs.delay : 30,
+          clearFirst: validatedArgs.clearFirst !== undefined ? validatedArgs.clearFirst : true,
+        };
+
+        await model.setValue(validatedArgs.text, options);
+        const description = model.getActionDescription(validatedArgs.text, identifier);
+
+        return {
+          content: [
+            { type: "text", text: description }
+          ],
+        };
       };
 
-      await model.setValue(validatedArgs.text, options);
-      const description = model.getActionDescription(validatedArgs.text, identifier);
+      // Execute with timeout
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Type operation timed out after ${timeout}ms`)), timeout)
+      );
 
-      return {
-        content: [
-          { type: "text", text: description }
-        ],
-      };
+      return Promise.race([typeOperation(), timeoutPromise]);
     }
 
     if (name === "getComputedCss") {
