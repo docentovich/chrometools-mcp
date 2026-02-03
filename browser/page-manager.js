@@ -8,6 +8,59 @@ import { getBrowser } from './browser-manager.js';
 // Note: injectRecorder removed - now using Chrome Extension for recording
 
 /**
+ * Click listener tracking script - injected via evaluateOnNewDocument
+ * Monkey-patches addEventListener to track which elements have click listeners
+ * This enables detection of click handlers added by frameworks like Angular
+ */
+const CLICK_LISTENER_TRACKER_SCRIPT = `
+(function() {
+  // Only inject once
+  if (window.__clickListenerTracker) return;
+  window.__clickListenerTracker = true;
+
+  // WeakMap to track elements with click listeners (prevents memory leaks)
+  const clickListeners = new WeakMap();
+
+  // Store original methods
+  const originalAddEventListener = EventTarget.prototype.addEventListener;
+  const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
+
+  // Patch addEventListener
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (type === 'click' && this instanceof Element) {
+      // Track this element has click listener
+      const count = clickListeners.get(this) || 0;
+      clickListeners.set(this, count + 1);
+    }
+    return originalAddEventListener.call(this, type, listener, options);
+  };
+
+  // Patch removeEventListener for accuracy
+  EventTarget.prototype.removeEventListener = function(type, listener, options) {
+    if (type === 'click' && this instanceof Element) {
+      const count = clickListeners.get(this) || 0;
+      if (count > 0) {
+        clickListeners.set(this, count - 1);
+      }
+    }
+    return originalRemoveEventListener.call(this, type, listener, options);
+  };
+
+  // Global function to check if element has click listener
+  window.__hasClickListener = function(element) {
+    if (!element) return false;
+    const count = clickListeners.get(element);
+    return count && count > 0;
+  };
+
+  // Also expose for debugging
+  window.__getClickListenerCount = function(element) {
+    return clickListeners.get(element) || 0;
+  };
+})();
+`;
+
+/**
  * Debug log helper (only logs to stderr when DEBUG=1)
  * @param {...any} args - Arguments to log
  */
@@ -160,6 +213,20 @@ export async function setupNetworkMonitoring(page) {
 // Note: setupRecorderAutoReinjection removed - Chrome Extension handles recording now
 
 /**
+ * Inject click listener tracker into page
+ * Must be called BEFORE page.goto() to catch all listeners
+ * @param {Page} page - Puppeteer page instance
+ */
+async function injectClickListenerTracker(page) {
+  try {
+    await page.evaluateOnNewDocument(CLICK_LISTENER_TRACKER_SCRIPT);
+    debugLog('Click listener tracker injected');
+  } catch (error) {
+    debugLog('Failed to inject click listener tracker:', error.message);
+  }
+}
+
+/**
  * Get or create page for URL
  * @param {string} url - URL to navigate to
  * @returns {Promise<Page>} - Puppeteer page instance
@@ -179,6 +246,9 @@ export async function getOrCreatePage(url) {
 
   // Create new page
   const page = await browser.newPage();
+
+  // Inject click listener tracker BEFORE navigation
+  await injectClickListenerTracker(page);
 
   // Set up console log capture
   const client = await page.target().createCDPSession();
@@ -277,6 +347,19 @@ export function setLastPage(page) {
  * @returns {Promise<void>}
  */
 export async function setupNewPage(page, source = 'manual') {
+  // Inject click listener tracker
+  // For new tabs, we need both:
+  // 1. evaluateOnNewDocument for future navigations
+  // 2. evaluate for already-loaded content (won't catch existing listeners, but will catch new ones)
+  try {
+    await page.evaluateOnNewDocument(CLICK_LISTENER_TRACKER_SCRIPT);
+    // Also inject immediately for current page (in case content already loaded)
+    await page.evaluate(CLICK_LISTENER_TRACKER_SCRIPT);
+    debugLog(`Click listener tracker injected for ${source} page`);
+  } catch (error) {
+    debugLog('Failed to inject click listener tracker:', error.message);
+  }
+
   // Set up console log capture
   try {
     const client = await page.target().createCDPSession();

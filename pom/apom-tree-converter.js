@@ -627,10 +627,11 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
   }
 
   /**
-   * Check if element has explicit click binding (framework attributes)
+   * Check if element has explicit click binding (framework attributes or addEventListener)
+   * Uses monkey-patched addEventListener tracker for framework detection (Angular, React, Vue)
    */
   function hasExplicitClickBinding(element) {
-    // Check for framework-specific click bindings
+    // Check for framework-specific click bindings (attributes)
     const attrs = element.attributes;
     for (let i = 0; i < attrs.length; i++) {
       const name = attrs[i].name.toLowerCase();
@@ -647,6 +648,13 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
     if (element.onclick) return true;
     // Check onclick attribute
     if (element.hasAttribute('onclick')) return true;
+
+    // Check for click listeners added via addEventListener (framework detection)
+    // This is injected by page-manager.js via evaluateOnNewDocument
+    if (typeof window.__hasClickListener === 'function' && window.__hasClickListener(element)) {
+      return true;
+    }
+
     return false;
   }
 

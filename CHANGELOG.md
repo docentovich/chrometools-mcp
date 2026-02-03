@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.8] - 2026-02-03
+
+### Added
+- **analyzePage: addEventListener tracking for Angular/React/Vue** — Monkey-patch detection
+  - Injects tracker via `evaluateOnNewDocument` before page load
+  - Catches `addEventListener('click', ...)` calls from any framework
+  - Solves Angular detection (compiled `(click)` bindings now visible)
+  - WeakMap storage prevents memory leaks
+  - `hasExplicitClickBinding()` now checks `window.__hasClickListener()`
+
+- **analyzePage: viewportOnly flag** — Filter to visible elements only
+  - Reduces output by 30-56% on large pages
+  - Useful for data-heavy pages with content below fold
+
+- **analyzePage: diff mode** — Show only changes since last analysis
+  - Returns `{added, removed, changed}` structure
+  - ~80-90% size reduction for incremental updates
+
+- **analyzePage: clickTarget legend** — Clarified in tool description
+  - Format: `"tag:id"` (e.g., `"div:container_19"`)
+  - No clickTarget = element handles its own click
+
 ## [3.3.7] - 2026-02-03
 
 ### Performance
