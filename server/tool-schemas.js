@@ -263,6 +263,8 @@ export const AnalyzePageSchema = z.object({
   useLegacyFormat: z.boolean().optional().describe("Return legacy format instead of APOM (default: false - APOM is now the default format)"),
   registerElements: z.boolean().optional().describe("Automatically register elements in selector resolver (default: true)"),
   groupBy: z.enum(['type', 'flat']).optional().describe("Group elements by type or return flat structure (default: 'type')"),
+  viewportOnly: z.boolean().optional().describe("Only analyze elements visible in current viewport (default: false). Reduces output for long pages."),
+  diff: z.boolean().optional().describe("Return only changes since last analysis: {added, removed, changed} (default: false). Useful after clicks to see what changed."),
 });
 
 export const GetElementDetailsSchema = z.object({

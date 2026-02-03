@@ -2212,20 +2212,25 @@ Start coding now.`;
       };
     }
 
+    // Store previous analysis for diff calculation
+    if (!global.previousApomAnalysis) {
+      global.previousApomAnalysis = new Map(); // pageUrl -> analysis data
+    }
+
     if (name === "analyzePage") {
       const validatedArgs = schemas.AnalyzePageSchema.parse(args);
       const page = await getLastOpenPage();
       const pageUrl = page.url();
 
       // APOM Tree format (default) - v2 with tree structure and positioning
-      const apomResult = await page.evaluate((apomTreeConverterCode, selectorResolverCode, shouldRegister, includeAll) => {
+      const apomResult = await page.evaluate((apomTreeConverterCode, selectorResolverCode, shouldRegister, includeAll, viewportOnly) => {
         // Inject utilities
         eval(apomTreeConverterCode);
         eval(selectorResolverCode);
 
         // Build APOM tree
         // interactiveOnly = !includeAll (if includeAll is true, we want ALL elements)
-        const apomData = buildAPOMTree(!includeAll);
+        const apomData = buildAPOMTree(!includeAll, viewportOnly);
 
         // Register elements in selector resolver if requested
         if (shouldRegister) {
@@ -2258,7 +2263,43 @@ Start coding now.`;
         }
 
         return apomData;
-      }, apomTreeConverter, selectorResolver, validatedArgs.registerElements !== false, validatedArgs.includeAll || false);
+      }, apomTreeConverter, selectorResolver, validatedArgs.registerElements !== false, validatedArgs.includeAll || false, validatedArgs.viewportOnly || false);
+
+      // Handle diff mode
+      if (validatedArgs.diff) {
+        const previousAnalysis = global.previousApomAnalysis.get(pageUrl);
+
+        if (previousAnalysis) {
+          // Calculate diff
+          const diff = calculateApomDiff(previousAnalysis, apomResult);
+
+          // Store current analysis for next diff
+          global.previousApomAnalysis.set(pageUrl, apomResult);
+
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                mode: 'diff',
+                pageId: apomResult.pageId,
+                url: apomResult.url,
+                timestamp: apomResult.timestamp,
+                previousTimestamp: previousAnalysis.timestamp,
+                diff,
+                metadata: apomResult.metadata,
+                alerts: apomResult.alerts
+              })
+            }]
+          };
+        } else {
+          // No previous analysis, return full result with note
+          global.previousApomAnalysis.set(pageUrl, apomResult);
+          apomResult._note = 'First analysis for this page, no diff available';
+        }
+      } else {
+        // Store for future diff
+        global.previousApomAnalysis.set(pageUrl, apomResult);
+      }
 
       return {
         content: [{
@@ -2266,6 +2307,82 @@ Start coding now.`;
           text: JSON.stringify(apomResult)
         }]
       };
+    }
+
+    /**
+     * Calculate diff between two APOM analyses
+     */
+    function calculateApomDiff(previous, current) {
+      const previousElements = flattenApomTree(previous.tree);
+      const currentElements = flattenApomTree(current.tree);
+
+      const previousIds = new Set(previousElements.map(e => e.id));
+      const currentIds = new Set(currentElements.map(e => e.id));
+
+      const added = currentElements.filter(e => !previousIds.has(e.id));
+      const removed = previousElements.filter(e => !currentIds.has(e.id));
+
+      // Find changed elements (same ID but different content)
+      const changed = [];
+      for (const curr of currentElements) {
+        if (previousIds.has(curr.id)) {
+          const prev = previousElements.find(e => e.id === curr.id);
+          if (prev && JSON.stringify(prev.metadata) !== JSON.stringify(curr.metadata)) {
+            changed.push({
+              id: curr.id,
+              type: curr.type,
+              before: prev.metadata,
+              after: curr.metadata
+            });
+          }
+        }
+      }
+
+      return {
+        added: added.length > 0 ? added : undefined,
+        removed: removed.length > 0 ? removed : undefined,
+        changed: changed.length > 0 ? changed : undefined,
+        summary: {
+          addedCount: added.length,
+          removedCount: removed.length,
+          changedCount: changed.length
+        }
+      };
+    }
+
+    /**
+     * Flatten APOM tree to array of elements
+     */
+    function flattenApomTree(node, result = []) {
+      if (!node) return result;
+
+      // Handle compact format: { "tag_id": [children] }
+      if (typeof node === 'object' && !node.id && !node.tag) {
+        const keys = Object.keys(node);
+        for (const key of keys) {
+          if (Array.isArray(node[key])) {
+            node[key].forEach(child => flattenApomTree(child, result));
+          }
+        }
+        return result;
+      }
+
+      // Interactive element with id
+      if (node.id) {
+        result.push({
+          id: node.id,
+          tag: node.tag,
+          type: node.type,
+          metadata: node.metadata
+        });
+      }
+
+      // Process children
+      if (node.children) {
+        node.children.forEach(child => flattenApomTree(child, result));
+      }
+
+      return result;
     }
 
     if (name === "getElementDetails") {

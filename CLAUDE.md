@@ -162,11 +162,26 @@ When making changes to the codebase:
 
 ### What to Update (ALWAYS)
 
-1. **CHANGELOG.md** - ALWAYS add concise entry with version, date, and changes
-2. **README.md** - ALWAYS update when adding new tools or changing user-facing behavior
-3. **package.json** - ALWAYS increment version number appropriately
+1. **README.md** - ALWAYS update when adding new tools or changing user-facing behavior
 
 **IMPORTANT**: For new tools/features, ALWAYS update README.md to document them. This is NOT optional.
+
+### Version Bump and CHANGELOG (ASK USER FIRST)
+
+**DO NOT automatically bump version or update CHANGELOG after each atomic change!**
+
+Instead, at the end of a work session (or when user requests):
+1. **Ask user**: "Do you want me to bump version and update CHANGELOG for this session?"
+2. If YES:
+   - Increment version in `package.json` appropriately (patch/minor/major)
+   - Add **single CHANGELOG entry** summarizing ALL changes from the session
+   - Update `extension/manifest.json` version if extension was modified
+3. If NO: Leave version and CHANGELOG unchanged
+
+This prevents:
+- Multiple tiny version bumps for related changes
+- Fragmented CHANGELOG entries
+- Version noise in git history
 
 ### What NOT to Create
 
@@ -212,24 +227,17 @@ Keep entries short and focused. Detailed explanations belong in code comments or
 
 When adding a new tool like `getNetworkRequests`:
 
-1. ✅ **Update README.md**:
+1. ✅ **Update README.md** (immediately):
    - Add tool to appropriate section (e.g., Advanced Tools)
    - Include parameters, use cases, examples
    - Update tool count in Features section
    - Add to Table of Contents
 
-2. ✅ **Update CHANGELOG.md**:
-   - Add new version entry
-   - List the new tool under "Added"
-   - Include brief examples
+2. ⏸️ **CHANGELOG.md and package.json** (ask user at session end):
+   - DO NOT update automatically
+   - Wait for user confirmation
 
-3. ✅ **Update package.json**:
-   - Increment version (e.g., 1.3.2 → 1.3.3)
-
-4. ✅ **Update extension/manifest.json** (if extension was modified):
-   - Set version equal to package.json version (see Version Sync Rule below)
-
-5. ❌ **DO NOT create**:
+3. ❌ **DO NOT create**:
    - `NETWORK_MONITORING.md`
    - `GET_NETWORK_REQUESTS_GUIDE.md`
    - Any other separate documentation files
@@ -238,17 +246,14 @@ When adding a new tool like `getNetworkRequests`:
 
 When modifying an existing tool (e.g., making screenshots optional):
 
-1. ✅ **Update README.md**:
+1. ✅ **Update README.md** (immediately if user-facing):
    - Update the tool's parameter documentation
    - Add performance notes if relevant
    - Update examples if behavior changed
 
-2. ✅ **Update CHANGELOG.md**:
-   - Add version entry with "Changed" or "Performance" section
-   - Include migration notes if breaking change
-
-3. ✅ **Update package.json**:
-   - Increment version appropriately
+2. ⏸️ **CHANGELOG.md and package.json** (ask user at session end):
+   - DO NOT update automatically
+   - Wait for user confirmation
 
 ### Version Sync Rule: MCP and Chrome Extension
 
@@ -262,3 +267,37 @@ Example:
 - MCP package.json: `3.3.6`
 - Extension manifest.json (before): `3.1.2`
 - Extension manifest.json (after update): `3.3.6` ← sync to MCP version
+
+## analyzePage Performance Benchmark
+
+**MANDATORY**: After any changes to `analyzePage` tool, run this benchmark to check output size regression.
+
+### Benchmark Test
+
+1. Navigate to: `https://www.google.com/search?q=puppeteer+mcp+server`
+2. Run `analyzePage` (default parameters)
+3. Compare results with baseline
+
+### Baseline Values (v3.3.7)
+
+| Metric | Baseline | Acceptable Range |
+|--------|----------|------------------|
+| totalElements | 281 | ±50 (Google may vary) |
+| interactiveCount | 61 | ±20 |
+| JSON size | ~28 KB | < 40 KB |
+
+### Actions Based on Results
+
+| Deviation | Action |
+|-----------|--------|
+| Size < 40 KB | ✅ OK - proceed with changes |
+| Size 40-55 KB | ⚠️ Review - consider optimizing new fields |
+| Size > 55 KB | ❌ Refactor - restructure to reduce output size |
+
+### Optimization Strategies (if size grows)
+
+1. **Move verbose data to separate tool** - e.g., `getElementDetails(id)` for full info
+2. **Use shorter keys** - `t` instead of `type`, `c` instead of `children`
+3. **Omit null/empty values** - don't include fields with default values
+4. **Limit tree depth** - add `maxDepth` parameter
+5. **Pagination** - return first N elements, provide continuation token

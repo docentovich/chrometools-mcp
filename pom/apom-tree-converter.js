@@ -10,9 +10,10 @@
  * Runs in browser context via page.evaluate()
  *
  * @param {boolean} interactiveOnly - Only include interactive elements and their parents
+ * @param {boolean} viewportOnly - Only include elements visible in current viewport
  * @returns {Object} APOM tree structure
  */
-function buildAPOMTree(interactiveOnly = true) {
+function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
   const pageId = `page_${btoa(window.location.href).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}_${Date.now()}`;
 
   const result = {
@@ -26,7 +27,14 @@ function buildAPOMTree(interactiveOnly = true) {
       interactiveCount: 0,
       formCount: 0,
       modalCount: 0,
-      maxDepth: 0
+      maxDepth: 0,
+      viewportOnly: viewportOnly || undefined,
+      viewport: viewportOnly ? {
+        width: window.innerWidth || document.documentElement.clientWidth,
+        height: window.innerHeight || document.documentElement.clientHeight,
+        scrollX: window.scrollX || window.pageXOffset,
+        scrollY: window.scrollY || window.pageYOffset
+      } : undefined
     }
   };
 
@@ -51,7 +59,121 @@ function buildAPOMTree(interactiveOnly = true) {
   // Collect radio and checkbox groups for easier agent access
   result.groups = collectInputGroups(result.tree);
 
+  // Detect page alerts, warnings, errors, and restrictions
+  result.alerts = detectPageAlerts();
+
   return result;
+
+  /**
+   * Detect page alerts, warnings, errors, toasts, and restrictions
+   * Uses heuristics to find notification elements
+   */
+  function detectPageAlerts() {
+    const alerts = [];
+    const seenTexts = new Set();
+    const MIN_TEXT_LENGTH = 10;  // Ignore very short texts like "19", "OK"
+
+    // Helper to add alert avoiding duplicates and substrings
+    function addAlert(type, text, source) {
+      text = text?.trim();
+      if (!text || text.length < MIN_TEXT_LENGTH || text.length > 300) return;
+
+      // Normalize text
+      const normalizedText = text.substring(0, 200);
+
+      // Skip if already seen or is substring of existing
+      if (seenTexts.has(normalizedText)) return;
+      for (const seen of seenTexts) {
+        if (seen.includes(normalizedText) || normalizedText.includes(seen)) return;
+      }
+
+      seenTexts.add(normalizedText);
+      alerts.push({ type, text: normalizedText, source });
+    }
+
+    // 1. Elements with role="alert" or aria-live (highest priority)
+    document.querySelectorAll('[role="alert"], [aria-live="assertive"]').forEach(el => {
+      const text = el.textContent?.trim();
+      addAlert('alert', text, 'aria');
+    });
+
+    // 2. Classes containing restriction keywords (high priority - affects functionality)
+    const restrictionSelector = '[class*="deactivat"], [class*="disabled"], [class*="blocked"], [class*="restrict"], [class*="suspend"], [class*="inactive"]';
+    document.querySelectorAll(restrictionSelector).forEach(el => {
+      if (!isVisibleForAlert(el)) return;
+      const text = el.textContent?.trim();
+      addAlert('restriction', text, 'class');
+    });
+
+    // 3. Error classes
+    document.querySelectorAll('[class*="error"], [class*="danger"], [class*="invalid"]').forEach(el => {
+      if (!isVisibleForAlert(el)) return;
+      const text = el.textContent?.trim();
+      addAlert('error', text, 'class');
+    });
+
+    // 4. Warning classes
+    document.querySelectorAll('[class*="warning"], [class*="warn"], [class*="caution"]').forEach(el => {
+      if (!isVisibleForAlert(el)) return;
+      const text = el.textContent?.trim();
+      addAlert('warning', text, 'class');
+    });
+
+    // 5. Toast/Snackbar notifications (usually important messages)
+    document.querySelectorAll('[class*="toast"], [class*="snackbar"], [class*="alert-banner"]').forEach(el => {
+      if (!isVisibleForAlert(el)) return;
+      const text = el.textContent?.trim();
+      addAlert('notification', text, 'toast');
+    });
+
+    // 6. SVG icons with warning colors - only for restriction/deactivated contexts
+    const warningColors = ['#FF3B30', '#FAB32F', '#FFCC00', '#FF9500', '#F44336'];
+    document.querySelectorAll('svg').forEach(svg => {
+      const svgHtml = svg.outerHTML.toLowerCase();
+      const hasWarningColor = warningColors.some(c => svgHtml.includes(c.toLowerCase()));
+      if (!hasWarningColor) return;
+
+      // Only consider if parent has restriction-related class or text
+      let parent = svg.parentElement;
+      let attempts = 0;
+      while (parent && attempts < 3) {
+        const className = parent.className?.toLowerCase() || '';
+        const text = parent.textContent?.trim() || '';
+
+        // Check if context suggests restriction/warning
+        const isRestrictionContext =
+          /deactivat|disabled|blocked|restrict|suspend|приостановлен|заблокирован/.test(className + ' ' + text.toLowerCase());
+
+        if (isRestrictionContext && text.length >= MIN_TEXT_LENGTH) {
+          addAlert('restriction', text, 'icon-color');
+          break;
+        }
+        parent = parent.parentElement;
+        attempts++;
+      }
+    });
+
+    // 7. Elements with semantic key/name attributes
+    document.querySelectorAll('[key*="error"], [key*="warning"], [key*="deactivat"], [key*="block"]').forEach(el => {
+      const parent = el.closest('div, span, p');
+      if (parent) {
+        const text = parent.textContent?.trim();
+        addAlert('warning', text, 'semantic-attr');
+      }
+    });
+
+    // Return only if there are meaningful alerts
+    return alerts.length > 0 ? alerts : undefined;
+  }
+
+  /**
+   * Check if element is visible (for alert detection)
+   */
+  function isVisibleForAlert(el) {
+    if (el.offsetWidth === 0 || el.offsetHeight === 0) return false;
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+  }
 
   /**
    * Collect radio and checkbox groups from the tree
@@ -149,6 +271,32 @@ function buildAPOMTree(interactiveOnly = true) {
   }
 
   /**
+   * Filter out null, undefined, and empty string values from object
+   * to reduce JSON output size
+   */
+  function filterNullValues(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      // Skip null, undefined, and empty strings
+      if (value === null || value === undefined || value === '') continue;
+      // Skip false for boolean fields (keep true)
+      if (value === false) continue;
+      // Recursively filter nested objects (but not arrays)
+      if (typeof value === 'object' && !Array.isArray(value)) {
+        const filtered = filterNullValues(value);
+        if (Object.keys(filtered).length > 0) {
+          result[key] = filtered;
+        }
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  /**
    * Check if cursor:pointer is explicitly set (not inherited)
    */
   function hasCursorPointerExplicit(element) {
@@ -230,6 +378,23 @@ function buildAPOMTree(interactiveOnly = true) {
   }
 
   /**
+   * Check if element is in viewport
+   */
+  function isInViewport(el) {
+    const rect = el.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+
+    // Element is in viewport if any part of it is visible
+    return (
+      rect.bottom > 0 &&
+      rect.right > 0 &&
+      rect.top < viewportHeight &&
+      rect.left < viewportWidth
+    );
+  }
+
+  /**
    * Check if element is visible
    * More reliable check that works with position:fixed elements (Angular Material, etc.)
    */
@@ -247,6 +412,11 @@ function buildAPOMTree(interactiveOnly = true) {
 
     // For body element, always consider visible if dimensions > 0
     if (el === document.body) return true;
+
+    // Check viewport if viewportOnly mode is enabled
+    if (viewportOnly && !isInViewport(el)) {
+      return false;
+    }
 
     // Additional check: element should be in viewport or have offsetParent
     // This handles elements inside position:fixed containers (Angular Material)
@@ -297,19 +467,23 @@ function buildAPOMTree(interactiveOnly = true) {
       node = {
         id,
         tag: element.tagName.toLowerCase(),
-        position,
         type: elementType.type,
         children: []
       };
+
+      // Only include position if not static (position is null for static)
+      if (position) {
+        node.position = position;
+      }
 
       // Add selector only in includeAll mode
       if (!interactiveOnly) {
         node.selector = selector;
       }
 
-      // Add metadata for interactive elements
+      // Add metadata for interactive elements, filtering out null/undefined values
       if (elementType.metadata) {
-        node.metadata = elementType.metadata;
+        node.metadata = filterNullValues(elementType.metadata);
       }
     } else {
       // Containers: compact format "tag_id": [children] when interactiveOnly
@@ -340,8 +514,8 @@ function buildAPOMTree(interactiveOnly = true) {
     if (elementType.type === 'form') {
       result.metadata.formCount++;
     }
-    if (position.type === 'fixed' || position.type === 'absolute') {
-      if (position.zIndex >= 100) {
+    if (position && (position.type === 'fixed' || position.type === 'absolute')) {
+      if (position.zIndex && position.zIndex >= 100) {
         result.metadata.modalCount++;
       }
     }
@@ -365,6 +539,11 @@ function buildAPOMTree(interactiveOnly = true) {
       return compactNode;
     }
 
+    // Remove empty children array to reduce output size
+    if (node.children && node.children.length === 0) {
+      delete node.children;
+    }
+
     return node;
   }
 
@@ -379,37 +558,30 @@ function buildAPOMTree(interactiveOnly = true) {
 
   /**
    * Get positioning information
+   * Returns null for static position (default) to reduce output size
    */
   function getPositionInfo(element) {
     const style = window.getComputedStyle(element);
     const position = style.position;
+
+    // Skip static position (default) - no need to include
+    if (position === 'static') {
+      return null;
+    }
+
     const zIndex = style.zIndex === 'auto' ? 'auto' : parseInt(style.zIndex, 10);
 
-    // Check if creates stacking context
-    const isStacking =
-      position === 'fixed' ||
-      position === 'sticky' ||
-      (position === 'absolute' && zIndex !== 'auto') ||
-      (position === 'relative' && zIndex !== 'auto') ||
-      parseFloat(style.opacity) < 1 ||
-      style.transform !== 'none' ||
-      style.filter !== 'none' ||
-      style.perspective !== 'none' ||
-      style.clipPath !== 'none' ||
-      style.mask !== 'none' ||
-      style.mixBlendMode !== 'normal' ||
-      style.isolation === 'isolate';
-
-    return {
-      type: position,
-      zIndex: zIndex,
-      isStacking: isStacking,
-      // Additional positioning properties for modals/overlays detection
-      hasBackdrop: style.backgroundColor !== 'rgba(0, 0, 0, 0)' &&
-                   (position === 'fixed' || position === 'absolute'),
-      isFullscreen: element.offsetWidth >= window.innerWidth * 0.9 &&
-                    element.offsetHeight >= window.innerHeight * 0.9
+    // Only include non-default values
+    const result = {
+      type: position
     };
+
+    // Only include zIndex if it's not 'auto'
+    if (zIndex !== 'auto') {
+      result.zIndex = zIndex;
+    }
+
+    return result;
   }
 
   /**
@@ -444,6 +616,75 @@ function buildAPOMTree(interactiveOnly = true) {
     } catch (e) {
       return false;
     }
+  }
+
+  /**
+   * Check if tag is a custom element (Web Component / Framework component)
+   */
+  function isCustomElement(tag) {
+    // Custom elements must contain a hyphen
+    return tag.includes('-');
+  }
+
+  /**
+   * Check if element has explicit click binding (framework attributes)
+   */
+  function hasExplicitClickBinding(element) {
+    // Check for framework-specific click bindings
+    const attrs = element.attributes;
+    for (let i = 0; i < attrs.length; i++) {
+      const name = attrs[i].name.toLowerCase();
+      // Angular: (click), Angular.js: ng-click
+      // Vue: @click, v-on:click
+      // React: onClick (but this is a property, not attribute)
+      if (name === '(click)' || name === 'ng-click' ||
+          name === '@click' || name === 'v-on:click' ||
+          name.startsWith('on') && name.includes('click')) {
+        return true;
+      }
+    }
+    // Check onclick property
+    if (element.onclick) return true;
+    // Check onclick attribute
+    if (element.hasAttribute('onclick')) return true;
+    return false;
+  }
+
+  /**
+   * Find click handler for interactive elements (bubbling search)
+   * Searches UP from element to find ancestor with explicit click binding
+   * Returns "tag:id" format like "div:container_19" or null if not found
+   */
+  function findClickHandler(element) {
+    const tag = element.tagName.toLowerCase();
+
+    // Check self first - native interactive elements handle their own clicks
+    if (hasExplicitClickBinding(element) ||
+        ['button', 'a', 'input', 'select'].includes(tag) ||
+        element.getAttribute('role') === 'button') {
+      return null;  // element handles its own click, no need for clickTarget
+    }
+
+    // Search UP (like event bubbling) - find ancestor with explicit click handler
+    let parent = element.parentElement;
+    let depth = 0;
+    const maxDepth = 5;  // limit to prevent hanging
+
+    while (parent && depth < maxDepth) {
+      if (hasExplicitClickBinding(parent)) {
+        // Found real click handler
+        const parentId = elementIds.get(parent);
+        if (parentId) {
+          const parentTag = parent.tagName.toLowerCase();
+          return `${parentTag}:${parentId}`;
+        }
+      }
+      parent = parent.parentElement;
+      depth++;
+    }
+
+    // No click handler found - return null (no fallback!)
+    return null;
   }
 
   /**
@@ -680,12 +921,20 @@ function buildAPOMTree(interactiveOnly = true) {
 
     // Generic container - check for JavaScript interactivity
     const interactivityCheck = checkInteractivity(element);
+
+    // For ALL interactive elements, search for click handler (bubbling)
+    // Returns "tag:id" format or null if not found
+    const clickTarget = interactivityCheck.isInteractive
+      ? findClickHandler(element)
+      : null;
+
     return {
       type: 'container',
       isInteractive: interactivityCheck.isInteractive,
       metadata: interactivityCheck.isInteractive ? {
         text: element.textContent?.trim().substring(0, 100) || '',
-        interactivityReason: interactivityCheck.reason
+        interactivityReason: interactivityCheck.reason,
+        clickTarget: clickTarget || undefined
       } : null
     };
   }

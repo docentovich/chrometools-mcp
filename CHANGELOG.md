@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.7] - 2026-02-03
+
+### Performance
+- **analyzePage: 26% output size reduction** — Optimized JSON structure
+  - Removed `position` for static elements (default, no need to include)
+  - Removed `zIndex: "auto"` (default value)
+  - Removed `isStacking`, `hasBackdrop`, `isFullscreen` from position object
+  - Removed empty `children: []` arrays
+  - Filtered out `null`, `undefined`, empty string, and `false` values from metadata
+  - Google Search benchmark: ~38 KB → ~28 KB
+
+### Added
+- **CLAUDE.md: analyzePage benchmark requirement** — Mandatory performance check
+  - Test URL: `https://www.google.com/search?q=puppeteer+mcp+server`
+  - Baseline: ~28 KB, threshold: < 40 KB
+  - Must run after any changes to analyzePage tool
+
+## [3.3.6] - 2026-02-03
+
+### Added
+- **Chrome Extension: POST request tracking** — Track POST requests via webRequest API
+  - Extension now captures POST/PUT/PATCH requests that Puppeteer may miss
+  - Shows in "Browser-level requests (via Extension)" section
+  - Useful for SPA apps with complex async request patterns
+
 ## [3.3.5] - 2026-01-30
 
 ### Fixed

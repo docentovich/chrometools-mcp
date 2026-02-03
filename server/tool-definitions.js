@@ -477,7 +477,7 @@ export const toolDefinitions = [
       },
       {
         name: "analyzePage",
-        description: "PRIMARY tool for reading page state. Returns APOM tree: {tree, metadata, groups}. Compact format (default): containers as \"tag_id\":[children] keys, interactive elements as {id, tag, type, position, metadata} without selectors. Use element IDs (e.g., button_45, input_20) with click/type tools. Selectors registered internally for resolution. Use refresh:true after clicks. Efficient: 8-10k tokens vs screenshot 15-25k.",
+        description: "PRIMARY tool for reading page state. Returns APOM tree: {tree, metadata, groups}. Compact format (default): containers as \"tag_id\":[children] keys, interactive elements as {id, tag, type, position, metadata} without selectors. Use element IDs (e.g., button_45, input_20) with click/type tools. Selectors registered internally for resolution. Use refresh:true after clicks. Efficient: 8-10k tokens vs screenshot 15-25k. Legend: clickTarget format is \"tag:id\" (e.g., \"kp-chats-list-item:container_58\") - use the id part for clicking.",
         inputSchema: {
           type: "object",
           properties: {
@@ -486,6 +486,8 @@ export const toolDefinitions = [
             useLegacyFormat: { type: "boolean", description: "Return legacy format instead of APOM (default: false - APOM is now default)" },
             registerElements: { type: "boolean", description: "Auto-register elements in selector resolver (default: true)" },
             groupBy: { type: "string", description: "Group elements: 'type' or 'flat' (default: 'type')", enum: ["type", "flat"] },
+            viewportOnly: { type: "boolean", description: "Only analyze elements in current viewport (default: false). Reduces output for long pages." },
+            diff: { type: "boolean", description: "Return only changes since last analysis: {added, removed, changed} (default: false)." },
           },
         },
       },
