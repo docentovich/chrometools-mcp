@@ -354,9 +354,9 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
         // tabindex (except -1)
         (el.hasAttribute('tabindex') && el.getAttribute('tabindex') !== '-1') ||
         // contenteditable
-        el.getAttribute('contenteditable') === 'true'
-        // Note: We skip event listener check here for performance
-        // as querySelectorAll can return thousands of elements
+        el.getAttribute('contenteditable') === 'true' ||
+        // Click event listeners (Angular, React, Vue) via monkey-patched addEventListener tracker
+        hasExplicitClickBinding(el)
       );
 
       if (isInteractive && isVisible(el)) {
@@ -598,27 +598,6 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
   }
 
   /**
-   * Check if element has click event listeners
-   */
-  function hasClickListener(element) {
-    try {
-      // Check for getEventListeners (available in Chrome DevTools context)
-      if (typeof getEventListeners === 'function') {
-        const listeners = getEventListeners(element);
-        return listeners && listeners.click && listeners.click.length > 0;
-      }
-
-      // Fallback: check for common event listener markers
-      // Note: This is not 100% reliable but catches common cases
-      return element._events?.click ||
-             element.__listeners?.click ||
-             element.__eventListeners?.click;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /**
    * Check if tag is a custom element (Web Component / Framework component)
    */
   function isCustomElement(tag) {
@@ -732,8 +711,8 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
       return { isInteractive: true, reason: 'cursor-pointer' };
     }
 
-    // 6. Elements with click event listeners
-    if (hasClickListener(element)) {
+    // 6. Elements with click event listeners (framework handlers: Angular, React, Vue)
+    if (hasExplicitClickBinding(element)) {
       return { isInteractive: true, reason: 'event-listener' };
     }
 

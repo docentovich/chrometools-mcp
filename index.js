@@ -2216,9 +2216,12 @@ Start coding now.`;
       const maxResults = validatedArgs.maxResults || 5;
 
       // Execute smart search in page context
-      const results = await page.evaluate((description, maxResults, utilsCode) => {
+      const results = await page.evaluate((description, maxResults, utilsCode, selectorResolverCode) => {
         // Inject utilities into page context
         eval(utilsCode);
+        if (typeof registerElement === 'undefined') {
+          eval(selectorResolverCode);
+        }
 
         // Determine element type from description
         const elementType = determineElementType(description);
@@ -2274,18 +2277,29 @@ Start coding now.`;
         });
 
         // Filter and sort
-        return analyzed
+        const filtered = analyzed
           .filter(r => r.score > 5) // Minimum threshold
           .sort((a, b) => b.score - a.score)
           .slice(0, maxResults);
 
-      }, validatedArgs.description, maxResults, elementFinderUtils);
+        // Register found elements in APOM registry and assign IDs
+        filtered.forEach((result, idx) => {
+          const apomId = `smart_${result.type}_${idx}`;
+          result.id = apomId;
+          if (typeof registerElement === 'function') {
+            registerElement(apomId, result.selector, { source: 'smartFindElement' });
+          }
+        });
+
+        return filtered;
+
+      }, validatedArgs.description, maxResults, elementFinderUtils, selectorResolver);
 
       const hints = {
         totalCandidates: results.length,
         bestMatch: results[0] || null,
         suggestion: results.length > 0
-          ? `Use selector: ${results[0].selector}`
+          ? `Use id: "${results[0].id}" or selector: ${results[0].selector}`
           : 'No good matches found. Try a different description.',
       };
 
@@ -2647,8 +2661,11 @@ Start coding now.`;
       const validatedArgs = schemas.FindElementsByTextSchema.parse(args);
       const page = await getLastOpenPage();
 
-      const elements = await page.evaluate((text, exact, caseSensitive, utilsCode) => {
+      const elements = await page.evaluate((text, exact, caseSensitive, utilsCode, selectorResolverCode) => {
         eval(utilsCode);
+        if (typeof registerElement === 'undefined') {
+          eval(selectorResolverCode);
+        }
 
         const results = [];
         const searchText = caseSensitive ? text : text.toLowerCase();
@@ -2675,9 +2692,16 @@ Start coding now.`;
             : compareText.includes(searchText);
 
           if (matches) {
+            const selector = getUniqueSelectorInPage(el);
+            const type = el.tagName.toLowerCase();
+            const apomId = `text_${type}_${results.length}`;
+            if (typeof registerElement === 'function') {
+              registerElement(apomId, selector, { source: 'findElementsByText' });
+            }
             results.push({
-              selector: getUniqueSelectorInPage(el),
-              type: el.tagName.toLowerCase(),
+              id: apomId,
+              selector,
+              type,
               text: elementText.substring(0, 100), // Only first 100 chars for preview
               visible: el.offsetParent !== null, // Add visibility check
             });
@@ -2685,7 +2709,7 @@ Start coding now.`;
         });
 
         return results;
-      }, validatedArgs.text, validatedArgs.exact || false, validatedArgs.caseSensitive || false, elementFinderUtils);
+      }, validatedArgs.text, validatedArgs.exact || false, validatedArgs.caseSensitive || false, elementFinderUtils, selectorResolver);
 
       // Prioritize visible elements and limit results to prevent token overflow
       const visibleElements = elements.filter(el => el.visible);
