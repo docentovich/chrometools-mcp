@@ -278,10 +278,20 @@ export function formatDiagnosticsForAI(diagnostics) {
 
   // Page navigation detection (form submit in non-SPA apps)
   if (diagnostics.navigation) {
-    output += `\n\n🔄 Page navigation detected (form submit):`;
-    output += `\n   From: ${diagnostics.navigation.from}`;
-    output += `\n   To: ${diagnostics.navigation.to}`;
-    output += `\n   → This indicates a successful form POST with page reload`;
+    const to = diagnostics.navigation.to || '';
+    const isAuthRedirect = /login|signin|auth/i.test(to)
+      && /[?&](returnUrl|return_url|redirect|next)/i.test(to);
+    if (isAuthRedirect) {
+      output += `\n\n⚠️ AUTH REDIRECT detected:`;
+      output += `\n   From: ${diagnostics.navigation.from}`;
+      output += `\n   To: ${diagnostics.navigation.to}`;
+      output += `\n   → Session not established. Ensure login completes and cookies are set before navigating to protected routes.`;
+    } else {
+      output += `\n\n🔄 Page navigation detected (form submit):`;
+      output += `\n   From: ${diagnostics.navigation.from}`;
+      output += `\n   To: ${diagnostics.navigation.to}`;
+      output += `\n   → This indicates a successful form POST with page reload`;
+    }
   }
 
   // Network activity - show all tracked requests (GET/POST/PUT/PATCH/DELETE)

@@ -500,6 +500,10 @@ Click an element with optional result screenshot. **PREFERRED**: Use APOM ID fro
 - **Use case**: Buttons, links, form submissions, Django admin forms
 - **Returns**: Confirmation text + optional screenshot + network diagnostics
 - **Performance**: 2-10x faster without screenshot, instant with skipNetworkWait
+- **Click strategy**: Three-tier fallback for maximum compatibility:
+  1. Puppeteer native click (trusted CDP events)
+  2. CDP coordinate click at element center (trusted, bypasses interception check)
+  3. JavaScript `element.click()` (untrusted, last resort)
 - **Example**:
   ```javascript
   // PREFERRED: Using APOM ID
@@ -1921,6 +1925,32 @@ npx chrometools-mcp --install-bridge
 - Bridge only runs when Chrome Extension is active
 - Close and reopen Chrome
 - Check Extension Service Worker console for errors
+
+## Known Limitations
+
+### Angular *ngFor with Dynamic Bindings
+
+In Angular apps using Zone.js, **any** programmatic click (including CDP trusted events) can trigger change detection **between** event listener callbacks. If `*ngFor` iterates over a getter that returns a new array reference each time (e.g., `[options]="getOptions()"`), Angular destroys and recreates all child elements mid-dispatch, causing `@HostListener('click')` on the target element to never fire. Only real hardware mouse events (physical mouse) are immune — CDP events, despite being `isTrusted: true`, are not dispatched through the OS event queue.
+
+ChromeTools **automatically detects** this: after each click, it checks if the target element was removed from DOM. If so, the `ELEMENT DETACHED` hint is shown with a workaround guide.
+
+**App fix** (recommended): add `trackBy` to `*ngFor`, or cache the array reference instead of returning a new one each time.
+
+**Workaround** when app fix is not possible — use `executeScript` to call the Angular component API directly:
+```javascript
+// 1. Find the component instance
+executeScript({ script: `
+  const comp = ng.getComponent(document.querySelector('my-component'));
+  // 2. Explore available events
+  Object.keys(comp).filter(k => k.includes('Event'));
+` })
+
+// 3. Emit the event directly (bypasses DOM click entirely)
+executeScript({ script: `
+  const comp = ng.getComponent(document.querySelector('my-component'));
+  comp.selectedOptionChangeEvent.emit(comp.options.find(o => o.name === 'Delete'));
+` })
+```
 
 ## Architecture
 

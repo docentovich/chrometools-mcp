@@ -352,6 +352,10 @@ async function executeToolInternal(name, args) {
       if (hints.heading) {
         hintsText += `\nPage heading: "${hints.heading}"`;
       }
+      if (hints.authRedirect) {
+        hintsText += `\n⚠️ AUTH REDIRECT: Page redirected to login (intended: ${hints.authRedirect.returnUrl || 'unknown'})`;
+        hintsText += `\n  → Session/cookies not established. Login first, then retry navigation.`;
+      }
       if (hints.availableActions.length > 0) {
         hintsText += `\nAvailable actions: ${hints.availableActions.join(', ')}`;
       }
@@ -484,22 +488,73 @@ async function executeToolInternal(name, args) {
         // ALWAYS scroll to element first to ensure it's in viewport
         await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
 
-        // Click with timeout to prevent hanging on navigation
+        // Click with adaptive fallback strategy:
+        //
+        // Pre-check: elementFromPoint() determines if element is the topmost at its center.
+        // This decides the click path — Puppeteer's click() doesn't always throw on interception.
+        //
+        // Path A (element covered by another, e.g. small button under <a routerLink>):
+        //   → JS element.click() — DOM dispatch bypasses coordinate hit-testing
+        //
+        // Path B (element is topmost — normal case):
+        //   Tier 1: Puppeteer native click (trusted CDP events)
+        //   Tier 2: page.mouse.click at coordinates (trusted CDP, no interception check)
+        //   Tier 3: JS element.click() (untrusted, last resort)
+        //   Trusted CDP events (Tier 1 & 2) are critical for Angular/Zone.js apps where
+        //   untrusted .click() triggers change detection mid-dispatch, destroying *ngFor elements.
         const clickWithTimeout = async (timeoutMs = 5000) => {
-          const clickPromise = element.click().catch(() => {
-            // If Puppeteer click fails, fallback to JS click
-            return element.evaluate(el => el.click());
+          const withTimeout = (promise) => Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('click timeout')), timeoutMs))
+          ]);
+
+          // Pre-check: is another element covering our target at its center coordinates?
+          const intercepted = await element.evaluate(el => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return false;
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            const topEl = document.elementFromPoint(cx, cy);
+            // topEl is our element or a child of it — not intercepted
+            return topEl !== el && !el.contains(topEl);
           });
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('click timeout')), timeoutMs)
-          );
-          return Promise.race([clickPromise, timeoutPromise]).catch(() => {
-            // If click times out, try JS click as last resort
-            return element.evaluate(el => el.click());
-          });
+
+          if (intercepted) {
+            // Path A: Element is covered (e.g., small button under <a routerLink>)
+            // Coordinate clicks would hit the covering element — use DOM dispatch
+            await element.evaluate(el => el.click());
+            return;
+          }
+
+          // Path B: Element is topmost — use trusted CDP events
+          // Tier 1: Puppeteer native click
+          try {
+            await withTimeout(element.click());
+            return;
+          } catch (e) { /* fall through to Tier 2 */ }
+
+          // Tier 2: CDP coordinate click — trusted events, bypasses Puppeteer's own checks
+          try {
+            const box = await element.boundingBox();
+            if (box) {
+              await withTimeout(page.mouse.click(box.x + box.width / 2, box.y + box.height / 2));
+              return;
+            }
+          } catch (e) { /* fall through to Tier 3 */ }
+
+          // Tier 3: JS click — untrusted, last resort
+          await element.evaluate(el => el.click());
         };
 
         await clickWithTimeout();
+
+        // Check if element was detached from DOM during click (Angular *ngFor + Zone.js pattern)
+        let elementDetached = false;
+        try {
+          elementDetached = await element.evaluate(el => !el.parentNode);
+        } catch (e) {
+          // Element handle may be invalid if page navigated — not a detachment issue
+        }
 
         // NEW POST-CLICK PATTERN:
         // 1. Run post-click diagnostics (waits for network requests within 200ms, max 10s timeout)
@@ -554,6 +609,22 @@ async function executeToolInternal(name, args) {
         const otherElements = hints.newElements.filter(e => e.type !== 'modal' && e.type !== 'dropdown' && e.type !== 'menu');
         if (otherElements.length > 0) {
           hintsText += `\nNew elements appeared: ${otherElements.map(e => e.text ? `${e.type}: ${e.text}` : e.type).join(', ')}`;
+        }
+
+        // Auth redirect after click (session expired, protected route)
+        if (hints.authRedirect) {
+          hintsText += '\n⚠️ AUTH REDIRECT: Landed on login page. Session may have expired.';
+        }
+
+        // Element detached during click (Angular *ngFor + Zone.js)
+        if (elementDetached) {
+          hintsText += '\n⚠️ ELEMENT DETACHED: Element was removed from DOM during click — handler did NOT fire.';
+          hintsText += '\n   Cause: Angular Zone.js triggers change detection mid-click, *ngFor recreates elements.';
+          hintsText += '\n   App fix: add trackBy to *ngFor, or cache array reference instead of returning new one.';
+          hintsText += '\n   Workaround via executeScript:';
+          hintsText += "\n   1. Find component: ng.getComponent(document.querySelector('component-tag'))";
+          hintsText += "\n   2. Explore API: Object.keys(comp).filter(k => k.includes('Event'))";
+          hintsText += '\n   3. Emit: comp.someChangeEvent.emit(selectedOption)';
         }
 
         if (hints.suggestedNext.length > 0) {
@@ -1654,6 +1725,10 @@ async function executeToolInternal(name, args) {
       if (hints.heading) {
         hintsText += `\nPage heading: "${hints.heading}"`;
       }
+      if (hints.authRedirect) {
+        hintsText += `\n⚠️ AUTH REDIRECT: Page redirected to login (intended: ${hints.authRedirect.returnUrl || 'unknown'})`;
+        hintsText += `\n  → Session/cookies not established. Login first, then retry navigation.`;
+      }
       if (hints.availableActions.length > 0) {
         hintsText += `\nAvailable actions: ${hints.availableActions.join(', ')}`;
       }
@@ -2696,9 +2771,11 @@ Start coding now.`;
         }
 
         const results = [];
+        const MAX_RESULTS = 40; // Collect up to 40 to allow visible/hidden sorting, cap expensive selector generation
         const searchText = caseSensitive ? text : text.toLowerCase();
 
         document.querySelectorAll('*').forEach(el => {
+          if (results.length >= MAX_RESULTS) return; // Stop expensive selector generation after enough results
           // Skip script, style, etc
           if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'BR', 'HR'].includes(el.tagName)) return;
 

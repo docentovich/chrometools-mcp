@@ -55,11 +55,28 @@ export async function generateNavigationHints(page, url) {
       }
     }
 
+    // Helper: detect login/auth page (broad detection)
+    function isLoginPage() {
+      // Classic password form
+      if (document.querySelector('form input[type="password"]')) return true;
+      // Phone/OTP login (input[type="tel"] inside a form with few fields)
+      const telInput = document.querySelector('form input[type="tel"]');
+      if (telInput) {
+        const form = telInput.closest('form');
+        if (form && form.querySelectorAll('input:not([type="hidden"])').length <= 3) return true;
+      }
+      // URL-based detection (/login, /signin, /auth in path)
+      if (/\/(login|signin|sign-in|auth|authenticate)(\/|$|\?)/i.test(window.location.pathname)) return true;
+      // Class/ID-based detection
+      if (document.querySelector('[class*="login-form"], [class*="signin-form"], [class*="auth-form"], [id*="login-form"], [id*="signin-form"]')) return true;
+      return false;
+    }
+
     // Detect page type
-    if (document.querySelector('form input[type="password"]')) {
+    if (isLoginPage()) {
       hints.pageType = 'login';
       hints.suggestedNext.push('Fill login credentials and submit');
-      hints.commonSelectors.usernameField = 'input[type="email"], input[name*="user"], input[name*="email"]';
+      hints.commonSelectors.usernameField = 'input[type="email"], input[type="tel"], input[name*="user"], input[name*="email"], input[name*="phone"]';
       hints.commonSelectors.passwordField = 'input[type="password"]';
       hints.commonSelectors.submitButton = 'button[type="submit"], input[type="submit"]';
     } else if (document.querySelector('form') && document.querySelectorAll('form input').length > 3) {
@@ -74,6 +91,18 @@ export async function generateNavigationHints(page, url) {
     } else if (document.querySelectorAll('article, .post, .product').length > 3) {
       hints.pageType = 'listing';
       hints.suggestedNext.push('Browse items or use filters');
+    }
+
+    // Detect auth redirect (landed on login page with returnUrl param)
+    const returnUrlPatterns = ['returnUrl', 'return_url', 'redirect', 'redirect_uri', 'next', 'return_to', 'RelayState'];
+    const urlParams = new URL(window.location.href).searchParams;
+    const returnParam = returnUrlPatterns.find(p => urlParams.has(p));
+    if (hints.pageType === 'login' && returnParam) {
+      hints.authRedirect = {
+        detected: true,
+        returnUrl: urlParams.get(returnParam),
+      };
+      hints.suggestedNext = ['⚠️ Auth redirect detected — complete login first, then navigate to intended page'];
     }
 
     // Available actions
@@ -257,6 +286,17 @@ export async function generateClickHints(page, selector) {
       hints.suggestedNext.push(type === 'menu' ? 'Select menu item' : 'Select option from dropdown');
     });
 
+    // Detect auth redirect after click (session expired, protected route)
+    const clickUrl = window.location.href;
+    const isLoginLike = document.querySelector('form input[type="password"]')
+      || (document.querySelector('form input[type="tel"]') && document.querySelectorAll('form input:not([type="hidden"])').length <= 3)
+      || /\/(login|signin|sign-in|auth|authenticate)(\/|$|\?)/i.test(window.location.pathname)
+      || document.querySelector('[class*="login-form"], [class*="signin-form"], [class*="auth-form"]');
+    if (/[?&](returnUrl|return_url|redirect|redirect_uri|next|return_to)=/i.test(clickUrl) && isLoginLike) {
+      hints.authRedirect = true;
+      hints.suggestedNext.push('⚠️ Auth redirect — landed on login page. Session may not be established.');
+    }
+
     return hints;
   }, selector);
 }
@@ -383,10 +423,10 @@ export async function generatePageHints(page) {
     };
 
     // Common patterns
-    const loginForm = document.querySelector('form input[type="password"]');
-    if (loginForm) {
-      const form = loginForm.closest('form');
-      hints.commonPatterns.loginForm = form && form.id ? `#${form.id}` : 'form:has(input[type="password"])';
+    const loginInput = document.querySelector('form input[type="password"]') || document.querySelector('form input[type="tel"]');
+    if (loginInput) {
+      const form = loginInput.closest('form');
+      hints.commonPatterns.loginForm = form && form.id ? `#${form.id}` : 'form';
     }
 
     const searchInput = document.querySelector('input[type="search"], input[placeholder*="search" i]');
