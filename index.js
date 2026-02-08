@@ -349,6 +349,9 @@ async function executeToolInternal(name, args) {
 
       let hintsText = '\n\n** AI HINTS **';
       hintsText += `\nPage type: ${hints.pageType}`;
+      if (hints.heading) {
+        hintsText += `\nPage heading: "${hints.heading}"`;
+      }
       if (hints.availableActions.length > 0) {
         hintsText += `\nAvailable actions: ${hints.availableActions.join(', ')}`;
       }
@@ -527,10 +530,32 @@ async function executeToolInternal(name, args) {
 
         // 3. Format output with hints and diagnostics
         let hintsText = '\n\n** AI HINTS **';
-        if (hints.modalOpened) hintsText += '\nModal opened - interact with it or close';
-        if (hints.newElements.length > 0) {
-          hintsText += `\nNew elements appeared: ${hints.newElements.map(e => e.type).join(', ')}`;
+
+        // Modal: show title, body text, and actions
+        if (hints.modalOpened && hints.newElements.some(e => e.type === 'modal')) {
+          const modal = hints.newElements.find(e => e.type === 'modal');
+          let modalText = 'Modal opened';
+          if (modal.title) modalText += `: "${modal.title}"`;
+          if (modal.text) modalText += `\n  ${modal.text}`;
+          if (modal.actions?.length) modalText += `\n  Actions: [${modal.actions.join('] [')}]`;
+          hintsText += '\n' + modalText;
+        } else if (hints.modalOpened) {
+          hintsText += '\nModal opened - interact with it or close';
         }
+
+        // Overlay: show items
+        const overlay = hints.newElements.find(e => e.type === 'dropdown' || e.type === 'menu');
+        if (overlay?.items?.length) {
+          const label = overlay.type === 'menu' ? 'Menu' : 'Dropdown';
+          hintsText += `\n${label} with ${overlay.totalCount} options: ${overlay.items.join(', ')}`;
+        }
+
+        // Other new elements (alerts, etc.)
+        const otherElements = hints.newElements.filter(e => e.type !== 'modal' && e.type !== 'dropdown' && e.type !== 'menu');
+        if (otherElements.length > 0) {
+          hintsText += `\nNew elements appeared: ${otherElements.map(e => e.text ? `${e.type}: ${e.text}` : e.type).join(', ')}`;
+        }
+
         if (hints.suggestedNext.length > 0) {
           hintsText += `\nSuggested next: ${hints.suggestedNext.join('; ')}`;
         }
@@ -1626,6 +1651,9 @@ async function executeToolInternal(name, args) {
 
       let hintsText = '\n\n** AI HINTS **';
       hintsText += `\nPage type: ${hints.pageType}`;
+      if (hints.heading) {
+        hintsText += `\nPage heading: "${hints.heading}"`;
+      }
       if (hints.availableActions.length > 0) {
         hintsText += `\nAvailable actions: ${hints.availableActions.join(', ')}`;
       }

@@ -261,7 +261,7 @@ AI: smartFindElement("login button")
 
 1. **`analyzePage`** - 🔥 **USE FREQUENTLY** - Get current page state after loads, clicks, submissions (cached, use refresh:true)
 2. **`smartFindElement`** - Natural language element search with multilingual support
-3. **AI Hints** - Automatic context in all tools (page type, available actions, suggestions)
+3. **AI Hints** - Automatic context in all tools (page type, page heading, modal content, dropdown/menu items, suggestions)
 4. **Text search** - `findElementsByText` for finding elements by visible text
 
 **Performance:** 3-5x faster, 5-10x fewer requests

@@ -6,7 +6,10 @@
 /**
  * Generate hints after page navigation
  */
-export function generateNavigationHints(page, url) {
+export async function generateNavigationHints(page, url) {
+  // Wait for SPA frameworks (Angular, React, Vue) to render after navigation
+  await new Promise(resolve => setTimeout(resolve, 500));
+
   return page.evaluate(() => {
     // Helper to get safe class selector (filters Tailwind special chars)
     function getSafeClassSelector(element) {
@@ -29,6 +32,28 @@ export function generateNavigationHints(page, url) {
       suggestedNext: [],
       commonSelectors: {},
     };
+
+    // Extract page heading (h1 first, then common framework title patterns)
+    // Helper: check if element is truly visible (not sr-only / visually-hidden)
+    function isReallyVisible(el) {
+      if (!el || el.offsetWidth === 0) return false;
+      if (el.offsetWidth <= 1 && el.offsetHeight <= 1) return false; // sr-only pattern
+      const style = getComputedStyle(el);
+      if (style.clip === 'rect(1px, 1px, 1px, 1px)' || style.clipPath === 'inset(50%)') return false;
+      if (style.visibility === 'hidden' || style.opacity === '0') return false;
+      return true;
+    }
+    const headingCandidates = [
+      document.querySelector('h1'),
+      document.querySelector('.page-title, [class*="page-title"]'),
+      document.querySelector('[class*="page-header"] h1, [class*="page-header"] h2'),
+    ];
+    for (const el of headingCandidates) {
+      if (el && isReallyVisible(el)) {
+        hints.heading = el.textContent.trim().substring(0, 100);
+        break;
+      }
+    }
 
     // Detect page type
     if (document.querySelector('form input[type="password"]')) {
@@ -126,18 +151,46 @@ export async function generateClickHints(page, selector) {
       suggestedNext: [],
     };
 
-    // Check for modals
-    const modals = document.querySelectorAll('[role="dialog"], .modal, [class*="modal"]');
-    modals.forEach(modal => {
-      if (modal.offsetWidth > 0 && modal.offsetHeight > 0) {
-        hints.modalOpened = true;
-        hints.newElements.push({
-          type: 'modal',
-          selector: getSafeClassSelector(modal) || '[role="dialog"]',
-        });
-        hints.suggestedNext.push('Interact with modal or close it');
-      }
+    // Check for modals — find the topmost visible one
+    const modalEls = document.querySelectorAll('[role="dialog"], .modal, [class*="modal"], mat-dialog-container, .cdk-overlay-pane [role="dialog"], [class*="dialog"]');
+    const visibleModals = Array.from(modalEls).filter(m => m.offsetWidth > 0 && m.offsetHeight > 0);
+    // Deduplicate: skip modals nested inside another visible modal
+    const topModals = visibleModals.filter(modal => {
+      return !visibleModals.some(other => other !== modal && other.contains(modal));
     });
+    // Take only the topmost modal (highest z-index or last in DOM)
+    const topModal = topModals.length > 0 ? topModals[topModals.length - 1] : null;
+    if (topModal) {
+      hints.modalOpened = true;
+      // Extract modal title
+      const titleEl = topModal.querySelector('h1, h2, h3, .modal-title, [mat-dialog-title], .dialog-title');
+      const title = titleEl ? titleEl.textContent.trim().substring(0, 100) : null;
+      // Extract body text (excluding title and buttons)
+      let bodyText = null;
+      const bodyEl = topModal.querySelector('.modal-body, [mat-dialog-content], .dialog-content, .dialog-body');
+      if (bodyEl) {
+        bodyText = bodyEl.textContent.trim().substring(0, 200);
+      } else if (!titleEl) {
+        // Fallback: get modal text directly
+        bodyText = topModal.textContent.trim().substring(0, 200);
+      }
+      // Extract action buttons (from footer or dialog-actions, limit to 5)
+      const actionButtons = [];
+      const actionsContainer = topModal.querySelector('.modal-footer, [mat-dialog-actions], .dialog-actions, .dialog-footer');
+      const btnScope = actionsContainer || topModal;
+      btnScope.querySelectorAll('button, [mat-button], [mat-raised-button], [mat-flat-button], a[role="button"]').forEach(btn => {
+        const text = btn.textContent.trim();
+        if (text && text.length < 50 && actionButtons.length < 5) actionButtons.push(text);
+      });
+      hints.newElements.push({
+        type: 'modal',
+        selector: getSafeClassSelector(topModal) || '[role="dialog"]',
+        title: title,
+        text: bodyText,
+        actions: actionButtons.length > 0 ? actionButtons : undefined,
+      });
+      hints.suggestedNext.push('Interact with modal or close it');
+    }
 
     // Check for new alerts/notifications
     const alerts = document.querySelectorAll('.alert, [role="alert"], .notification');
@@ -152,15 +205,57 @@ export async function generateClickHints(page, selector) {
       }
     });
 
-    // Check for dropdowns
-    const dropdowns = document.querySelectorAll('[class*="dropdown"][class*="open"], [aria-expanded="true"]');
-    if (dropdowns.length > 0) {
-      hints.newElements.push({
-        type: 'dropdown',
-        count: dropdowns.length,
+    // Check for dropdowns, overlays, menus
+    const overlaySelectors = [
+      '[class*="dropdown"][class*="open"]',
+      '[class*="dropdown"][class*="show"]',
+      '.cdk-overlay-pane',
+      '[role="listbox"]',
+      '[role="menu"]',
+      '.mat-select-panel',
+      '.mat-mdc-select-panel',
+      '[class*="overlay"][class*="open"]',
+      '.p-dropdown-panel',
+      '.ant-dropdown:not(.ant-dropdown-hidden)',
+      '[class*="select-options"]',
+    ].join(', ');
+    const overlayEls = document.querySelectorAll(overlaySelectors);
+    // Deduplicate: skip overlays that are children of another matched overlay
+    const overlays = Array.from(overlayEls).filter(el => el.offsetWidth > 0 && el.offsetHeight > 0);
+    const dedupedOverlays = overlays.filter(overlay => {
+      return !overlays.some(other => other !== overlay && other.contains(overlay));
+    });
+    dedupedOverlays.forEach(overlay => {
+      // Determine type: explicit menu roles, or custom select-options pattern (but NOT mat-option-text)
+      const isMenu = overlay.matches('[role="menu"]') ||
+        overlay.querySelector('[role="menuitem"]') !== null ||
+        (overlay.matches('[class*="select-options"]') && !overlay.querySelector('mat-option'));
+      const isDropdown = overlay.matches('[role="listbox"]') ||
+        overlay.querySelector('mat-option, [role="option"]') !== null;
+      const type = isMenu ? 'menu' : 'dropdown';
+      // Extract items — use specific selectors to avoid duplicates from nested matches
+      let itemEls;
+      if (isDropdown) {
+        itemEls = overlay.querySelectorAll('mat-option, [role="option"]');
+      } else if (isMenu) {
+        itemEls = overlay.querySelectorAll('[role="menuitem"], [class*="option-text"]');
+      } else {
+        itemEls = overlay.querySelectorAll('mat-option, [role="option"], [role="menuitem"], li, .dropdown-item, .p-dropdown-item, .ant-dropdown-menu-item, [class*="option-text"]');
+      }
+      const items = [];
+      const totalCount = itemEls.length;
+      itemEls.forEach((item, i) => {
+        if (i < 10 && item.textContent.trim()) {
+          items.push(item.textContent.trim().substring(0, 80));
+        }
       });
-      hints.suggestedNext.push('Select option from dropdown');
-    }
+      hints.newElements.push({
+        type,
+        items: items.length > 0 ? items : undefined,
+        totalCount: totalCount,
+      });
+      hints.suggestedNext.push(type === 'menu' ? 'Select menu item' : 'Select option from dropdown');
+    });
 
     return hints;
   }, selector);
