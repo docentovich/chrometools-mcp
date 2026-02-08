@@ -7,7 +7,7 @@
 ## Why ChromeTools MCP?
 
 **For AI Agents & Developers:**
-- 🎯 **54 specialized tools** for browser automation - from simple clicks to Figma comparisons
+- 🎯 **56 specialized tools** for browser automation - from simple clicks to Figma comparisons
 - 🧠 **APOM (Agent Page Object Model)** - AI-friendly page representation (~8-10k tokens vs 15-25k for screenshots)
 - 🔄 **Persistent browser sessions** - pages stay open between commands for iterative workflows
 - ⚡ **Framework-aware** - handles React, Vue, Angular events and state updates automatically
@@ -219,7 +219,7 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 - [Installation](#installation)
   - [Chrome Extension Setup](#chrome-extension-setup)
 - [AI Optimization Features](#ai-optimization-features)- [Scenario Recorder](#scenario-recorder)  - Visual UI-based recording with smart optimization
-- [Available Tools](#available-tools) - **46+ Tools Total**
+- [Available Tools](#available-tools) - **48+ Tools Total**
   - [AI-Powered Tools](#ai-powered-tools)  - smartFindElement, analyzePage, getElementDetails, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
@@ -227,6 +227,7 @@ The Chrome Extension is **required** for scenario recording and other advanced f
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
   - [Tab Management Tools](#5-tab-management-tools)  - listTabs, switchTab
   - [Recorder Tools](#7-recorder-tools)  - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
+  - [API / Swagger Tools](#8-api--swagger-tools) - loadSwagger, generateApiModels
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
@@ -1356,6 +1357,78 @@ Append recorded scenario as test code to an **EXISTING** test file. Automaticall
   - `playwright-python`: Playwright with Python (sync API, snake_case naming)
   - `selenium-python`: Selenium with Python (WebDriver, explicit waits, By locators)
   - `selenium-java`: Selenium with Java (WebDriver, Page Factory compatible)
+
+### 8. API / Swagger Tools
+
+Tools for loading OpenAPI/Swagger specs and generating typed API models.
+
+#### `loadSwagger`
+
+Parse an OpenAPI 2.0 (Swagger) or 3.x spec and return a structured summary of endpoints, schemas, and auth.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `source` | string | Yes | URL (`https://...`) or local file path to `swagger.json` / `openapi.yaml` |
+| `format` | `'auto'` \| `'json'` \| `'yaml'` | No | Parse format (default: `auto` — detects from content) |
+
+**Response includes:**
+- API title, version, base URL
+- All endpoints with method, path, operationId, parameters, request body, responses
+- Schema summaries (property names, types, enums)
+- Auth schemes (Bearer, API key, OAuth2)
+
+```javascript
+// Load from URL
+loadSwagger({ source: "https://petstore.swagger.io/v2/swagger.json" })
+
+// Load from local file
+loadSwagger({ source: "/path/to/openapi.yaml" })
+```
+
+#### `generateApiModels`
+
+Generate TypeScript interfaces or Python dataclasses/pydantic models from an OpenAPI spec.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `source` | string | Yes | URL or file path to spec |
+| `language` | `'typescript'` \| `'python'` | Yes | Target language |
+| `format` | `'auto'` \| `'json'` \| `'yaml'` | No | Parse format (default: `auto`) |
+| `style` | `'interface'` \| `'type'` | No | TypeScript style (default: `interface`) |
+| `pythonStyle` | `'dataclass'` \| `'pydantic'` \| `'typeddict'` | No | Python style (default: `dataclass`) |
+| `includeEnums` | boolean | No | Generate enum types (default: `true`) |
+| `schemas` | string[] | No | Filter to specific schema names |
+
+**Features:**
+- Topological sort ensures correct declaration order
+- Enum deduplication (property enums reuse top-level enums)
+- `allOf` → extends/inheritance, `oneOf`/`anyOf` → union types
+- Circular reference detection with forward references
+- Swagger 2.0 automatically normalized to OpenAPI 3.x
+
+```javascript
+// Generate TypeScript interfaces
+generateApiModels({
+  source: "https://petstore.swagger.io/v2/swagger.json",
+  language: "typescript"
+})
+// Returns: { code: "export interface Pet { ... }", suggestedFileName: "pet-store-api.models.ts" }
+
+// Generate Python pydantic models
+generateApiModels({
+  source: "/path/to/openapi.yaml",
+  language: "python",
+  pythonStyle: "pydantic"
+})
+// Returns: { code: "class Pet(BaseModel): ...", suggestedFileName: "pet_store_api_models.py" }
+
+// Generate only specific schemas
+generateApiModels({
+  source: "https://api.example.com/openapi.json",
+  language: "typescript",
+  schemas: ["User", "Order"]
+})
+```
 
 ---
 

@@ -73,6 +73,11 @@ import {SeleniumPythonGenerator} from './utils/code-generators/selenium-python.j
 import {SeleniumJavaGenerator} from './utils/code-generators/selenium-java.js';
 import {FileAppender} from './utils/code-generators/file-appender.js';
 import {parsePomFile} from './utils/code-generators/pom-integrator.js';
+
+// Import OpenAPI / Swagger tools
+import {OpenAPIParser} from './utils/openapi/parser.js';
+import {ApiModelsTypeScriptGenerator} from './utils/api-generators/api-models-typescript.js';
+import {ApiModelsPythonGenerator} from './utils/api-generators/api-models-python.js';
 // Import Figma tools
 import {
     collectAllText,
@@ -3704,6 +3709,87 @@ Start coding now.`;
         content: [{
           type: 'text',
           text: JSON.stringify(result, null, 2)
+        }]
+      };
+    }
+
+    // ========== API / Swagger Tools ==========
+
+    if (name === "loadSwagger") {
+      const validatedArgs = schemas.LoadSwaggerSchema.parse(args);
+      const parser = await OpenAPIParser.load(validatedArgs.source, validatedArgs.format || 'auto');
+      const summary = parser.getSummary();
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            ...summary,
+            instruction: 'Use generateApiModels to generate typed models from these schemas.'
+          }, null, 2)
+        }]
+      };
+    }
+
+    if (name === "generateApiModels") {
+      const validatedArgs = schemas.GenerateApiModelsSchema.parse(args);
+      const parser = await OpenAPIParser.load(validatedArgs.source, validatedArgs.format || 'auto');
+      let schemasObj = parser.getSchemas();
+
+      // Filter schemas if specified
+      if (validatedArgs.schemas && validatedArgs.schemas.length > 0) {
+        const filtered = {};
+        for (const name of validatedArgs.schemas) {
+          if (schemasObj[name]) filtered[name] = schemasObj[name];
+        }
+        schemasObj = filtered;
+      }
+
+      const metadata = {
+        title: parser.spec.info?.title || '',
+        source: validatedArgs.source,
+        version: parser.version
+      };
+
+      let code, suggestedFileName;
+
+      if (validatedArgs.language === 'typescript') {
+        const generator = new ApiModelsTypeScriptGenerator(schemasObj, {
+          style: validatedArgs.style || 'interface',
+          includeEnums: validatedArgs.includeEnums !== false,
+          includeValidation: validatedArgs.includeValidation || false,
+        });
+        code = generator.generate(metadata);
+        const titleSlug = (metadata.title || 'api').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        suggestedFileName = `${titleSlug}.models.ts`;
+      } else {
+        const generator = new ApiModelsPythonGenerator(schemasObj, {
+          style: validatedArgs.pythonStyle || 'dataclass',
+          includeEnums: validatedArgs.includeEnums !== false,
+          includeValidation: validatedArgs.includeValidation || false,
+        });
+        code = generator.generate(metadata);
+        const titleSlug = (metadata.title || 'api').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        suggestedFileName = `${titleSlug}_models.py`;
+      }
+
+      const schemaCount = Object.keys(schemasObj).length;
+      const enumCount = Object.values(schemasObj).filter(s => s.enum && s.type === 'string').length;
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            action: 'create_new_file',
+            suggestedFileName,
+            code,
+            schemaCount,
+            enumCount,
+            language: validatedArgs.language,
+            source: validatedArgs.source,
+            instruction: `Create file '${suggestedFileName}' with the generated code.`
+          }, null, 2)
         }]
       };
     }

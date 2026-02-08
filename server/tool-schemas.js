@@ -370,3 +370,27 @@ export const SwitchTabSchema = z.object({
   ]).describe("Tab identifier: index number or URL pattern to match"),
 });
 
+// API / Swagger tools
+export const LoadSwaggerSchema = z.object({
+  source: z.string().describe("URL (http/https) or local file path to swagger.json / openapi.yaml"),
+  format: z.enum(['auto', 'json', 'yaml']).optional()
+    .describe("Spec format. 'auto' (default) detects from extension/content"),
+});
+
+export const GenerateApiModelsSchema = z.object({
+  source: z.string().describe("URL or file path to OpenAPI spec"),
+  language: z.enum(['typescript', 'python']).describe("Target language for models"),
+  format: z.enum(['auto', 'json', 'yaml']).optional()
+    .describe("Spec format (default: auto)"),
+  style: z.enum(['interface', 'type']).optional()
+    .describe("TypeScript only: 'interface' (default) or 'type' aliases"),
+  pythonStyle: z.enum(['dataclass', 'pydantic', 'typeddict']).optional()
+    .describe("Python only: 'dataclass' (default), 'pydantic', or 'typeddict'"),
+  includeEnums: z.boolean().optional()
+    .describe("Generate enum types (default: true)"),
+  includeValidation: z.boolean().optional()
+    .describe("Include validation constraints as comments (default: false)"),
+  schemas: z.array(z.string()).optional()
+    .describe("Generate only these schemas (default: all)"),
+});
+

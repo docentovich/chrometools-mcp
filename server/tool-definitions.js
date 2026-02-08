@@ -840,4 +840,34 @@ export const toolDefinitions = [
           required: ["tab"],
         },
       },
+      {
+        name: "loadSwagger",
+        description: "Load and parse OpenAPI/Swagger spec from URL or local file. Returns structured summary: endpoints, schemas, auth types, base URL. Supports both OpenAPI 2.0 (Swagger) and 3.x, JSON and YAML formats. Use this first to understand an API before generating models or client code.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source: { type: "string", description: "URL (http/https) or local file path to swagger.json / openapi.yaml" },
+            format: { type: "string", enum: ["auto", "json", "yaml"], description: "Spec format. 'auto' (default) detects from extension/content" },
+          },
+          required: ["source"],
+        },
+      },
+      {
+        name: "generateApiModels",
+        description: "Generate typed data models from OpenAPI/Swagger spec. Creates TypeScript interfaces/types or Python dataclasses/pydantic/TypedDict from API schemas. Handles $ref resolution, enums, allOf/oneOf, nested objects. Use after loadSwagger to generate model files.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source: { type: "string", description: "URL or file path to OpenAPI spec" },
+            language: { type: "string", enum: ["typescript", "python"], description: "Target language for models" },
+            format: { type: "string", enum: ["auto", "json", "yaml"], description: "Spec format (default: auto)" },
+            style: { type: "string", enum: ["interface", "type"], description: "TypeScript only: 'interface' (default) or 'type' aliases" },
+            pythonStyle: { type: "string", enum: ["dataclass", "pydantic", "typeddict"], description: "Python only: 'dataclass' (default), 'pydantic', or 'typeddict'" },
+            includeEnums: { type: "boolean", description: "Generate enum types (default: true)" },
+            includeValidation: { type: "boolean", description: "Include validation constraints as comments (default: false)" },
+            schemas: { type: "array", items: { type: "string" }, description: "Generate only these schemas (default: all)" },
+          },
+          required: ["source", "language"],
+        },
+      },
 ];
