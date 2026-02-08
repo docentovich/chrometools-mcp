@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.9] - 2026-02-08
+
+### Added
+- **AI Hints: modal content extraction** — Modals now show title, body text (200 chars), and action buttons
+  - Expanded selectors: mat-dialog-container, cdk-overlay-pane, `[class*="dialog"]`
+  - Topmost modal dedup for pages with multiple modals
+  - Actions extracted from `.modal-footer` / `[mat-dialog-actions]` (limit 5)
+
+- **AI Hints: dropdown/menu item extraction** — Overlays now list actual option texts
+  - 11 overlay selectors: Angular CDK/Material, PrimeNG, Ant Design, custom `select-options`
+  - Menu vs dropdown auto-classification (role="menu", role="listbox", menuitem detection)
+  - Item text extraction (limit 10 items, shows total count)
+  - Deduplication of nested overlay elements
+
+- **AI Hints: page heading in navigation** — `navigateTo` and `openBrowser` now show page heading
+  - Extracts h1 or `.page-title` / `[class*="page-title"]` fallback for SPAs
+  - Filters sr-only/visually-hidden elements (clip, 1px size, opacity)
+  - 500ms SPA render delay for Angular/React/Vue frameworks
+
+- **Swagger/OpenAPI tools** — `loadSwagger` and `generateApiModels` (Phase 1)
+  - `loadSwagger`: Parse OpenAPI 2.0/3.x specs from URL or file (JSON/YAML)
+  - `generateApiModels`: Generate TypeScript interfaces or Python models (dataclass/pydantic/TypedDict)
+  - $ref resolution, enum generation, snake_case conversion for Python
+  - Supports filtering specific schemas
+
+- **Page Object Model integration in exported tests** — `pageObjectMode` parameter
+  - `generate-integrated`: Generate POM + test using it
+  - `use-existing`: Generate test referencing existing POM file
+  - Works with `exportScenarioAsCode` and `appendScenarioToFile`
+
+- **Synthetic drag mode** — `drag` tool now supports `mode: 'synthetic'`
+  - Better compatibility with JS libraries (frappe-gantt, jQuery UI, Sortable.js)
+  - Native mode (default) for standard HTML drag operations
+
+- **analyzePage: framework click handler detection** — Detect addEventListener-based handlers
+  - APOM IDs returned from `smartFindElement` and `findElementsByText`
+
+### Fixed
+- Swagger Phase 1 code review fixes (error handling, edge cases)
+
 ## [3.3.8] - 2026-02-03
 
 ### Added
