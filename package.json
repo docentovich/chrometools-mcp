@@ -48,6 +48,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.2",
     "jimp": "^0.22.12",
+    "js-yaml": "^4.1.1",
     "pixelmatch": "^7.1.0",
     "puppeteer": "^24.27.0",
     "ws": "^8.18.0",
