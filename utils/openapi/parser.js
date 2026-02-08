@@ -8,6 +8,7 @@
 import yaml from 'js-yaml';
 import { readFileSync } from 'fs';
 import { resolveAllRefs } from './ref-resolver.js';
+import { schemaSignature } from './helpers.js';
 
 export class OpenAPIParser {
   constructor(rawSpec) {
@@ -27,11 +28,17 @@ export class OpenAPIParser {
     let content;
 
     if (source.startsWith('http://') || source.startsWith('https://')) {
-      const response = await fetch(source);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ${source}: ${response.status} ${response.statusText}`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      try {
+        const response = await fetch(source, { signal: controller.signal });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch ${source}: ${response.status} ${response.statusText}`);
+        }
+        content = await response.text();
+      } finally {
+        clearTimeout(timeoutId);
       }
-      content = await response.text();
     } else {
       content = readFileSync(source, 'utf-8');
     }
@@ -102,9 +109,12 @@ export class OpenAPIParser {
         if (method === 'parameters') continue;
         if (!['get', 'post', 'put', 'patch', 'delete', 'head', 'options'].includes(method)) continue;
 
-        const params = [...pathParams, ...(operation.parameters || [])];
-        const bodyParam = params.find(p => p.in === 'body');
-        const nonBodyParams = params.filter(p => p.in !== 'body' && p.in !== 'formData');
+        // Operation params override path params with same name+in (per OpenAPI spec)
+        const opParams = operation.parameters || [];
+        const opKeys = new Set(opParams.map(p => `${p.name}:${p.in}`));
+        const mergedParams = [...opParams, ...pathParams.filter(p => !opKeys.has(`${p.name}:${p.in}`))];
+        const bodyParam = mergedParams.find(p => p.in === 'body');
+        const nonBodyParams = mergedParams.filter(p => p.in !== 'body' && p.in !== 'formData');
 
         const op = { ...operation, parameters: nonBodyParams };
 
@@ -121,7 +131,7 @@ export class OpenAPIParser {
         }
 
         // Convert formData params to requestBody
-        const formParams = params.filter(p => p.in === 'formData');
+        const formParams = mergedParams.filter(p => p.in === 'formData');
         if (formParams.length > 0 && !op.requestBody) {
           const properties = {};
           const required = [];
@@ -325,15 +335,20 @@ export class OpenAPIParser {
   _getSchemaName(schema) {
     if (!schema) return null;
 
+    // Fast path: resolved $ref carries its origin name
+    if (schema._refName && this.spec.components?.schemas?.[schema._refName]) {
+      return schema._refName;
+    }
+
     // Check if this matches a known schema
     const schemas = this.spec.components?.schemas || {};
     for (const [name, s] of Object.entries(schemas)) {
       if (s === schema) return name;
-      // Deep equality for resolved refs
-      if (schema.type === 'object' && s.type === 'object' && s.properties && schema.properties) {
-        const sKeys = Object.keys(s.properties).sort().join(',');
-        const schemaKeys = Object.keys(schema.properties).sort().join(',');
-        if (sKeys === schemaKeys && sKeys.length > 0) return name;
+      // Signature-based match (keys + types to avoid false positives)
+      if (s.properties && schema.properties) {
+        const sSig = schemaSignature(s.properties);
+        const schemaSig = schemaSignature(schema.properties);
+        if (sSig === schemaSig && sSig.length > 0) return name;
       }
     }
 

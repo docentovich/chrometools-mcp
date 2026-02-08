@@ -77,7 +77,7 @@ export class TypeMapper {
       case 'boolean':
         return 'boolean';
       case 'object':
-        return 'object';
+        return 'Record<string, unknown>';
       default:
         return 'any';
     }

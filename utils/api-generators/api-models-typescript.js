@@ -6,6 +6,7 @@
 
 import { TypeMapper } from '../openapi/type-mapper.js';
 import { mergeAllOf } from '../openapi/ref-resolver.js';
+import { arraysEqual, schemaSignature } from '../openapi/helpers.js';
 
 export class ApiModelsTypeScriptGenerator {
   constructor(schemas, options = {}) {
@@ -106,7 +107,8 @@ export class ApiModelsTypeScriptGenerator {
     }
     lines.push(`export enum ${name} {`);
     for (const value of values) {
-      const key = value.charAt(0).toUpperCase() + value.slice(1).replace(/[^a-zA-Z0-9]/g, '_');
+      let key = value.charAt(0).toUpperCase() + value.slice(1).replace(/[^a-zA-Z0-9]/g, '_');
+      if (/^\d/.test(key)) key = `_${key}`;
       lines.push(`  ${key} = '${value}',`);
     }
     lines.push('}');
@@ -299,13 +301,14 @@ export class ApiModelsTypeScriptGenerator {
   _findSchemaName(schema) {
     if (!schema || typeof schema !== 'object') return null;
     if (schema.$circularRef) return schema.$circularRef;
+    if (schema._refName && this.schemas[schema._refName]) return schema._refName;
 
     for (const [name, s] of Object.entries(this.schemas)) {
       if (s === schema) return name;
       if (s.properties && schema.properties) {
-        const sKeys = Object.keys(s.properties).sort().join(',');
-        const schemaKeys = Object.keys(schema.properties).sort().join(',');
-        if (sKeys === schemaKeys && sKeys.length > 0) return name;
+        const sSig = schemaSignature(s.properties);
+        const schemaSig = schemaSignature(schema.properties);
+        if (sSig === schemaSig && sSig.length > 0) return name;
       }
     }
     return null;
@@ -344,13 +347,15 @@ export class ApiModelsTypeScriptGenerator {
     const schema = this.schemas[name];
     if (!schema) return [];
     const deps = new Set();
+    const seen = new WeakSet();
 
     const collectDeps = (obj) => {
       if (!obj || typeof obj !== 'object') return;
       if (obj.$circularRef) { deps.add(obj.$circularRef); return; }
+      if (seen.has(obj)) return;
+      seen.add(obj);
       if (Array.isArray(obj)) { obj.forEach(collectDeps); return; }
 
-      // Check if this matches a known schema
       const refName = this._findSchemaName(obj);
       if (refName && refName !== name) deps.add(refName);
 
@@ -367,9 +372,4 @@ export class ApiModelsTypeScriptGenerator {
 
     return [...deps];
   }
-}
-
-function arraysEqual(a, b) {
-  if (!a || !b || a.length !== b.length) return false;
-  return a.every((v, i) => v === b[i]);
 }

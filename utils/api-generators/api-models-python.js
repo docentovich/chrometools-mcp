@@ -6,6 +6,7 @@
 
 import { TypeMapper } from '../openapi/type-mapper.js';
 import { mergeAllOf } from '../openapi/ref-resolver.js';
+import { arraysEqual, schemaSignature } from '../openapi/helpers.js';
 
 export class ApiModelsPythonGenerator {
   constructor(schemas, options = {}) {
@@ -150,7 +151,8 @@ export class ApiModelsPythonGenerator {
       lines.push(`    """${description}"""`);
     }
     for (const value of values) {
-      const key = value.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+      let key = value.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+      if (/^\d/.test(key)) key = `_${key}`;
       lines.push(`    ${key} = '${value}'`);
     }
     return lines;
@@ -229,9 +231,9 @@ export class ApiModelsPythonGenerator {
           lines.push(`    ${pyName}: Optional[${type}] = None`);
         }
       } else {
-        // dataclass
+        // dataclass: required fields have no default (enforced at construction)
         if (isRequired) {
-          lines.push(`    ${pyName}: ${type} = ${this.getDefaultValue(type, propSchema)}`);
+          lines.push(`    ${pyName}: ${type}`);
         } else {
           lines.push(`    ${pyName}: Optional[${type}] = None`);
         }
@@ -306,7 +308,7 @@ export class ApiModelsPythonGenerator {
           : `    ${pyName}: Optional[${type}] = None`);
       } else if (this.options.style === 'dataclass') {
         lines.push(isRequired
-          ? `    ${pyName}: ${type} = ${this.getDefaultValue(type, propSchema)}`
+          ? `    ${pyName}: ${type}`
           : `    ${pyName}: Optional[${type}] = None`);
       } else {
         lines.push(isRequired
@@ -363,7 +365,7 @@ export class ApiModelsPythonGenerator {
     if (type === 'bool') return 'False';
     if (type.startsWith('List[')) return 'field(default_factory=list)';
     if (type.startsWith('Dict[')) return 'field(default_factory=dict)';
-    return "''";
+    return 'None';
   }
 
   toSnakeCase(name) {
@@ -382,13 +384,14 @@ export class ApiModelsPythonGenerator {
   _findSchemaName(schema) {
     if (!schema || typeof schema !== 'object') return null;
     if (schema.$circularRef) return `'${schema.$circularRef}'`;
+    if (schema._refName && this.schemas[schema._refName]) return schema._refName;
 
     for (const [name, s] of Object.entries(this.schemas)) {
       if (s === schema) return name;
       if (s.properties && schema.properties) {
-        const sKeys = Object.keys(s.properties).sort().join(',');
-        const schemaKeys = Object.keys(schema.properties).sort().join(',');
-        if (sKeys === schemaKeys && sKeys.length > 0) return name;
+        const sSig = schemaSignature(s.properties);
+        const schemaSig = schemaSignature(schema.properties);
+        if (sSig === schemaSig && sSig.length > 0) return name;
       }
     }
     return null;
@@ -419,10 +422,13 @@ export class ApiModelsPythonGenerator {
     const schema = this.schemas[name];
     if (!schema) return [];
     const deps = new Set();
+    const seen = new WeakSet();
 
     const collectDeps = (obj) => {
       if (!obj || typeof obj !== 'object') return;
       if (obj.$circularRef) { deps.add(obj.$circularRef); return; }
+      if (seen.has(obj)) return;
+      seen.add(obj);
       if (Array.isArray(obj)) { obj.forEach(collectDeps); return; }
       const refName = this._findSchemaName(obj);
       if (refName && refName !== name && !refName.startsWith("'")) deps.add(refName);
@@ -439,9 +445,4 @@ export class ApiModelsPythonGenerator {
 
     return [...deps];
   }
-}
-
-function arraysEqual(a, b) {
-  if (!a || !b || a.length !== b.length) return false;
-  return a.every((v, i) => v === b[i]);
 }

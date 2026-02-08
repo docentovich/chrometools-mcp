@@ -3740,8 +3740,8 @@ Start coding now.`;
       // Filter schemas if specified
       if (validatedArgs.schemas && validatedArgs.schemas.length > 0) {
         const filtered = {};
-        for (const name of validatedArgs.schemas) {
-          if (schemasObj[name]) filtered[name] = schemasObj[name];
+        for (const schemaName of validatedArgs.schemas) {
+          if (schemasObj[schemaName]) filtered[schemaName] = schemasObj[schemaName];
         }
         schemasObj = filtered;
       }

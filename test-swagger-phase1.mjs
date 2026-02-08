@@ -613,12 +613,16 @@ test('PY: optional fields use Optional', () => {
   assertIncludes(code, 'status: Optional[');
 });
 
-test('PY: required fields have defaults in dataclass', () => {
+test('PY: required fields have no defaults in dataclass', () => {
   const parser = new OpenAPIParser(swagger20Spec);
   const gen = new ApiModelsPythonGenerator(parser.getSchemas(), { style: 'dataclass', includeEnums: true });
   const code = gen.generate({ title: 'Test', source: 'test', version: '2.0' });
-  assertIncludes(code, "id: int = 0");
-  assertIncludes(code, "name: str = ''");
+  // Required fields should NOT have defaults (enforced at construction)
+  const lines = code.split('\n');
+  const idLine = lines.find(l => l.trim().startsWith('id: int'));
+  assert(idLine && !idLine.includes('='), 'Dataclass required int should not have default');
+  const nameLine = lines.find(l => l.trim().startsWith('name: str'));
+  assert(nameLine && !nameLine.includes('='), 'Dataclass required str should not have default');
 });
 
 test('PY: pydantic required fields no default', () => {
@@ -709,6 +713,126 @@ test('PY: suggested filename generation', () => {
   const titleSlug = 'Pet Store API'.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   assert(titleSlug === 'pet_store_api');
   assert(`${titleSlug}_models.py` === 'pet_store_api_models.py');
+});
+
+// ========== Bug fix regression tests ==========
+console.log('\n=== Bug Fix Regressions ===');
+
+test('Circular $ref produces $circularRef marker (not infinite JS refs)', () => {
+  const spec = {
+    openapi: '3.0.0', info: { title: 'Test' }, paths: {},
+    components: { schemas: {
+      TreeNode: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          children: { type: 'array', items: { $ref: '#/components/schemas/TreeNode' } }
+        }
+      }
+    }}
+  };
+  const parser = new OpenAPIParser(spec);
+  const schemas = parser.getSchemas();
+  // First level resolves fully, second level gets $circularRef marker
+  const resolved = schemas.TreeNode.properties.children.items;
+  assert(resolved.type === 'object', 'First level should be fully resolved');
+  const nested = resolved.properties.children.items;
+  assert(nested.$circularRef === 'TreeNode', `Expected $circularRef at nested level, got: ${JSON.stringify(nested)}`);
+  // Verify no infinite JS object references (JSON.stringify would throw)
+  const json = JSON.stringify(schemas.TreeNode);
+  assert(json.includes('"$circularRef":"TreeNode"'), 'Should contain $circularRef marker in serialized output');
+});
+
+test('Circular schemas do not crash generators', () => {
+  const spec = {
+    openapi: '3.0.0', info: { title: 'Test' }, paths: {},
+    components: { schemas: {
+      A: { type: 'object', properties: { b: { $ref: '#/components/schemas/B' } } },
+      B: { type: 'object', properties: { a: { $ref: '#/components/schemas/A' } } }
+    }}
+  };
+  const parser = new OpenAPIParser(spec);
+  const tsGen = new ApiModelsTypeScriptGenerator(parser.getSchemas(), {});
+  const tsCode = tsGen.generate({});
+  assertIncludes(tsCode, 'export interface A');
+  assertIncludes(tsCode, 'export interface B');
+
+  const pyGen = new ApiModelsPythonGenerator(parser.getSchemas(), { style: 'dataclass' });
+  const pyCode = pyGen.generate({});
+  assertIncludes(pyCode, 'class A:');
+  assertIncludes(pyCode, 'class B:');
+});
+
+test('Enum key starting with digit gets _ prefix', () => {
+  const schemas = {
+    Status: { type: 'string', enum: ['3xx', '4xx', '5xx'] }
+  };
+  const tsGen = new ApiModelsTypeScriptGenerator(schemas, { includeEnums: true });
+  const tsCode = tsGen.generate({});
+  assertIncludes(tsCode, "_3xx = '3xx'");
+
+  const pyGen = new ApiModelsPythonGenerator(schemas, { includeEnums: true });
+  const pyCode = pyGen.generate({});
+  assertIncludes(pyCode, "_3XX = '3xx'");
+});
+
+test('Path-level params overridden by operation-level params', () => {
+  const spec = {
+    swagger: '2.0', info: { title: 'Test' }, host: 'localhost', basePath: '/api',
+    paths: {
+      '/items/{id}': {
+        parameters: [
+          { name: 'id', in: 'path', type: 'string', description: 'path-level' }
+        ],
+        get: {
+          operationId: 'getItem',
+          parameters: [
+            { name: 'id', in: 'path', type: 'integer', description: 'op-level override' }
+          ],
+          responses: { '200': { description: 'OK' } }
+        }
+      }
+    }
+  };
+  const parser = new OpenAPIParser(spec);
+  const endpoints = parser.getEndpoints();
+  const getItem = endpoints.find(e => e.operationId === 'getItem');
+  // Operation-level param should win (type integer, not string)
+  const idParams = getItem.parameters.filter(p => p.name === 'id');
+  assert(idParams.length === 1, `Expected 1 id param, got ${idParams.length}`);
+  assert(idParams[0].type === 'integer', `Expected integer, got ${idParams[0].type}`);
+});
+
+test('_refName marker enables fast schema lookup', () => {
+  const spec = {
+    openapi: '3.0.0', info: { title: 'Test' }, paths: {},
+    components: { schemas: {
+      Address: { type: 'object', properties: { street: { type: 'string' }, city: { type: 'string' } } },
+      User: { type: 'object', properties: { name: { type: 'string' }, address: { $ref: '#/components/schemas/Address' } } }
+    }}
+  };
+  const parser = new OpenAPIParser(spec);
+  const schemas = parser.getSchemas();
+  // The resolved address property should be identified as Address
+  const gen = new ApiModelsTypeScriptGenerator(schemas, {});
+  const code = gen.generate({});
+  assertIncludes(code, 'address?: Address;');
+});
+
+test('Schema matching includes types, not just keys', () => {
+  const schemas = {
+    PersonName: { type: 'object', properties: { first: { type: 'string' }, last: { type: 'string' } } },
+    Coords: { type: 'object', properties: { first: { type: 'number' }, last: { type: 'number' } } },
+  };
+  const gen = new ApiModelsTypeScriptGenerator(schemas, {});
+  // Both have keys "first,last" but different types — should NOT be confused
+  const code = gen.generate({});
+  assertIncludes(code, 'export interface PersonName');
+  assertIncludes(code, 'export interface Coords');
+  // Both should exist independently
+  const personIdx = code.indexOf('export interface PersonName');
+  const coordsIdx = code.indexOf('export interface Coords');
+  assert(personIdx >= 0 && coordsIdx >= 0, 'Both schemas should be generated');
 });
 
 // ========== Remote URL loading ==========

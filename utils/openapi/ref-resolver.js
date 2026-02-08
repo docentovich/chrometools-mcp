@@ -62,14 +62,17 @@ export function resolveRef(ref, root, visited = new Set(), cache = new Map()) {
     return { $externalRef: ref, _warning: 'External $ref not supported' };
   }
 
-  if (cache.has(ref)) {
-    return cache.get(ref);
-  }
-
+  // Circular check MUST come before cache check:
+  // During resolution A→B→A, ref A is both in visited and cache.
+  // Cache would return the partially-resolved object, creating circular JS refs.
+  // Visited correctly returns a $circularRef marker instead.
   if (visited.has(ref)) {
-    // Circular reference
     const name = ref.split('/').pop();
     return { $circularRef: name };
+  }
+
+  if (cache.has(ref)) {
+    return cache.get(ref);
   }
 
   visited.add(ref);
@@ -90,8 +93,16 @@ export function resolveRef(ref, root, visited = new Set(), cache = new Map()) {
     return { $brokenRef: ref };
   }
 
-  // Deep clone to avoid mutation
+  // Deep clone to avoid mutation between different $ref usages
   const result = JSON.parse(JSON.stringify(resolved));
+
+  // Tag with original ref name for fast identification by generators
+  const refName = ref.split('/').pop();
+  if (refName) {
+    Object.defineProperty(result, '_refName', {
+      value: refName, enumerable: false, writable: false
+    });
+  }
 
   // Cache before recursing to handle self-references
   cache.set(ref, result);
