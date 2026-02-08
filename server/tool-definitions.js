@@ -238,7 +238,7 @@ export const toolDefinitions = [
       },
       {
         name: "drag",
-        description: "Drag element in any direction. For maps, charts, SVG, canvas, sliders. Use scrollHorizontal for scrollbars.",
+        description: "Drag element in any direction. For maps, charts, SVG, canvas, sliders. Use mode='synthetic' for JS libraries (frappe-gantt, jQuery UI). Use scrollHorizontal for scrollbars.",
         inputSchema: {
           type: "object",
           properties: {
@@ -246,6 +246,7 @@ export const toolDefinitions = [
             direction: { type: "string", enum: ["up", "down", "left", "right", "up-left", "up-right", "down-left", "down-right"], description: "Drag direction" },
             distance: { type: "number", description: "Distance in pixels (default: 100)" },
             duration: { type: "number", description: "Drag duration in ms (default: 500)" },
+            mode: { type: "string", enum: ["native", "synthetic"], description: "Drag mode: 'native' (default, faster) or 'synthetic' (better for JS libraries)" },
           },
           required: ["selector", "direction"],
         },

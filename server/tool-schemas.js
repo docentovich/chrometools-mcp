@@ -61,6 +61,7 @@ export const DragSchema = z.object({
     .describe("Direction to drag: vertical (up, down), horizontal (left, right), or diagonal (up-left, up-right, down-left, down-right)"),
   distance: z.number().min(1).optional().describe("Distance to drag in pixels (default: 100)"),
   duration: z.number().min(100).optional().describe("Duration of drag operation in milliseconds (default: 500)"),
+  mode: z.enum(['native', 'synthetic']).optional().describe("Drag mode: 'native' uses Puppeteer mouse API (default, faster), 'synthetic' dispatches DOM events (better compatibility with JS libraries like frappe-gantt, jQuery UI)"),
 });
 
 export const ScrollHorizontalSchema = z.object({

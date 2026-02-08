@@ -603,10 +603,16 @@ Drag element by mouse (click-hold-move-release). Simulates real mouse drag, not 
   - `direction` (required): 'up', 'down', 'left', 'right', 'up-left', 'up-right', 'down-left', 'down-right'
   - `distance` (optional): Distance in pixels (default: 100)
   - `duration` (optional): Drag duration in milliseconds (default: 500)
+  - `mode` (optional): 'native' (default) or 'synthetic'
+    - **'native'**: Uses Puppeteer mouse API - faster, works for most cases
+    - **'synthetic'**: Dispatches DOM events (pointerdown/pointermove/pointerup) - better compatibility with JS libraries (frappe-gantt, jQuery UI Draggable, custom drag handlers)
 - **Use case**: Interactive maps (Google Maps, Leaflet), Gantt charts, SVG diagrams, canvas elements, sliders, drag-to-pan interfaces
-- **How it works**: Moves mouse to element center, presses mouse button, drags to target position, releases button
+- **How it works**:
+  - **Native mode**: Uses Puppeteer's mouse API (mousedown → mousemove → mouseup)
+  - **Synthetic mode**: Dispatches PointerEvent/MouseEvent on element with intermediate pointermove events during drag
+- **When to use synthetic mode**: If native drag doesn't trigger JS library event handlers (e.g., frappe-gantt, jQuery UI, React DnD)
 - **NOT for**: Standard overflow scrollbars (use `scrollTo` or `scrollHorizontal` instead)
-- **Returns**: Start/end mouse positions and drag delta
+- **Returns**: Start/end mouse positions, drag delta, and mode used
 
 #### scrollHorizontal
 Scroll element horizontally (for tables, carousels, wide content).

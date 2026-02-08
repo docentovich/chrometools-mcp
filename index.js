@@ -1245,6 +1245,7 @@ async function executeToolInternal(name, args) {
 
       const distance = validatedArgs.distance || 100;
       const duration = validatedArgs.duration || 500;
+      const mode = validatedArgs.mode || 'native';
 
       // Calculate drag deltas based on direction
       let deltaX = 0;
@@ -1281,62 +1282,166 @@ async function executeToolInternal(name, args) {
           break;
       }
 
-      // Get element center position for drag start
-      const elementInfo = await page.evaluate((selector) => {
-        const element = document.querySelector(selector);
-        if (!element) {
-          return { success: false, error: `Element not found: ${selector}` };
+      if (mode === 'synthetic') {
+        // Synthetic mode: dispatch DOM events for better JS library compatibility
+        const result = await page.evaluate((selector, deltaX, deltaY, duration) => {
+          const element = document.querySelector(selector);
+          if (!element) {
+            return { success: false, error: `Element not found: ${selector}` };
+          }
+
+          const rect = element.getBoundingClientRect();
+          const startX = rect.left + rect.width / 2;
+          const startY = rect.top + rect.height / 2;
+          const endX = startX + deltaX;
+          const endY = startY + deltaY;
+
+          // Helper to create mouse/pointer event
+          const createEvent = (type, clientX, clientY, buttons = 0) => {
+            // Try PointerEvent first (modern browsers)
+            if (typeof PointerEvent !== 'undefined') {
+              return new PointerEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                clientX,
+                clientY,
+                screenX: clientX,
+                screenY: clientY,
+                buttons,
+                button: 0,
+                pointerId: 1,
+                pointerType: 'mouse',
+                isPrimary: true
+              });
+            }
+            // Fallback to MouseEvent
+            return new MouseEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              clientX,
+              clientY,
+              screenX: clientX,
+              screenY: clientY,
+              buttons,
+              button: 0
+            });
+          };
+
+          // Dispatch mousedown/pointerdown
+          element.dispatchEvent(createEvent('pointerdown', startX, startY, 1));
+          element.dispatchEvent(createEvent('mousedown', startX, startY, 1));
+
+          // Dispatch intermediate mousemove/pointermove events
+          const steps = Math.max(10, Math.floor(duration / 20));
+          const stepDelay = duration / steps;
+
+          return new Promise((resolve) => {
+            let currentStep = 0;
+
+            const moveInterval = setInterval(() => {
+              currentStep++;
+              const progress = currentStep / steps;
+              const currentX = startX + (deltaX * progress);
+              const currentY = startY + (deltaY * progress);
+
+              element.dispatchEvent(createEvent('pointermove', currentX, currentY, 1));
+              element.dispatchEvent(createEvent('mousemove', currentX, currentY, 1));
+
+              if (currentStep >= steps) {
+                clearInterval(moveInterval);
+
+                // Dispatch mouseup/pointerup
+                element.dispatchEvent(createEvent('pointerup', endX, endY, 0));
+                element.dispatchEvent(createEvent('mouseup', endX, endY, 0));
+                element.dispatchEvent(createEvent('click', endX, endY, 0));
+
+                resolve({
+                  success: true,
+                  startX: Math.round(startX),
+                  startY: Math.round(startY),
+                  endX: Math.round(endX),
+                  endY: Math.round(endY),
+                  mode: 'synthetic'
+                });
+              }
+            }, stepDelay);
+          });
+        }, validatedArgs.selector, deltaX, deltaY, duration);
+
+        if (!result.success) {
+          throw new Error(result.error);
         }
 
-        const rect = element.getBoundingClientRect();
         return {
-          success: true,
-          centerX: rect.left + rect.width / 2,
-          centerY: rect.top + rect.height / 2,
-          width: rect.width,
-          height: rect.height
+          content: [{
+            type: "text",
+            text: `Dragged ${validatedArgs.selector} ${validatedArgs.direction} by ${distance}px (${result.mode} mode):\n` +
+                  `  Start position: (${result.startX}, ${result.startY})\n` +
+                  `  End position: (${result.endX}, ${result.endY})\n` +
+                  `  Delta: (${deltaX}px, ${deltaY}px)\n` +
+                  `  Duration: ${duration}ms\n` +
+                  `  Events: pointerdown → ${Math.floor(duration / 20)} × pointermove → pointerup`
+          }],
         };
-      }, validatedArgs.selector);
+      } else {
+        // Native mode: use Puppeteer mouse API (default, faster)
+        const elementInfo = await page.evaluate((selector) => {
+          const element = document.querySelector(selector);
+          if (!element) {
+            return { success: false, error: `Element not found: ${selector}` };
+          }
 
-      if (!elementInfo.success) {
-        throw new Error(elementInfo.error);
+          const rect = element.getBoundingClientRect();
+          return {
+            success: true,
+            centerX: rect.left + rect.width / 2,
+            centerY: rect.top + rect.height / 2,
+            width: rect.width,
+            height: rect.height
+          };
+        }, validatedArgs.selector);
+
+        if (!elementInfo.success) {
+          throw new Error(elementInfo.error);
+        }
+
+        const startX = elementInfo.centerX;
+        const startY = elementInfo.centerY;
+        const endX = startX + deltaX;
+        const endY = startY + deltaY;
+
+        // Move to start position
+        await page.mouse.move(startX, startY);
+
+        // Press mouse button (start drag)
+        await page.mouse.down();
+
+        // Wait a bit to ensure drag is registered
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        // Move mouse to end position (drag)
+        const steps = Math.max(10, Math.floor(duration / 20)); // Smooth movement
+        await page.mouse.move(endX, endY, { steps });
+
+        // Wait for duration
+        await new Promise(resolve => setTimeout(resolve, Math.max(0, duration - steps * 20)));
+
+        // Release mouse button (end drag)
+        await page.mouse.up();
+
+        return {
+          content: [{
+            type: "text",
+            text: `Dragged ${validatedArgs.selector} ${validatedArgs.direction} by ${distance}px (native mode):\n` +
+                  `  Start position: (${Math.round(startX)}, ${Math.round(startY)})\n` +
+                  `  End position: (${Math.round(endX)}, ${Math.round(endY)})\n` +
+                  `  Delta: (${deltaX}px, ${deltaY}px)\n` +
+                  `  Duration: ${duration}ms`
+          }],
+        };
       }
-
-      // Perform drag: mousedown → mousemove → mouseup
-      const startX = elementInfo.centerX;
-      const startY = elementInfo.centerY;
-      const endX = startX + deltaX;
-      const endY = startY + deltaY;
-
-      // Move to start position
-      await page.mouse.move(startX, startY);
-
-      // Press mouse button (start drag)
-      await page.mouse.down();
-
-      // Wait a bit to ensure drag is registered
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      // Move mouse to end position (drag)
-      const steps = Math.max(10, Math.floor(duration / 20)); // Smooth movement
-      await page.mouse.move(endX, endY, { steps });
-
-      // Wait for duration
-      await new Promise(resolve => setTimeout(resolve, Math.max(0, duration - steps * 20)));
-
-      // Release mouse button (end drag)
-      await page.mouse.up();
-
-      return {
-        content: [{
-          type: "text",
-          text: `Dragged ${validatedArgs.selector} ${validatedArgs.direction} by ${distance}px:\n` +
-                `  Start position: (${Math.round(startX)}, ${Math.round(startY)})\n` +
-                `  End position: (${Math.round(endX)}, ${Math.round(endY)})\n` +
-                `  Delta: (${deltaX}px, ${deltaY}px)\n` +
-                `  Duration: ${duration}ms`
-        }],
-      };
     }
 
     if (name === "scrollHorizontal") {
