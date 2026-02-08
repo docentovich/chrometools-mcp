@@ -303,6 +303,81 @@ export class SeleniumPythonGenerator extends CodeGeneratorBase {
     }
   }
 
+  // ========================================
+  // POM INTEGRATION
+  // ========================================
+
+  /**
+   * Generate POM import
+   */
+  generatePomImports(className, importPath) {
+    if (importPath) {
+      return [`from ${importPath} import ${className}`];
+    }
+    const moduleName = className.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    return [`from ${moduleName} import ${className}`];
+  }
+
+  /**
+   * Generate POM instantiation
+   */
+  generatePomInstantiation(className) {
+    const varName = className.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    return [this.indent(`${varName} = ${className}(driver)`), ''];
+  }
+
+  /**
+   * Generate POM goto
+   */
+  generatePomGoto(url) {
+    const varName = this.options.pomClassName.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    return [this.indent(`${varName}.goto()`)];
+  }
+
+  /**
+   * Generate POM-based action
+   */
+  generatePomAction(action, pomElement) {
+    const varName = this.options.pomClassName.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    const lines = [];
+
+    const comment = this.generateActionComment(action);
+    if (comment.length > 0) lines.push(...comment);
+
+    switch (action.type) {
+      case 'type': {
+        const text = action.data?.text || '';
+        lines.push(this.indent(`${varName}.${pomElement.methodName}("${this.escapeString(text)}")`));
+        break;
+      }
+      case 'click':
+        if (pomElement.methodType === 'click') {
+          lines.push(this.indent(`${varName}.${pomElement.methodName}()`));
+        } else {
+          lines.push(this.indent(`${varName}.${pomElement.name}.click()`));
+        }
+        break;
+      case 'select': {
+        const value = action.data?.value || '';
+        lines.push(this.indent(`${varName}.${pomElement.methodName}("${this.escapeString(value)}")`));
+        break;
+      }
+      case 'hover': {
+        lines.push(this.indent(`element = ${varName}.driver.find_element(By.CSS_SELECTOR, "${this.escapeString(pomElement.selector)}")`));
+        lines.push(this.indent(`ActionChains(${varName}.driver).move_to_element(element).perform()`));
+        break;
+      }
+      case 'navigate':
+        lines.push(this.indent(`${varName}.goto()`));
+        break;
+      default:
+        return null;
+    }
+
+    if (lines.length > 0) lines.push('');
+    return lines;
+  }
+
   /**
    * Generate URL assertion
    */

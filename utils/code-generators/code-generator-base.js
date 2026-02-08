@@ -6,6 +6,7 @@
  */
 
 import { cleanSelector, getBestSelector, analyzeSelectorStability } from '../selector-cleaner.js';
+import { matchActionToPomElement } from './pom-integrator.js';
 
 /**
  * Base code generator class
@@ -39,20 +40,51 @@ export class CodeGeneratorBase {
 
     // Generate imports
     lines.push(...this.generateImports());
+
+    // Generate POM import if POM mode
+    if (this.options.pomClassName) {
+      lines.push(...this.generatePomImports(this.options.pomClassName, this.options.pomImportPath));
+    }
+
     lines.push('');
 
     // Generate test function/method
     lines.push(...this.generateTestHeader(testName, description));
-    lines.push('');
+
+    // Generate POM instantiation if POM mode
+    if (this.options.pomClassName) {
+      lines.push(...this.generatePomInstantiation(this.options.pomClassName));
+    } else {
+      lines.push('');
+    }
 
     // Generate navigation to entry URL
     if (entryUrl) {
-      lines.push(...this.generateNavigate(entryUrl));
+      if (this.options.pomClassName) {
+        lines.push(...this.generatePomGoto(entryUrl));
+      } else {
+        lines.push(...this.generateNavigate(entryUrl));
+      }
     }
 
     // Generate actions
     for (const action of scenario.chain) {
-      const actionCode = this.generateAction(action);
+      let actionCode = null;
+
+      // Try POM matching first
+      if (this.options.pomElements) {
+        const selector = this.prepareSelector(action);
+        const match = matchActionToPomElement(selector, this.options.pomElements);
+        if (match) {
+          actionCode = this.generatePomAction(action, match);
+        }
+      }
+
+      // Fallback to raw action
+      if (!actionCode) {
+        actionCode = this.generateAction(action);
+      }
+
       if (actionCode && actionCode.length > 0) {
         lines.push(...actionCode);
       }
@@ -252,18 +284,49 @@ export class CodeGeneratorBase {
 
     const lines = [];
 
+    // Generate POM import if POM mode (needed even in test-only for append)
+    if (this.options.pomClassName) {
+      lines.push(...this.generatePomImports(this.options.pomClassName, this.options.pomImportPath));
+      lines.push('');
+    }
+
     // Generate test function/method header
     lines.push(...this.generateTestHeader(testName, description));
-    lines.push('');
+
+    // Generate POM instantiation if POM mode
+    if (this.options.pomClassName) {
+      lines.push(...this.generatePomInstantiation(this.options.pomClassName));
+    } else {
+      lines.push('');
+    }
 
     // Generate navigation to entry URL
     if (entryUrl) {
-      lines.push(...this.generateNavigate(entryUrl));
+      if (this.options.pomClassName) {
+        lines.push(...this.generatePomGoto(entryUrl));
+      } else {
+        lines.push(...this.generateNavigate(entryUrl));
+      }
     }
 
     // Generate actions
     for (const action of scenario.chain) {
-      const actionCode = this.generateAction(action);
+      let actionCode = null;
+
+      // Try POM matching first
+      if (this.options.pomElements) {
+        const selector = this.prepareSelector(action);
+        const match = matchActionToPomElement(selector, this.options.pomElements);
+        if (match) {
+          actionCode = this.generatePomAction(action, match);
+        }
+      }
+
+      // Fallback to raw action
+      if (!actionCode) {
+        actionCode = this.generateAction(action);
+      }
+
       if (actionCode && actionCode.length > 0) {
         lines.push(...actionCode);
       }
@@ -282,6 +345,48 @@ export class CodeGeneratorBase {
     lines.push(...this.generateTestFooter());
 
     return lines.join('\n');
+  }
+
+  // ========================================
+  // POM INTEGRATION METHODS (override in subclasses)
+  // ========================================
+
+  /**
+   * Generate POM import statement
+   * @param {string} className - POM class name
+   * @param {string} importPath - Import path (optional)
+   * @returns {string[]} - Import lines
+   */
+  generatePomImports(className, importPath) {
+    return [];
+  }
+
+  /**
+   * Generate POM class instantiation
+   * @param {string} className - POM class name
+   * @returns {string[]} - Instantiation lines
+   */
+  generatePomInstantiation(className) {
+    return [];
+  }
+
+  /**
+   * Generate POM-based action (uses POM method instead of raw selector)
+   * @param {Object} action - Recorded action
+   * @param {Object} pomElement - Matched POM element metadata
+   * @returns {string[]|null} - Action lines or null for fallback
+   */
+  generatePomAction(action, pomElement) {
+    return null;
+  }
+
+  /**
+   * Generate POM goto (navigation via POM instance)
+   * @param {string} url - URL to navigate to
+   * @returns {string[]} - Navigation lines
+   */
+  generatePomGoto(url) {
+    return this.generateNavigate(url);
   }
 
   /**

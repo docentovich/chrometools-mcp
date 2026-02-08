@@ -209,6 +209,75 @@ export class PlaywrightTypeScriptGenerator extends CodeGeneratorBase {
     }
   }
 
+  // ========================================
+  // POM INTEGRATION
+  // ========================================
+
+  /**
+   * Generate POM import
+   */
+  generatePomImports(className, importPath) {
+    return [`import { ${className} } from '${importPath || './' + className}';`];
+  }
+
+  /**
+   * Generate POM instantiation
+   */
+  generatePomInstantiation(className) {
+    const varName = className.charAt(0).toLowerCase() + className.slice(1);
+    return [this.indent(`const ${varName} = new ${className}(page);`), ''];
+  }
+
+  /**
+   * Generate POM goto
+   */
+  generatePomGoto(url) {
+    const varName = this.options.pomClassName.charAt(0).toLowerCase() + this.options.pomClassName.slice(1);
+    return [this.indent(`await ${varName}.goto();`)];
+  }
+
+  /**
+   * Generate POM-based action
+   */
+  generatePomAction(action, pomElement) {
+    const varName = this.options.pomClassName.charAt(0).toLowerCase() + this.options.pomClassName.slice(1);
+    const lines = [];
+
+    const comment = this.generateActionComment(action);
+    if (comment.length > 0) lines.push(...comment);
+
+    switch (action.type) {
+      case 'type': {
+        const text = action.data?.text || '';
+        lines.push(this.indent(`await ${varName}.${pomElement.methodName}('${this.escapeString(text)}');`));
+        break;
+      }
+      case 'click':
+        if (pomElement.methodType === 'click') {
+          lines.push(this.indent(`await ${varName}.${pomElement.methodName}();`));
+        } else {
+          lines.push(this.indent(`await ${varName}.${pomElement.name}.click();`));
+        }
+        break;
+      case 'select': {
+        const value = action.data?.value || '';
+        lines.push(this.indent(`await ${varName}.${pomElement.methodName}('${this.escapeString(value)}');`));
+        break;
+      }
+      case 'hover':
+        lines.push(this.indent(`await ${varName}.${pomElement.name}.hover();`));
+        break;
+      case 'navigate':
+        lines.push(this.indent(`await ${varName}.goto();`));
+        break;
+      default:
+        return null; // Fallback to raw action
+    }
+
+    if (lines.length > 0) lines.push('');
+    return lines;
+  }
+
   /**
    * Generate URL assertion
    */

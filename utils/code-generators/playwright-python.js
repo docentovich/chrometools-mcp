@@ -228,6 +228,80 @@ export class PlaywrightPythonGenerator extends CodeGeneratorBase {
     }
   }
 
+  // ========================================
+  // POM INTEGRATION
+  // ========================================
+
+  /**
+   * Generate POM import
+   */
+  generatePomImports(className, importPath) {
+    if (importPath) {
+      return [`from ${importPath} import ${className}`];
+    }
+    // Convert ClassName to class_name for Python module
+    const moduleName = className.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    return [`from ${moduleName} import ${className}`];
+  }
+
+  /**
+   * Generate POM instantiation
+   */
+  generatePomInstantiation(className) {
+    const varName = className.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    return [this.indent(`${varName} = ${className}(page)`), ''];
+  }
+
+  /**
+   * Generate POM goto
+   */
+  generatePomGoto(url) {
+    const varName = this.options.pomClassName.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    return [this.indent(`${varName}.goto()`)];
+  }
+
+  /**
+   * Generate POM-based action
+   */
+  generatePomAction(action, pomElement) {
+    const varName = this.options.pomClassName.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    const lines = [];
+
+    const comment = this.generateActionComment(action);
+    if (comment.length > 0) lines.push(...comment);
+
+    switch (action.type) {
+      case 'type': {
+        const text = action.data?.text || '';
+        lines.push(this.indent(`${varName}.${pomElement.methodName}("${this.escapeString(text)}")`));
+        break;
+      }
+      case 'click':
+        if (pomElement.methodType === 'click') {
+          lines.push(this.indent(`${varName}.${pomElement.methodName}()`));
+        } else {
+          lines.push(this.indent(`${varName}.${pomElement.name}.click()`));
+        }
+        break;
+      case 'select': {
+        const value = action.data?.value || '';
+        lines.push(this.indent(`${varName}.${pomElement.methodName}("${this.escapeString(value)}")`));
+        break;
+      }
+      case 'hover':
+        lines.push(this.indent(`${varName}.${pomElement.name}.hover()`));
+        break;
+      case 'navigate':
+        lines.push(this.indent(`${varName}.goto()`));
+        break;
+      default:
+        return null;
+    }
+
+    if (lines.length > 0) lines.push('');
+    return lines;
+  }
+
   /**
    * Generate URL assertion
    */

@@ -1124,17 +1124,24 @@ Delete a scenario and its associated secrets. Searches all projects to find the 
   - `language` (required): Target framework - `"playwright-typescript"`, `"playwright-python"`, `"selenium-python"`, `"selenium-java"`
   - `cleanSelectors` (optional): Remove unstable CSS classes (default: true)
   - `includeComments` (optional): Include descriptive comments (default: true)
-  - `generatePageObject` (optional): Also generate Page Object class for the page (default: false)
+  - `generatePageObject` (optional): Also generate Page Object class for the page (default: false). Legacy - use `pageObjectMode` instead.
   - `pageObjectClassName` (optional): Custom Page Object class name (auto-generated if not provided)
+  - `pageObjectMode` (optional): POM integration mode:
+    - `"none"` (default) - no Page Object
+    - `"generate"` - generate separate POM file (same as `generatePageObject: true`)
+    - `"generate-integrated"` - generate POM + test that **uses** POM methods (imports, instantiates, calls POM methods)
+    - `"use-existing"` - generate test that uses an **existing** POM file (requires `pageObjectFile`)
+  - `pageObjectFile` (optional): Path to existing POM file (required for `"use-existing"` mode)
 
-- **Use case**: Create new test files from recorded scenarios with optional Page Objects
+- **Use case**: Create new test files from recorded scenarios with optional Page Object integration
 
 - **Returns**: JSON with:
   - `action`: `"create_new_file"`
   - `suggestedFileName`: Suggested test filename
   - `testCode`: Full test code with imports
   - `instruction`: Instructions for Claude Code
-  - `pageObject` (if `generatePageObject=true`): Page Object code and metadata
+  - `pageObject` (if POM generated): Page Object code and metadata
+  - `pomIntegration` (if POM integrated): `{ className, mode }` info
 
 - **Example 1 - Test only**:
   ```javascript
@@ -1153,29 +1160,46 @@ Delete a scenario and its associated secrets. Searches all projects to find the 
   }
   ```
 
-- **Example 2 - Test + Page Object**:
+- **Example 2 - Test + separate Page Object** (legacy):
   ```javascript
-  // Export with Page Object class
   exportScenarioAsCode({
     scenarioName: "login_test",
     language: "playwright-typescript",
     generatePageObject: true,
     pageObjectClassName: "LoginPage"
   })
+  ```
 
-  // Returns JSON with both files:
-  {
-    "action": "create_new_file",
-    "suggestedFileName": "login_test.spec.ts",
-    "testCode": "import { test } from '@playwright/test';\nimport { LoginPage } from './LoginPage';\n\ntest('login_test', async ({ page }) => {\n  const loginPage = new LoginPage(page);\n  await loginPage.goto();\n  await loginPage.fillEmailInput('user@test.com');\n  await loginPage.clickLoginButton();\n});",
-    "pageObject": {
-      "code": "import { Page, Locator } from '@playwright/test';\n\nexport class LoginPage { ... }",
-      "className": "LoginPage",
-      "suggestedFileName": "LoginPage.ts",
-      "elementCount": 12
-    },
-    "instruction": "Create a new test file 'login_test.spec.ts' with the testCode. Also create a Page Object file 'LoginPage.ts' with the pageObject.code."
-  }
+- **Example 3 - Test + integrated Page Object** (recommended):
+  ```javascript
+  // Generate POM and test that USES POM methods (not raw selectors)
+  exportScenarioAsCode({
+    scenarioName: "login_test",
+    language: "playwright-typescript",
+    pageObjectMode: "generate-integrated",
+    pageObjectClassName: "LoginPage"
+  })
+
+  // Returns test code using POM:
+  // import { LoginPage } from './LoginPage';
+  // test('login_test', async ({ page }) => {
+  //   const loginPage = new LoginPage(page);
+  //   await loginPage.goto();
+  //   await loginPage.fillUsername('admin');
+  //   await loginPage.clickLoginBtn();
+  // });
+  ```
+
+- **Example 4 - Test using existing POM file**:
+  ```javascript
+  // Use pre-existing Page Object file
+  exportScenarioAsCode({
+    scenarioName: "login_test",
+    language: "playwright-typescript",
+    pageObjectMode: "use-existing",
+    pageObjectFile: "./pages/LoginPage.ts"
+  })
+  // Test will import and use methods from the existing LoginPage
   ```
 
 - **Selector Cleaning**: Automatically removes unstable patterns:
@@ -1197,8 +1221,10 @@ Append recorded scenario as test code to an **EXISTING** test file. Automaticall
   - `referenceTestName` (optional): Reference test name for 'before'/'after' insertion
   - `cleanSelectors` (optional): Remove unstable CSS classes (default: true)
   - `includeComments` (optional): Include descriptive comments (default: true)
-  - `generatePageObject` (optional): Also generate Page Object class for the page (default: false)
+  - `generatePageObject` (optional): Also generate Page Object class for the page (default: false). Legacy - use `pageObjectMode` instead.
   - `pageObjectClassName` (optional): Custom Page Object class name (auto-generated if not provided)
+  - `pageObjectMode` (optional): POM integration mode - `"none"`, `"generate"`, `"generate-integrated"`, `"use-existing"` (see exportScenarioAsCode for details)
+  - `pageObjectFile` (optional): Path to existing POM file (required for `"use-existing"` mode)
 
 - **Use case**: Add tests to existing test files without overwriting current tests
 

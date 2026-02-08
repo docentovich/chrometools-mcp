@@ -72,6 +72,7 @@ import {PlaywrightPythonGenerator} from './utils/code-generators/playwright-pyth
 import {SeleniumPythonGenerator} from './utils/code-generators/selenium-python.js';
 import {SeleniumJavaGenerator} from './utils/code-generators/selenium-java.js';
 import {FileAppender} from './utils/code-generators/file-appender.js';
+import {parsePomFile} from './utils/code-generators/pom-integrator.js';
 // Import Figma tools
 import {
     collectAllText,
@@ -3194,13 +3195,102 @@ Start coding now.`;
         };
       }
 
+      // Resolve pageObjectMode (backward compat: generatePageObject: true -> 'generate')
+      const pageObjectMode = args.pageObjectMode || (args.generatePageObject ? 'generate' : 'none');
+
       // Select generator based on language
-      let generator;
       const options = {
         cleanSelectors: args.cleanSelectors !== false, // default true
         includeComments: args.includeComments !== false, // default true
       };
 
+      // Resolve POM elements for integrated modes
+      let pomElements = null;
+      let pomClassName = null;
+      let pomImportPath = null;
+      let pageObjectData = null;
+
+      if (pageObjectMode === 'generate-integrated' || pageObjectMode === 'generate') {
+        try {
+          const entryUrl = scenario.metadata?.entryUrl;
+          if (entryUrl) {
+            let page;
+            try {
+              page = await getLastOpenPage();
+              const currentUrl = page.url();
+              if (currentUrl !== entryUrl) {
+                await page.goto(entryUrl, { waitUntil: 'networkidle2' });
+              }
+            } catch (error) {
+              page = await getOrCreatePage(entryUrl);
+            }
+
+            const pageObjectOptions = {
+              className: args.pageObjectClassName || null,
+              framework: args.language,
+              includeComments: args.includeComments !== false,
+              groupElements: true
+            };
+
+            const pageObjectResult = await generatePageObject(page, pageObjectOptions);
+            if (pageObjectResult.success) {
+              const extension = args.language.includes('typescript') ? '.ts' :
+                               args.language.includes('java') ? '.java' : '.py';
+              pageObjectData = {
+                code: pageObjectResult.code,
+                className: pageObjectResult.className,
+                suggestedFileName: `${pageObjectResult.className}${extension}`,
+                elementCount: pageObjectResult.elementCount
+              };
+
+              if (pageObjectMode === 'generate-integrated') {
+                pomElements = pageObjectResult.elements;
+                pomClassName = pageObjectResult.className;
+              }
+            }
+          }
+        } catch (error) {
+          // Page Object generation failed, continue without it
+        }
+      } else if (pageObjectMode === 'use-existing') {
+        if (!args.pageObjectFile) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: "pageObjectFile is required for 'use-existing' mode"
+              }, null, 2)
+            }],
+            isError: true
+          };
+        }
+
+        try {
+          const pomContent = FileAppender.readFile(args.pageObjectFile);
+          const parsed = parsePomFile(pomContent, args.language);
+          pomElements = parsed.elements;
+          pomClassName = parsed.className;
+        } catch (error) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: `Failed to parse POM file: ${error.message}`
+              }, null, 2)
+            }],
+            isError: true
+          };
+        }
+      }
+
+      // Add POM options to generator
+      if (pomElements && pomClassName) {
+        options.pomElements = pomElements;
+        options.pomClassName = pomClassName;
+        options.pomImportPath = pomImportPath;
+      }
+
+      let generator;
       switch (args.language) {
         case 'playwright-typescript':
           generator = new PlaywrightTypeScriptGenerator(options);
@@ -3239,58 +3329,20 @@ Start coding now.`;
           referenceTestName: args.referenceTestName
         };
 
-        // Generate Page Object if requested
-        let pageObjectData = null;
-        if (args.generatePageObject) {
-          try {
-            const entryUrl = scenario.metadata?.entryUrl;
-            if (entryUrl) {
-              let page;
-              try {
-                page = await getLastOpenPage();
-                const currentUrl = page.url();
-                if (currentUrl !== entryUrl) {
-                  await page.goto(entryUrl, { waitUntil: 'networkidle2' });
-                }
-              } catch (error) {
-                page = await getOrCreatePage(entryUrl);
-              }
-
-              const pageObjectOptions = {
-                className: args.pageObjectClassName || null,
-                framework: args.language,
-                includeComments: args.includeComments !== false,
-                groupElements: true
-              };
-
-              const pageObjectResult = await generatePageObject(page, pageObjectOptions);
-              if (pageObjectResult.success) {
-                // Suggest filename based on className
-                const extension = args.language.includes('typescript') ? '.ts' :
-                                 args.language.includes('java') ? '.java' : '.py';
-                pageObjectData = {
-                  code: pageObjectResult.code,
-                  className: pageObjectResult.className,
-                  suggestedFileName: `${pageObjectResult.className}${extension}`,
-                  elementCount: pageObjectResult.elementCount
-                };
-              }
-            }
-          } catch (error) {
-            // Page Object generation failed, continue without it
-          }
-        }
-
         // Return JSON with instructions for Claude Code to append the test
         const result = {
           action: 'append_test',
           targetFile: args.targetFile,
-          testCode: testOnly,  // Only test code, no imports
+          testCode: testOnly,
           testName: args.testName || scenario.metadata?.name,
           insertPosition: appendOptions.insertPosition,
           referenceTestName: appendOptions.referenceTestName,
           instruction: `Read file '${args.targetFile}', append the testCode at position '${appendOptions.insertPosition}', then write the file back.`
         };
+
+        if (pomClassName) {
+          result.pomIntegration = { className: pomClassName, mode: pageObjectMode };
+        }
 
         if (pageObjectData) {
           result.pageObject = pageObjectData;
@@ -3333,13 +3385,110 @@ Start coding now.`;
         };
       }
 
-      // Select generator based on language
-      let generator;
+      // Resolve pageObjectMode (backward compat: generatePageObject: true -> 'generate')
+      const pageObjectMode = args.pageObjectMode || (args.generatePageObject ? 'generate' : 'none');
+
       const options = {
         cleanSelectors: args.cleanSelectors !== false, // default true
         includeComments: args.includeComments !== false, // default true
       };
 
+      // Resolve POM elements for integrated modes
+      let pomElements = null;
+      let pomClassName = null;
+      let pageObjectData = null;
+      const entryUrl = scenario.metadata?.entryUrl;
+
+      if (pageObjectMode === 'generate-integrated' || pageObjectMode === 'generate') {
+        if (!entryUrl) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Cannot generate Page Object: scenario has no entryUrl in metadata'
+              }, null, 2)
+            }],
+            isError: true
+          };
+        }
+
+        try {
+          let page;
+          try {
+            page = await getLastOpenPage();
+            const currentUrl = page.url();
+            if (currentUrl !== entryUrl) {
+              await page.goto(entryUrl, { waitUntil: 'networkidle2' });
+            }
+          } catch (error) {
+            page = await getOrCreatePage(entryUrl);
+          }
+
+          const pageObjectOptions = {
+            className: args.pageObjectClassName || null,
+            framework: args.language,
+            includeComments: args.includeComments !== false,
+            groupElements: true
+          };
+
+          const pageObjectResult = await generatePageObject(page, pageObjectOptions);
+
+          if (pageObjectResult.success) {
+            const poExtension = args.language.includes('typescript') ? '.ts' :
+                               args.language.includes('java') ? '.java' : '.py';
+            pageObjectData = {
+              code: pageObjectResult.code,
+              className: pageObjectResult.className,
+              suggestedFileName: `${pageObjectResult.className}${poExtension}`,
+              elementCount: pageObjectResult.elementCount
+            };
+
+            if (pageObjectMode === 'generate-integrated') {
+              pomElements = pageObjectResult.elements;
+              pomClassName = pageObjectResult.className;
+            }
+          }
+        } catch (error) {
+          // Page Object generation failed, continue without it
+        }
+      } else if (pageObjectMode === 'use-existing') {
+        if (!args.pageObjectFile) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: "pageObjectFile is required for 'use-existing' mode"
+              }, null, 2)
+            }],
+            isError: true
+          };
+        }
+
+        try {
+          const pomContent = FileAppender.readFile(args.pageObjectFile);
+          const parsed = parsePomFile(pomContent, args.language);
+          pomElements = parsed.elements;
+          pomClassName = parsed.className;
+        } catch (error) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: `Failed to parse POM file: ${error.message}`
+              }, null, 2)
+            }],
+            isError: true
+          };
+        }
+      }
+
+      // Add POM options to generator
+      if (pomElements && pomClassName) {
+        options.pomElements = pomElements;
+        options.pomClassName = pomClassName;
+      }
+
+      let generator;
       switch (args.language) {
         case 'playwright-typescript':
           generator = new PlaywrightTypeScriptGenerator(options);
@@ -3377,114 +3526,27 @@ Start coding now.`;
         ? testName.charAt(0).toUpperCase() + testName.slice(1) + 'Test.java'
         : testName.replace(/\s+/g, '_').toLowerCase() + extension;
 
-      // If generatePageObject is requested, also generate Page Object class
-      if (args.generatePageObject) {
-        try {
-          // Get page - need to open at scenario's entry URL
-          let page;
-          const entryUrl = scenario.metadata?.entryUrl;
+      // Build result
+      const result = {
+        action: 'create_new_file',
+        suggestedFileName: suggestedFileName,
+        testCode: testCode,
+        instruction: `Create a new test file '${suggestedFileName}' with the testCode.`
+      };
 
-          if (!entryUrl) {
-            return {
-              content: [{
-                type: 'text',
-                text: JSON.stringify({
-                  error: 'Cannot generate Page Object: scenario has no entryUrl in metadata'
-                }, null, 2)
-              }],
-              isError: true
-            };
-          }
-
-          // Try to get existing page or open new one
-          try {
-            page = await getLastOpenPage();
-            // Navigate to entry URL if current page is different
-            const currentUrl = page.url();
-            if (currentUrl !== entryUrl) {
-              await page.goto(entryUrl, { waitUntil: 'networkidle2' });
-            }
-          } catch (error) {
-            // No page open, create new one
-            page = await getOrCreatePage(entryUrl);
-          }
-
-          // Generate Page Object
-          const pageObjectOptions = {
-            className: args.pageObjectClassName || null,
-            framework: args.language, // Use same framework as test
-            includeComments: args.includeComments !== false,
-            groupElements: true
-          };
-
-          const pageObjectResult = await generatePageObject(page, pageObjectOptions);
-
-          if (pageObjectResult.success) {
-            // Suggest Page Object filename
-            const poExtension = args.language.includes('typescript') ? '.ts' :
-                               args.language.includes('java') ? '.java' : '.py';
-            const pageObjectFileName = `${pageObjectResult.className}${poExtension}`;
-
-            // Return both test code and Page Object code
-            return {
-              content: [{
-                type: 'text',
-                text: JSON.stringify({
-                  action: 'create_new_file',
-                  suggestedFileName: suggestedFileName,
-                  testCode: testCode,
-                  pageObject: {
-                    code: pageObjectResult.code,
-                    className: pageObjectResult.className,
-                    suggestedFileName: pageObjectFileName,
-                    elementCount: pageObjectResult.elementCount
-                  },
-                  instruction: `Create a new test file '${suggestedFileName}' with the testCode. Also create a Page Object file '${pageObjectFileName}' with the pageObject.code.`
-                }, null, 2)
-              }]
-            };
-          } else {
-            // Page Object generation failed, return test code only with warning
-            return {
-              content: [{
-                type: 'text',
-                text: JSON.stringify({
-                  action: 'create_new_file',
-                  suggestedFileName: suggestedFileName,
-                  testCode: testCode,
-                  warning: 'Page Object generation failed: ' + (pageObjectResult.error || 'Unknown error'),
-                  instruction: `Create a new test file '${suggestedFileName}' with the testCode.`
-                }, null, 2)
-              }]
-            };
-          }
-        } catch (error) {
-          // Page Object generation failed, return test code only with error
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                action: 'create_new_file',
-                suggestedFileName: suggestedFileName,
-                testCode: testCode,
-                warning: 'Page Object generation error: ' + error.message,
-                instruction: `Create a new test file '${suggestedFileName}' with the testCode.`
-              }, null, 2)
-            }]
-          };
-        }
+      if (pomClassName) {
+        result.pomIntegration = { className: pomClassName, mode: pageObjectMode };
       }
 
-      // Default: return test code only
+      if (pageObjectData) {
+        result.pageObject = pageObjectData;
+        result.instruction = `Create a new test file '${suggestedFileName}' with the testCode. Also create a Page Object file '${pageObjectData.suggestedFileName}' with the pageObject.code.`;
+      }
+
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
-            action: 'create_new_file',
-            suggestedFileName: suggestedFileName,
-            testCode: testCode,
-            instruction: `Create a new test file '${suggestedFileName}' with the testCode.`
-          }, null, 2)
+          text: JSON.stringify(result, null, 2)
         }]
       };
     }

@@ -33,6 +33,19 @@ export async function generatePageObject(page, options = {}) {
   // Generate code based on framework
   const code = await generateCode(finalClassName, elementGroups, pageAnalysis, framework, includeComments);
 
+  // Build structured elements metadata for POM integration
+  const allElements = Object.values(elementGroups).flat();
+  const uniqueElements = deduplicateElements(allElements);
+  const lang = framework.includes('python') ? 'python' : framework.includes('java') ? 'java' : 'typescript';
+  const elements = uniqueElements.map(el => ({
+    name: sanitizeIdentifier(el.name, lang),
+    selector: el.selector,
+    tag: el.tag,
+    type: el.type,
+    methodName: generateMethodName(el, framework),
+    methodType: getMethodType(el)
+  }));
+
   return {
     success: true,
     className: finalClassName,
@@ -41,7 +54,8 @@ export async function generatePageObject(page, options = {}) {
     elementCount: pageAnalysis.elements.length,
     groups: Object.keys(elementGroups),
     framework,
-    code
+    code,
+    elements
   };
 }
 
@@ -726,6 +740,36 @@ function generateSeleniumJavaActionMethods(lines, elements) {
     lines.push(`    }`);
     lines.push(``);
   });
+}
+
+/**
+ * Helper: Determine method type for element
+ * @param {Object} el - Element info
+ * @returns {string} - "fill" | "click" | "select"
+ */
+function getMethodType(el) {
+  if (el.tag === 'select') return 'select';
+  if (el.tag === 'input' || el.tag === 'textarea') return 'fill';
+  return 'click';
+}
+
+/**
+ * Helper: Generate method name for element based on framework
+ * @param {Object} el - Element info
+ * @param {string} framework - Target framework
+ * @returns {string} - Method name (e.g., "fillUsername", "clickSubmit", "fill_username")
+ */
+function generateMethodName(el, framework) {
+  const methodType = getMethodType(el);
+  const isPython = framework.includes('python');
+  const lang = isPython ? 'python' : framework.includes('java') ? 'java' : 'typescript';
+  const name = sanitizeIdentifier(el.name, lang);
+
+  if (isPython) {
+    return `${methodType}_${name}`;
+  }
+  // TypeScript/Java: camelCase
+  return `${methodType}${capitalize(name)}`;
 }
 
 /**

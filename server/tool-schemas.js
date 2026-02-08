@@ -342,6 +342,10 @@ export const ExportScenarioAsCodeSchema = z.object({
   includeComments: z.boolean().optional().describe("Include descriptive comments (default: true)"),
   generatePageObject: z.boolean().optional().describe("Also generate Page Object class for the page (default: false)"),
   pageObjectClassName: z.string().optional().describe("Page Object class name (optional, auto-generated if not provided)"),
+  pageObjectMode: z.enum(['none', 'generate', 'generate-integrated', 'use-existing']).optional()
+    .describe("POM integration: 'none' (default), 'generate' (separate POM, current behavior), 'generate-integrated' (POM + test using it), 'use-existing' (test uses existing POM file)"),
+  pageObjectFile: z.string().optional()
+    .describe("Path to existing POM file (for 'use-existing' mode)"),
   directory: z.string().optional().describe("Directory where scenarios are stored (optional)"),
   appendToFile: z.string().optional().describe("Path to existing test file to append to (enables append mode)"),
   testName: z.string().optional().describe("Override test name (default: from scenario name)"),

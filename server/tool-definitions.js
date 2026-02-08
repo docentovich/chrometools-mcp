@@ -686,7 +686,7 @@ export const toolDefinitions = [
       },
       {
         name: "exportScenarioAsCode",
-        description: "Export scenario as test code for NEW file. Cleans unstable selectors, optionally generates Page Object. Use appendScenarioToFile for existing files.",
+        description: "Export scenario as test code for NEW file. Supports Page Object integration: 'generate-integrated' generates POM + test using it, 'use-existing' generates test using existing POM file. Use appendScenarioToFile for existing files.",
         inputSchema: {
           type: "object",
           properties: {
@@ -709,11 +709,20 @@ export const toolDefinitions = [
             },
             generatePageObject: {
               type: "boolean",
-              description: "Also generate Page Object class for the page (default: false)"
+              description: "Also generate Page Object class for the page (default: false). Legacy - use pageObjectMode instead."
             },
             pageObjectClassName: {
               type: "string",
               description: "Page Object class name (optional, auto-generated if not provided)"
+            },
+            pageObjectMode: {
+              type: "string",
+              enum: ["none", "generate", "generate-integrated", "use-existing"],
+              description: "POM integration: 'none' (default), 'generate' (separate POM), 'generate-integrated' (POM + test using it), 'use-existing' (test uses existing POM file)"
+            },
+            pageObjectFile: {
+              type: "string",
+              description: "Path to existing POM file (required for 'use-existing' mode)"
             },
           },
           required: ["scenarioName", "language"],
@@ -721,7 +730,7 @@ export const toolDefinitions = [
       },
       {
         name: "appendScenarioToFile",
-        description: "Append scenario as test code to EXISTING file. Cleans unstable selectors, optionally generates Page Object. Use exportScenarioAsCode for new files.",
+        description: "Append scenario as test code to EXISTING file. Supports Page Object integration: 'generate-integrated' generates POM + test using it, 'use-existing' generates test using existing POM file. Use exportScenarioAsCode for new files.",
         inputSchema: {
           type: "object",
           properties: {
@@ -761,7 +770,16 @@ export const toolDefinitions = [
             },
             generatePageObject: {
               type: "boolean",
-              description: "Also generate Page Object class for the page (default: false)"
+              description: "Also generate Page Object class for the page (default: false). Legacy - use pageObjectMode instead."
+            },
+            pageObjectMode: {
+              type: "string",
+              enum: ["none", "generate", "generate-integrated", "use-existing"],
+              description: "POM integration: 'none' (default), 'generate' (separate POM), 'generate-integrated' (POM + test using it), 'use-existing' (test uses existing POM file)"
+            },
+            pageObjectFile: {
+              type: "string",
+              description: "Path to existing POM file (required for 'use-existing' mode)"
             },
             pageObjectClassName: {
               type: "string",
