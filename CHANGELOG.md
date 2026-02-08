@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.0] - 2026-02-08
+
+### Added
+- **Adaptive click strategy with elementFromPoint pre-check** — Before each click, verifies the target element is topmost via `document.elementFromPoint()`. If covered by another element (e.g. small button under `<a routerLink>`), uses DOM dispatch to bypass coordinate hit-testing. Fixes clicks on absolutely-positioned elements over links.
+- **Auth redirect detection** — `navigateTo`, `openBrowser`, and `click` now warn when landing on a login page with returnUrl parameter. Broad login detection: password forms, phone/OTP forms, URL path (`/login`, `/signin`, `/auth`), CSS class matching.
+- **Post-click element detachment detection** — Detects when clicked element is removed from DOM during click (Angular `*ngFor` + Zone.js pattern). Shows actionable hint with app fix (trackBy) and executeScript workaround.
+- **Auth redirect in post-click diagnostics** — `formatDiagnosticsForAI` detects navigation to login pages with returnUrl and shows targeted warning.
+
+### Performance
+- **findElementsByText early exit** — Stops DOM traversal at 40 results, preventing 120s timeout on heavy Angular Material pages with CDK overlay.
+
 ## [3.3.9] - 2026-02-08
 
 ### Added
