@@ -23,6 +23,9 @@ let chromeProcess = null;
 // Track if we connected to existing Chrome (extension won't be auto-loaded)
 let connectedToExistingChrome = false;
 
+// Ensure bridge reconnect is only triggered once per Chrome launch
+let bridgeReconnectScheduled = false;
+
 // Track pages we've already seen to avoid double-handling
 const knownTargets = new WeakSet();
 
@@ -118,6 +121,9 @@ export async function getBrowser() {
           // Set up new tab tracking
           setupNewTabTracking(browser);
 
+          // Existing Chrome may already have bridge running — try to connect
+          scheduleBridgeReconnect();
+
           return browser;
         } catch (connectError) {
           debugLog("No existing Chrome found, launching new instance...");
@@ -173,6 +179,10 @@ export async function getBrowser() {
         // Set up new tab tracking
         setupNewTabTracking(browser);
 
+        // Extension needs time to load and start the bridge service.
+        // Schedule bridge reconnection after Chrome is ready.
+        scheduleBridgeReconnect();
+
         return browser;
       } catch (error) {
         // Check if it's a display-related error in WSL
@@ -219,6 +229,46 @@ This requires an X server to display the browser GUI.
   }
 
   return await browserPromise;
+}
+
+/**
+ * Schedule bridge reconnection after Chrome launches.
+ * Extension needs ~2-3s to load and start the bridge service via Native Messaging.
+ * Retries a few times in case the bridge takes longer to start.
+ */
+function scheduleBridgeReconnect() {
+  if (bridgeReconnectScheduled) return;
+  bridgeReconnectScheduled = true;
+
+  const delays = [2000, 3000, 5000]; // retry schedule in ms
+  let attempt = 0;
+
+  async function tryConnect() {
+    try {
+      const { retryBridgeConnection, isBridgeConnected } = await import('../bridge/bridge-client.js');
+      if (isBridgeConnected()) {
+        debugLog('Bridge already connected, skipping reconnect');
+        return;
+      }
+      debugLog(`Bridge reconnect attempt ${attempt + 1}/${delays.length}`);
+      const connected = await retryBridgeConnection();
+      if (connected) {
+        console.error('[chrometools-mcp] Bridge connected after Chrome launch');
+        return;
+      }
+    } catch (e) {
+      debugLog('Bridge reconnect error:', e.message);
+    }
+
+    attempt++;
+    if (attempt < delays.length) {
+      setTimeout(tryConnect, delays[attempt]);
+    } else {
+      console.error('[chrometools-mcp] Bridge not available after Chrome launch. Run: npx chrometools-mcp --install-bridge');
+    }
+  }
+
+  setTimeout(tryConnect, delays[0]);
 }
 
 /**

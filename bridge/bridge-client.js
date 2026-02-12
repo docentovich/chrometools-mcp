@@ -157,6 +157,33 @@ function scheduleReconnect() {
 }
 
 /**
+ * Reset reconnect state and retry connection to Bridge.
+ * Call this after Chrome launches (bridge-service may have just started).
+ */
+export async function retryBridgeConnection() {
+  if (isConnected && ws?.readyState === WebSocket.OPEN) {
+    return true; // Already connected
+  }
+
+  // Clean up any stale connection
+  if (ws) {
+    try { ws.close(); } catch (e) {}
+    ws = null;
+  }
+  isConnected = false;
+
+  // Reset reconnect counter so we get fresh attempts
+  reconnectAttempts = 0;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  logToFile('retryBridgeConnection: resetting and reconnecting');
+  return await connectToBridge();
+}
+
+/**
  * Disconnect from Bridge
  */
 export function disconnectFromBridge() {

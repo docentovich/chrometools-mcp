@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.1] - 2026-02-12
+
+### Fixed
+- **Extension "not connected" after install** — Bridge connection now auto-retries after Chrome launches (previously MCP exhausted all reconnect attempts before Chrome even started)
+- **Bridge auto-install on first run** — Native Messaging Host is automatically registered on MCP startup if not yet installed, eliminating the need to manually run `--install-bridge`
+- **Browser autocomplete corrupting text input** — Temporarily suppresses autocomplete during typing to prevent stale data from overwriting input fields
+
 ## [3.4.0] - 2026-02-08
 
 ### Added
