@@ -23,3 +23,6 @@ test-*.js
 # User scenarios and secrets (not part of MCP server)
 scenarios/
 secrets/
+
+# Spec documents
+SPEC-*.md
