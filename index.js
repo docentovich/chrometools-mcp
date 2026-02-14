@@ -621,10 +621,13 @@ async function executeToolInternal(name, args) {
           hintsText += '\n⚠️ ELEMENT DETACHED: Element was removed from DOM during click — handler did NOT fire.';
           hintsText += '\n   Cause: Angular Zone.js triggers change detection mid-click, *ngFor recreates elements.';
           hintsText += '\n   App fix: add trackBy to *ngFor, or cache array reference instead of returning new one.';
-          hintsText += '\n   Workaround via executeScript:';
-          hintsText += "\n   1. Find component: ng.getComponent(document.querySelector('component-tag'))";
-          hintsText += "\n   2. Explore API: Object.keys(comp).filter(k => k.includes('Event'))";
-          hintsText += '\n   3. Emit: comp.someChangeEvent.emit(selectedOption)';
+          hintsText += '\n   Workaround options:';
+          hintsText += '\n   1. Click via executeScript (bypasses Puppeteer element handle):';
+          hintsText += '\n      executeScript({ script: "document.querySelector(\'YOUR_SELECTOR\').click()" })';
+          hintsText += '\n   2. Call Angular component method directly:';
+          hintsText += '\n      executeScript({ script: "ng.getComponent(document.querySelector(\'component-tag\')).methodName()" })';
+          hintsText += '\n   3. Re-analyze page and use new element ID:';
+          hintsText += '\n      analyzePage({ refresh: true }) → click({ id: "NEW_ID" })';
         }
 
         if (hints.suggestedNext.length > 0) {
