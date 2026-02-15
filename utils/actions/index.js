@@ -9,3 +9,4 @@ export { executeHoverAction } from './hover-action.js';
 export { executeScreenshotAction } from './screenshot-action.js';
 export { executeSelectOptionAction } from './selectOption-action.js';
 export { executeCheckAction } from './check-action.js';
+export { executeScrollToAction } from './scrollTo-action.js';

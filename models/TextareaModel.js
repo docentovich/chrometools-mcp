@@ -7,6 +7,16 @@
 
 import { BaseInputModel } from './BaseInputModel.js';
 
+/**
+ * Wrap operation with timeout to prevent hanging
+ */
+async function withTimeout(operation, timeoutMs, operationName) {
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`${operationName} timed out after ${timeoutMs}ms`)), timeoutMs)
+  );
+  return Promise.race([operation(), timeoutPromise]);
+}
+
 export class TextareaModel extends BaseInputModel {
   static get inputTypes() {
     return ['textarea'];
@@ -21,24 +31,77 @@ export class TextareaModel extends BaseInputModel {
   }
 
   /**
-   * Type text into the textarea
+   * Type text into the textarea with timeout protection and JS fallback
    * @param {string} value - Text to type (can include newlines)
    * @param {object} options - { delay, clearFirst }
    */
   async setValue(value, options = {}) {
     const { delay = 0, clearFirst = true } = options;
+    const opTimeout = 5000;
 
-    if (clearFirst) {
-      await this.element.click({ clickCount: 3 });
-      await this.page.keyboard.press('Backspace');
-      // For multiline, also clear with Ctrl+A
-      await this.page.keyboard.down('Control');
-      await this.page.keyboard.press('a');
-      await this.page.keyboard.up('Control');
-      await this.page.keyboard.press('Backspace');
+    // Suppress browser autocomplete to prevent interference
+    // (Google search textarea triggers autocomplete on every keystroke)
+    const savedAutocomplete = await this.element.evaluate(el => {
+      const prev = el.getAttribute('autocomplete');
+      el.setAttribute('autocomplete', 'off');
+      return prev;
+    });
+
+    try {
+      // Method 1: Try Puppeteer typing
+      try {
+        if (clearFirst) {
+          await withTimeout(
+            () => this.element.evaluate(el => {
+              el.focus();
+              el.value = '';
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }),
+            opTimeout,
+            'focus-and-clear'
+          );
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        // Type with calculated timeout based on text length
+        const typeTimeout = Math.max(opTimeout, value.length * delay + 5000);
+        await withTimeout(
+          () => this.element.type(value, { delay }),
+          typeTimeout,
+          'type'
+        );
+
+        // Verify value was set correctly
+        const actualValue = await this.element.evaluate(el => el.value);
+        if (actualValue === value) {
+          return; // Success
+        }
+      } catch (e) {
+        // Fall through to JS method
+      }
+
+      // Method 2: Fallback to direct JS value setting
+      await withTimeout(
+        () => this.element.evaluate((el, newValue) => {
+          el.focus();
+          el.value = newValue;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, value),
+        opTimeout,
+        'js-set-value'
+      );
+    } finally {
+      // Restore original autocomplete attribute
+      await this.element.evaluate((el, orig) => {
+        if (orig === null) {
+          el.removeAttribute('autocomplete');
+        } else {
+          el.setAttribute('autocomplete', orig);
+        }
+      }, savedAutocomplete).catch(() => {});
     }
-
-    await this.element.type(value, { delay });
   }
 
   async getMetadata() {

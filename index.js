@@ -76,7 +76,8 @@ import {
   executeHoverAction,
   executeScreenshotAction,
   executeSelectOptionAction,
-  executeCheckAction
+  executeCheckAction,
+  executeScrollToAction
 } from './utils/actions/index.js';
 import {PlaywrightPythonGenerator} from './utils/code-generators/playwright-python.js';
 import {SeleniumPythonGenerator} from './utils/code-generators/selenium-python.js';
@@ -636,7 +637,8 @@ async function executeToolInternal(name, args) {
           'executeHoverAction': executeHoverAction,
           'executeScreenshotAction': executeScreenshotAction,
           'executeSelectOptionAction': executeSelectOptionAction,
-          'executeCheckAction': executeCheckAction
+          'executeCheckAction': executeCheckAction,
+          'executeScrollToAction': executeScrollToAction
         };
 
         const handlerFunction = actionHandlers[handlerInfo.handlerName];
@@ -762,56 +764,29 @@ async function executeToolInternal(name, args) {
       const validatedArgs = schemas.ScreenshotSchema.parse(args);
       const page = await getLastOpenPage();
 
-      const element = await page.$(validatedArgs.selector);
+      // Get identifier (id or selector)
+      const identifier = validatedArgs.id || validatedArgs.selector;
+
+      // Resolve selector (supports both APOM ID and CSS selector)
+      const resolved = await resolveSelector(page, identifier);
+      if (!resolved.found) {
+        throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
+      }
+
+      const element = await page.$(resolved.selector);
       if (!element) {
-        throw new Error(`Element not found: ${validatedArgs.selector}`);
+        throw new Error(`Element not found: ${identifier}`);
       }
 
-      const box = await element.boundingBox();
-      if (!box) {
-        throw new Error(`Element is not visible or has no bounding box: ${validatedArgs.selector}`);
-      }
-
-      const padding = validatedArgs.padding || 0;
-      const clip = {
-        x: Math.max(box.x - padding, 0),
-        y: Math.max(box.y - padding, 0),
-        width: Math.max(box.width + padding * 2, 1),
-        height: Math.max(box.height + padding * 2, 1)
-      };
-
-      // Take screenshot as buffer
-      const screenshotBuffer = await page.screenshot({ clip, encoding: 'binary' });
-
-      // Process with compression and scaling
-      const processed = await processScreenshot(screenshotBuffer, {
-        maxWidth: validatedArgs.maxWidth ?? 1024,
-        maxHeight: validatedArgs.maxHeight ?? 8000,
-        quality: validatedArgs.quality ?? 80,
-        format: validatedArgs.format ?? 'auto'
+      // Use shared screenshot action handler
+      return await executeScreenshotAction(page, element, {
+        identifier,
+        padding: validatedArgs.padding,
+        maxWidth: validatedArgs.maxWidth,
+        maxHeight: validatedArgs.maxHeight,
+        quality: validatedArgs.quality,
+        format: validatedArgs.format
       });
-
-      // Build info message
-      const infoText = `Screenshot captured: ${processed.metadata.width}x${processed.metadata.height} ${processed.metadata.format.toUpperCase()}` +
-        (processed.metadata.scaled ? ` (scaled from ${processed.metadata.originalWidth}x${processed.metadata.originalHeight})` : '') +
-        (processed.metadata.compressed ? ` (${processed.metadata.compressionRatio}% compression)` : '') +
-        `\nSize: ${(processed.metadata.finalSize / 1024).toFixed(1)}KB` +
-        (processed.metadata.originalSize !== processed.metadata.finalSize ?
-          ` (original: ${(processed.metadata.originalSize / 1024).toFixed(1)}KB)` : '');
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: infoText
-          },
-          {
-            type: "image",
-            data: processed.buffer.toString('base64'),
-            mimeType: processed.mimeType
-          }
-        ],
-      };
     }
 
     if (name === "saveScreenshot") {
@@ -875,33 +850,25 @@ async function executeToolInternal(name, args) {
       const validatedArgs = schemas.ScrollToSchema.parse(args);
       const page = await getLastOpenPage();
 
-      // Check if element exists
-      const elementExists = await page.$(validatedArgs.selector);
-      if (!elementExists) {
-        throw new Error(`Element not found: ${validatedArgs.selector}`);
+      // Get identifier (id or selector)
+      const identifier = validatedArgs.id || validatedArgs.selector;
+
+      // Resolve selector (supports both APOM ID and CSS selector)
+      const resolved = await resolveSelector(page, identifier);
+      if (!resolved.found) {
+        throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
       }
 
-      // Scroll to element using page.evaluate
-      await page.evaluate((selector, behavior) => {
-        const element = document.querySelector(selector);
-        if (element) {
-          element.scrollIntoView({ behavior: behavior || 'auto', block: 'center' });
-        }
-      }, validatedArgs.selector, validatedArgs.behavior || 'auto');
+      const element = await page.$(resolved.selector);
+      if (!element) {
+        throw new Error(`Element not found: ${identifier}`);
+      }
 
-      // Wait for scroll to complete
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const position = await page.evaluate(() => ({
-        x: window.scrollX,
-        y: window.scrollY
-      }));
-
-      return {
-        content: [
-          { type: "text", text: `Scrolled to ${validatedArgs.selector} (position: ${position.x}, ${position.y})` }
-        ],
-      };
+      // Use shared scrollTo action handler
+      return await executeScrollToAction(page, element, {
+        identifier,
+        behavior: validatedArgs.behavior
+      });
     }
 
     if (name === "waitForElement") {
@@ -1210,15 +1177,8 @@ async function executeToolInternal(name, args) {
         throw new Error(`Element not found: ${identifier}`);
       }
 
-      await element.hover();
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      return {
-        content: [{
-          type: "text",
-          text: `Hovered over: ${identifier}`
-        }],
-      };
+      // Use shared hover action handler
+      return await executeHoverAction(page, element, { identifier });
     }
 
     if (name === "selectOption") {
@@ -1234,70 +1194,16 @@ async function executeToolInternal(name, args) {
         throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
       }
 
-      // Select option with priority: value > text > index
-      const result = await page.evaluate((selector, value, text, index) => {
-        const selectElement = document.querySelector(selector);
-        if (!selectElement || selectElement.tagName !== 'SELECT') {
-          return { success: false, error: `Select element not found: ${selector}` };
-        }
-
-        let selectedOption = null;
-
-        // Priority 1: Select by value
-        if (value !== undefined && value !== null) {
-          const option = Array.from(selectElement.options).find(opt => opt.value === value);
-          if (option) {
-            selectElement.value = value;
-            selectedOption = option;
-          }
-        }
-
-        // Priority 2: Select by text
-        if (!selectedOption && text !== undefined && text !== null) {
-          const option = Array.from(selectElement.options).find(opt => opt.textContent.trim() === text);
-          if (option) {
-            selectElement.value = option.value;
-            selectedOption = option;
-          }
-        }
-
-        // Priority 3: Select by index
-        if (!selectedOption && index !== undefined && index !== null) {
-          if (index >= 0 && index < selectElement.options.length) {
-            selectElement.selectedIndex = index;
-            selectedOption = selectElement.options[index];
-          }
-        }
-
-        if (!selectedOption) {
-          return { success: false, error: 'No matching option found' };
-        }
-
-        // Trigger events for React and other frameworks
-        selectElement.dispatchEvent(new Event('input', { bubbles: true }));
-        selectElement.dispatchEvent(new Event('change', { bubbles: true }));
-
-        return {
-          success: true,
-          selectedValue: selectElement.value,
-          selectedText: selectedOption.textContent.trim(),
-          selectedIndex: selectElement.selectedIndex
-        };
-      }, resolved.selector, validatedArgs.value, validatedArgs.text, validatedArgs.index);
-
-      if (!result.success) {
-        throw new Error(result.error);
+      const element = await page.$(resolved.selector);
+      if (!element) {
+        throw new Error(`Element not found: ${identifier}`);
       }
 
-      return {
-        content: [{
-          type: "text",
-          text: `Selected option in ${identifier}:\n` +
-                `  Value: ${result.selectedValue}\n` +
-                `  Text: ${result.selectedText}\n` +
-                `  Index: ${result.selectedIndex}`
-        }],
-      };
+      // Use shared selectOption action handler
+      return await executeSelectOptionAction(page, element,
+        { value: validatedArgs.value, text: validatedArgs.text, index: validatedArgs.index },
+        { identifier }
+      );
     }
 
     if (name === "drag") {
