@@ -223,6 +223,24 @@ export const toolDefinitions = [
         },
       },
       {
+        name: "pressKey",
+        description: "Press keyboard key on focused element or page. For form submission (Enter), closing dialogs (Escape), navigation (Tab, Arrow keys), shortcuts (Ctrl+A).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "APOM element ID to focus before pressing. Optional." },
+            selector: { type: "string", description: "CSS selector to focus before pressing. Optional." },
+            key: { type: "string", description: "Key to press: 'Enter', 'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace', 'Delete', 'Home', 'End', 'PageUp', 'PageDown', 'Space'" },
+            modifiers: {
+              type: "array",
+              items: { type: "string", enum: ["Control", "Shift", "Alt", "Meta"] },
+              description: "Modifier keys to hold while pressing (e.g., ['Control'] for Ctrl+key)"
+            },
+          },
+          required: ["key"],
+        },
+      },
+      {
         name: "selectOption",
         description: "Select dropdown option by APOM ID or CSS selector. Specify value, text, or index.",
         inputSchema: {

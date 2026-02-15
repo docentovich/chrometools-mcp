@@ -219,12 +219,12 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 - [Installation](#installation)
   - [Chrome Extension Setup](#chrome-extension-setup)
 - [AI Optimization Features](#ai-optimization-features)- [Scenario Recorder](#scenario-recorder)  - Visual UI-based recording with smart optimization
-- [Available Tools](#available-tools) - **48+ Tools Total**
+- [Available Tools](#available-tools) - **49+ Tools Total**
   - [AI-Powered Tools](#ai-powered-tools)  - smartFindElement, analyzePage, getElementDetails, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
-  - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo
+  - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, pressKey, setStyles, setViewport, getViewport, navigateTo
   - [Tab Management Tools](#5-tab-management-tools)  - listTabs, switchTab
   - [Recorder Tools](#7-recorder-tools)  - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
   - [API / Swagger Tools](#8-api--swagger-tools) - loadSwagger, generateApiModels
@@ -775,6 +775,31 @@ Simulate mouse hover over element. **PREFERRED**: Use APOM ID from `analyzePage`
 
   // Alternative: Using CSS selector
   hover({ selector: ".dropdown-trigger" })
+  ```
+
+#### pressKey
+Press keyboard key, optionally on a specific element. Uses Puppeteer's trusted keyboard events.
+- **Parameters**:
+  - `id` (optional): APOM element ID to focus before pressing
+  - `selector` (optional): CSS selector to focus before pressing
+  - `key` (required): Key to press — `'Enter'`, `'Escape'`, `'Tab'`, `'ArrowUp'`, `'ArrowDown'`, `'ArrowLeft'`, `'ArrowRight'`, `'Backspace'`, `'Delete'`, `'Home'`, `'End'`, `'PageUp'`, `'PageDown'`, `'Space'`
+  - `modifiers` (optional): Array of modifier keys to hold — `['Control']`, `['Shift']`, `['Alt']`, `['Meta']`
+  - Neither `id` nor `selector` is required — without them, presses on whatever is currently focused
+- **Use case**: Form submission (Enter), closing dialogs (Escape), focus navigation (Tab), keyboard shortcuts (Ctrl+A)
+- **Returns**: Confirmation text
+- **Example**:
+  ```javascript
+  // Submit form by pressing Enter on input
+  pressKey({ id: "input_20", key: "Enter" })
+
+  // Close modal with Escape (no element needed)
+  pressKey({ key: "Escape" })
+
+  // Select all text with Ctrl+A
+  pressKey({ id: "input_5", key: "a", modifiers: ["Control"] })
+
+  // Navigate with Tab
+  pressKey({ key: "Tab" })
   ```
 
 #### setStyles

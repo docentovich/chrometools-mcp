@@ -77,7 +77,9 @@ import {
   executeScreenshotAction,
   executeSelectOptionAction,
   executeCheckAction,
-  executeScrollToAction
+  executeScrollToAction,
+  executePressKeyAction,
+  executeDatePickerAction
 } from './utils/actions/index.js';
 import {PlaywrightPythonGenerator} from './utils/code-generators/playwright-python.js';
 import {SeleniumPythonGenerator} from './utils/code-generators/selenium-python.js';
@@ -638,7 +640,9 @@ async function executeToolInternal(name, args) {
           'executeScreenshotAction': executeScreenshotAction,
           'executeSelectOptionAction': executeSelectOptionAction,
           'executeCheckAction': executeCheckAction,
-          'executeScrollToAction': executeScrollToAction
+          'executeScrollToAction': executeScrollToAction,
+          'executePressKeyAction': executePressKeyAction,
+          'executeDatePickerAction': executeDatePickerAction
         };
 
         const handlerFunction = actionHandlers[handlerInfo.handlerName];
@@ -653,13 +657,27 @@ async function executeToolInternal(name, args) {
         // Call the action handler based on its signature
         let result;
         if (handlerInfo.handlerName === 'executeTypeAction') {
-          result = await handlerFunction(page, element, actionParams.text || '', { ...options, ...actionParams });
+          let text = actionParams.text || '';
+          let typeOptions = { ...options, ...actionParams };
+
+          if (validatedArgs.action === 'append') {
+            typeOptions.clearFirst = false;
+          } else if (validatedArgs.action === 'clear') {
+            text = '';
+            typeOptions.clearFirst = true;
+          }
+
+          result = await handlerFunction(page, element, text, typeOptions);
         } else if (handlerInfo.handlerName === 'executeSelectOptionAction') {
           result = await handlerFunction(page, element, actionParams, options);
         } else if (handlerInfo.handlerName === 'executeClickAction') {
           result = await handlerFunction(page, element, { ...options, screenshot: actionParams.screenshot });
         } else if (handlerInfo.handlerName === 'executeCheckAction') {
           result = await handlerFunction(page, element, validatedArgs.action, options);
+        } else if (handlerInfo.handlerName === 'executeDatePickerAction') {
+          result = await handlerFunction(page, element, validatedArgs.action, { ...options, ...actionParams });
+        } else if (handlerInfo.handlerName === 'executePressKeyAction') {
+          result = await handlerFunction(page, element, { ...options, key: actionParams.key, modifiers: actionParams.modifiers });
         } else {
           result = await handlerFunction(page, element, { ...options, ...actionParams });
         }
@@ -1179,6 +1197,34 @@ async function executeToolInternal(name, args) {
 
       // Use shared hover action handler
       return await executeHoverAction(page, element, { identifier });
+    }
+
+    if (name === "pressKey") {
+      const validatedArgs = schemas.PressKeySchema.parse(args);
+      const page = await getLastOpenPage();
+
+      const identifier = validatedArgs.id || validatedArgs.selector || null;
+      let element = null;
+
+      if (identifier) {
+        // Resolve selector (supports both APOM ID and CSS selector)
+        const resolved = await resolveSelector(page, identifier);
+        if (!resolved.found) {
+          throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
+        }
+
+        element = await page.$(resolved.selector);
+        if (!element) {
+          throw new Error(`Element not found: ${identifier}`);
+        }
+      }
+
+      // Use shared pressKey action handler
+      return await executePressKeyAction(page, element, {
+        key: validatedArgs.key,
+        modifiers: validatedArgs.modifiers,
+        identifier
+      });
     }
 
     if (name === "selectOption") {

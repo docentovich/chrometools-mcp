@@ -70,7 +70,8 @@ export class TextInputModel extends BaseInputModel {
 
         // Verify the value was set (exact match to catch autocomplete corruption)
         const actualValue = await this.element.evaluate(el => el.value);
-        if (actualValue === value) {
+        const isValid = clearFirst ? actualValue === value : actualValue.endsWith(value);
+        if (isValid) {
           return; // Success
         }
       } catch (e) {
@@ -79,12 +80,12 @@ export class TextInputModel extends BaseInputModel {
 
       // Method 2: Fallback to direct JS value setting
       await withTimeout(
-        () => this.element.evaluate((el, newValue) => {
+        () => this.element.evaluate((el, newValue, shouldClear) => {
           el.focus();
-          el.value = newValue;
+          el.value = shouldClear ? newValue : el.value + newValue;
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
-        }, value),
+        }, value, clearFirst),
         opTimeout,
         'js-set-value'
       );

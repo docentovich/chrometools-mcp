@@ -45,6 +45,14 @@ export const HoverSchema = z.object({
   message: "Either 'id' or 'selector' must be provided, but not both"
 });
 
+export const PressKeySchema = z.object({
+  id: z.string().optional().describe("APOM element ID to focus before pressing. Optional."),
+  selector: z.string().optional().describe("CSS selector to focus before pressing. Optional."),
+  key: z.string().describe("Key to press: 'Enter', 'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace', 'Delete', 'Home', 'End', 'PageUp', 'PageDown', 'Space'"),
+  modifiers: z.array(z.enum(['Control', 'Shift', 'Alt', 'Meta'])).optional()
+    .describe("Modifier keys to hold: ['Control'], ['Shift', 'Alt'], etc."),
+});
+
 export const SelectOptionSchema = z.object({
   id: z.string().optional().describe("APOM element ID from analyzePage for select element. Mutually exclusive with selector."),
   selector: z.string().optional().describe("CSS selector for select element. Mutually exclusive with id."),

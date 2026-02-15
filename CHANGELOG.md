@@ -2,46 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - 2026-02-15
+## [3.5.0] - 2026-02-16
 
 ### Added
 - **Element Model System with Strategy Pattern** — Extensible architecture for custom UI components
   - Base `ElementModel` class with interface for model definition
   - `ModelRegistry` for automatic model selection and action routing
   - 13 concrete models: TextInput, Checkbox, Radio, Button, Select, TextArea, Link, Range, DatePicker, DateInput, FileInput, ColorInput, Default
-  - Models integrated into APOM analyzer - elements now show model name and available actions
+  - Models integrated into APOM analyzer — elements now show model name and available actions
 
 - **executeModelAction tool** — Universal tool for model-specific actions
   - Supports APOM ID (`id` parameter) and CSS selector (`selector` parameter)
   - Automatic routing via ModelRegistry.getActionHandler()
   - Framework-specific actions (e.g., DatePicker SetDate, Checkbox toggle)
-  - Examples: `executeModelAction({id: "input_34", action: "check"})`, `executeModelAction({selector: ".datepicker", action: "SetDate", params: {date: "2024-03-15"}})`
 
-- **Checkbox action handler** — `executeCheckAction` for check/uncheck/toggle actions
-  - Handles checkbox and radio button interactions
-  - Includes scrollIntoView and timeout wrapper for reliability
-  - Works with React synthetic events
+- **pressKey tool** — Keyboard key press with modifier support
+  - Press Enter, Escape, Tab, Arrow keys, Backspace, Delete, etc.
+  - Modifier keys: Control, Shift, Alt, Meta (e.g., Ctrl+A)
+  - Optional element targeting via APOM ID or CSS selector
 
-- **Material UI DatePicker detection** — Updated DatePickerModel to recognize MUI DatePicker
-  - Detects MuiFormControl/MuiTextField + input + calendar icon button
-  - Ready for DatePicker action implementation
+- **executeDatePickerAction handler** — Generic date picker interaction
+  - Supports SetDate, SetDateTime, SetTime, and clear actions
+  - Finds inner input and types value with change/blur event dispatch
+  - Tested on Ant Design DatePicker
+
+- **State-aware checkbox actions** — check/uncheck/toggle with skip logic
+  - `check` skips if already checked, `uncheck` skips if already unchecked
+  - `toggle` and `select` always click
+  - Returns descriptive message with final state (e.g., "check (already checked)")
+
+- **TextArea append and clear** — New actions via executeModelAction
+  - `append` types text without clearing existing content
+  - `clear` empties the field completely
+  - Tested on Angular Material, Ant Design, MUI
 
 ### Fixed
-- **Checkboxes with opacity:0 not appearing in APOM tree** — Updated `isVisible()` to allow stylable inputs
-  - Added exception for checkbox, radio, and file inputs with `opacity:0`
-  - Common pattern: custom-styled inputs with opacity:0 + visual overlay
-  - Checkboxes now appear with model "Chk" in analyzePage output
-
-### Documentation
-- Created `models/DATEPICKER_IMPLEMENTATION.md` — Complete implementation plan for DatePicker models (MUI, Ant Design, react-datepicker)
-- Created `TODO.md` — Task list with priorities and architecture decisions
-- Updated `README.md` — Added executeModelAction documentation and model-based interaction section
-
-### Architecture
-- **Decision: Separate models for each UI framework** — Approved for DatePicker implementation
-  - Rationale: DatePickers fundamentally different across frameworks (input vs popup vs custom render)
-  - Benefits: Clean architecture, framework-specific actions, easier maintenance
-  - Future: MuiDatePickerModel, AntDatePickerModel, ReactDatePickerModel
+- **TextArea/TextInput append destroying existing text** — Verification in setValue() compared exact value on append, falling through to JS fallback that replaced all content. Now uses `endsWith()` check for append mode, and JS fallback appends instead of replacing.
+- **Checkboxes with opacity:0 not appearing in APOM tree** — Updated `isVisible()` to allow stylable inputs (checkbox, radio, file) with `opacity:0`
 
 ## [3.4.1] - 2026-02-12
 

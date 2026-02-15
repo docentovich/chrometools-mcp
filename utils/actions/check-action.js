@@ -12,31 +12,49 @@
  * @returns {Promise<Object>} Result with content array (same format as other handlers)
  */
 export async function executeCheckAction(page, element, action = 'check', options = {}) {
-  console.log('[executeCheckAction] Called with action:', action, 'element:', !!element, 'page:', !!page);
+  const { identifier = 'element' } = options;
 
-  // Scroll element into view first
   await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
 
-  // Click with timeout
-  const clickWithTimeout = async (timeoutMs = 5000) => {
-    const withTimeout = (promise) => Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('click timeout')), timeoutMs))
-    ]);
+  // Read current state
+  const isChecked = await element.evaluate(el => el.checked);
 
-    try {
-      await withTimeout(element.click());
-    } catch (e) {
-      // Fallback to JS click
-      await element.evaluate(el => el.click());
-    }
-  };
+  // Determine if click is needed
+  let shouldClick = true;
+  if (action === 'check' && isChecked) {
+    shouldClick = false;
+  } else if (action === 'uncheck' && !isChecked) {
+    shouldClick = false;
+  }
+  // 'toggle' and 'select' always click
 
-  await clickWithTimeout();
+  if (shouldClick) {
+    // Click with timeout + JS fallback
+    const clickWithTimeout = async (timeoutMs = 5000) => {
+      const withTimeout = (promise) => Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('click timeout')), timeoutMs))
+      ]);
+
+      try {
+        await withTimeout(element.click());
+      } catch (e) {
+        // Fallback to JS click
+        await element.evaluate(el => el.click());
+      }
+    };
+
+    await clickWithTimeout();
+  }
+
+  // Read final state
+  const finalState = await element.evaluate(el => el.checked);
+  const stateStr = finalState ? 'checked' : 'unchecked';
+  const actionStr = shouldClick ? action : `${action} (already ${stateStr})`;
 
   return {
     content: [
-      { type: "text", text: `Clicked checkbox (action: ${action})` }
+      { type: "text", text: `${actionStr}: ${identifier} → ${stateStr}` }
     ]
   };
 }
