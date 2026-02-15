@@ -6,6 +6,32 @@
  */
 
 /**
+ * Initialize Model Registry (Strategy Pattern)
+ * This is called once per page analysis
+ */
+function initializeModelRegistry() {
+  // Check if already initialized
+  if (typeof window !== 'undefined' && window.__MODEL_REGISTRY__) {
+    return window.__MODEL_REGISTRY__;
+  }
+
+  // Create and populate registry
+  const registry = new ModelRegistry();
+
+  // Register all models (order doesn't matter, priority is handled internally)
+  if (typeof window !== 'undefined' && window.ELEMENT_MODELS_CLASSES) {
+    registry.registerAll(window.ELEMENT_MODELS_CLASSES);
+  }
+
+  // Cache in window for reuse
+  if (typeof window !== 'undefined') {
+    window.__MODEL_REGISTRY__ = registry;
+  }
+
+  return registry;
+}
+
+/**
  * Build DOM tree starting from root element
  * Runs in browser context via page.evaluate()
  *
@@ -15,6 +41,9 @@
  */
 function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
   const pageId = `page_${btoa(window.location.href).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}_${Date.now()}`;
+
+  // Initialize model registry (Strategy Pattern setup)
+  const modelRegistry = initializeModelRegistry();
 
   const result = {
     pageId,
@@ -35,7 +64,9 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
         scrollX: window.scrollX || window.pageXOffset,
         scrollY: window.scrollY || window.pageYOffset
       } : undefined
-    }
+    },
+    // Add models map from registry
+    models: modelRegistry ? modelRegistry.getModelsMap() : undefined
   };
 
   // Element ID counter
@@ -404,9 +435,15 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
 
     // Check computed styles
     const style = window.getComputedStyle(el);
-    if (style.display === 'none' ||
-        style.visibility === 'hidden' ||
-        style.opacity === '0') {
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      return false;
+    }
+
+    // Check opacity, but allow exceptions for inputs that are commonly styled with opacity:0
+    // (checkboxes, radios, file inputs often use opacity:0 with custom visual overlay)
+    const tag = el.tagName.toLowerCase();
+    const isStylableInput = tag === 'input' && ['checkbox', 'radio', 'file'].includes(el.type);
+    if (style.opacity === '0' && !isStylableInput) {
       return false;
     }
 
@@ -456,6 +493,18 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
     // Determine element type
     const elementType = determineElementType(element);
 
+    // Find matching model using Model Registry (Strategy Pattern)
+    let model = null;
+    let modelName = null;
+    if (modelRegistry) {
+      try {
+        model = modelRegistry.findModel(element, elementType);
+        modelName = model.getName();
+      } catch (e) {
+        // If no model found, continue without model
+      }
+    }
+
     // Build node - minimize non-interactive parents
     const isInteractive = elementType.isInteractive;
 
@@ -470,6 +519,11 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
         type: elementType.type,
         children: []
       };
+
+      // Add model name (skip for default model to reduce output size)
+      if (modelName && modelName !== 'default') {
+        node.model = modelName;
+      }
 
       // Only include position if not static (position is null for static)
       if (position) {

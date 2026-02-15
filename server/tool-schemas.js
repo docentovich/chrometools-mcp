@@ -55,6 +55,15 @@ export const SelectOptionSchema = z.object({
   message: "Either 'id' or 'selector' must be provided, but not both"
 });
 
+export const ExecuteModelActionSchema = z.object({
+  id: z.string().optional().describe("Element APOM ID (e.g., 'input_20', 'button_5') from analyzePage. Mutually exclusive with selector."),
+  selector: z.string().optional().describe("CSS selector (alternative to id). Mutually exclusive with id."),
+  action: z.string().describe("Action name to execute (e.g., 'type', 'click', 'SetDate', 'selectOption'). See element's model in analyzePage 'models' map for available actions for each model type."),
+  params: z.record(z.any()).optional().describe("Action parameters (depends on action). Examples: {text: 'hello'} for type, {date: '2024-03-15'} for SetDate, {value: 'US'} for selectOption, {checked: true} for check"),
+}).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
+  message: "Either 'id' or 'selector' must be provided, but not both"
+});
+
 export const DragSchema = z.object({
   selector: z.string().describe("CSS selector for element to drag"),
   direction: z.enum(['up', 'down', 'left', 'right', 'up-left', 'up-right', 'down-left', 'down-right'])

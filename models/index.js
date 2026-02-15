@@ -1,136 +1,440 @@
 /**
- * models/index.js
+ * Browser-based element model implementations (Strategy Pattern)
+ * These models define WHAT actions are available for each element type
+ * Actual execution is delegated to utils/actions/ handlers
  *
- * Input element models for chrometools-mcp.
- * Provides specialized handlers for different input types.
+ * Used by: analyzePage (for models map), executeModelAction (for action routing)
  *
- * Usage:
- *   import { getInputModel, InputModelFactory } from './models/index.js';
- *
- *   const model = await getInputModel(element, page);
- *   await model.setValue('some value');
+ * NOTE: ElementModel base class is loaded separately (ElementModel.js)
+ * Don't redeclare it here to avoid "already declared" errors
  */
-
-import { BaseInputModel } from './BaseInputModel.js';
-import { TextInputModel } from './TextInputModel.js';
-import { TimeInputModel } from './TimeInputModel.js';
-import { DateInputModel } from './DateInputModel.js';
-import { ColorInputModel } from './ColorInputModel.js';
-import { RangeInputModel } from './RangeInputModel.js';
-import { SelectModel } from './SelectModel.js';
-import { CheckboxModel } from './CheckboxModel.js';
-import { TextareaModel } from './TextareaModel.js';
-import { RadioGroupModel } from './RadioGroupModel.js';
-import { CheckboxGroupModel } from './CheckboxGroupModel.js';
 
 /**
- * Registry of all input models in priority order.
- * More specific models should come before generic ones.
+ * Text Input Model
+ * Handles: text, email, password, number, search, url, tel inputs
  */
-const MODEL_REGISTRY = [
-  TimeInputModel,
-  DateInputModel,
-  ColorInputModel,
-  RangeInputModel,
-  CheckboxModel,
+class TextInputModel extends ElementModel {
+  getName() {
+    return 'TxtInp';
+  }
+
+  getActions() {
+    return ['type', 'click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    if (elementType.type !== 'input') return false;
+    const inputType = elementType.metadata?.inputType;
+    const textTypes = ['text', 'email', 'password', 'number', 'search', 'url', 'tel'];
+    return textTypes.includes(inputType) || !inputType;
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'type': 'executeTypeAction',
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * Select Model
+ * Handles: <select> dropdowns
+ */
+class SelectModel extends ElementModel {
+  getName() {
+    return 'Sel';
+  }
+
+  getActions() {
+    return ['selectOption', 'click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    return elementType.type === 'select';
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'selectOption': 'executeSelectOptionAction',
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * Button Model
+ * Handles: buttons, submit/reset inputs
+ */
+class ButtonModel extends ElementModel {
+  getName() {
+    return 'Btn';
+  }
+
+  getActions() {
+    return ['click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    return elementType.type === 'button';
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * Checkbox Model
+ * Handles: <input type="checkbox">
+ */
+class CheckboxModel extends ElementModel {
+  getName() {
+    return 'Chk';
+  }
+
+  getActions() {
+    return ['check', 'uncheck', 'toggle', 'click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    if (elementType.type !== 'input') return false;
+    return elementType.metadata?.inputType === 'checkbox';
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'check': 'executeCheckAction',
+      'uncheck': 'executeCheckAction',
+      'toggle': 'executeCheckAction',
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * Radio Button Model
+ * Handles: <input type="radio">
+ */
+class RadioModel extends ElementModel {
+  getName() {
+    return 'Radio';
+  }
+
+  getActions() {
+    return ['select', 'click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    if (elementType.type !== 'input') return false;
+    return elementType.metadata?.inputType === 'radio';
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'select': 'executeCheckAction',
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * TextArea Model
+ * Handles: <textarea>
+ */
+class TextAreaModel extends ElementModel {
+  getName() {
+    return 'TxtArea';
+  }
+
+  getActions() {
+    return ['type', 'append', 'clear', 'click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    return elementType.type === 'textarea';
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'type': 'executeTypeAction',
+      'append': 'executeTypeAction',
+      'clear': 'executeTypeAction',
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * Link Model
+ * Handles: <a> links
+ */
+class LinkModel extends ElementModel {
+  getName() {
+    return 'Link';
+  }
+
+  getActions() {
+    return ['click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    return elementType.type === 'link';
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * Range Input Model
+ * Handles: <input type="range">
+ */
+class RangeInputModel extends ElementModel {
+  getName() {
+    return 'Range';
+  }
+
+  getActions() {
+    return ['setValue', 'click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    if (elementType.type !== 'input') return false;
+    return elementType.metadata?.inputType === 'range';
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'setValue': 'executeTypeAction', // Reuse type action for setting value
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * DatePicker Model (Custom Component Example)
+ * Handles: Date picker UI components (not native <input type="date">)
+ */
+class DatePickerModel extends ElementModel {
+  getName() {
+    return 'DatePicker';
+  }
+
+  getActions() {
+    return ['SetDate', 'SetDateTime', 'SetTime', 'click', 'clear'];
+  }
+
+  getPriority() {
+    return 100; // Check before DateInputModel
+  }
+
+  matches(element, elementType) {
+    const classes = element.className || '';
+    const datePickerPatterns = [
+      'datepicker', 'date-picker', 'datetime-picker',
+      'react-datepicker', 'flatpickr', 'pikaday',
+      'ant-picker', 'el-date-picker'
+    ];
+
+    // Check for common datepicker class patterns
+    if (datePickerPatterns.some(pattern => classes.toLowerCase().includes(pattern))) {
+      return true;
+    }
+
+    // Material UI DatePicker detection (v5/v6):
+    // Look for MuiFormControl with input + calendar icon button
+    if (classes.includes('MuiFormControl') || classes.includes('MuiTextField')) {
+      const hasInput = element.querySelector('input[type="text"]');
+      const hasCalendarIcon = element.querySelector('button[aria-label*="date" i], button[aria-label*="calendar" i]');
+      return hasInput && hasCalendarIcon;
+    }
+
+    return false;
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'SetDate': 'executeDatePickerAction',
+      'SetDateTime': 'executeDatePickerAction',
+      'SetTime': 'executeDatePickerAction',
+      'click': 'executeClickAction',
+      'clear': 'executeDatePickerAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * Date Input Model (Native HTML5)
+ * Handles: <input type="date|datetime-local|month|week">
+ */
+class DateInputModel extends ElementModel {
+  getName() {
+    return 'DateInp';
+  }
+
+  getActions() {
+    return ['type', 'click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    if (elementType.type !== 'input') return false;
+    const inputType = elementType.metadata?.inputType;
+    return ['date', 'datetime-local', 'month', 'week', 'time'].includes(inputType);
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'type': 'executeTypeAction',
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * File Input Model
+ * Handles: <input type="file">
+ */
+class FileInputModel extends ElementModel {
+  getName() {
+    return 'FileInp';
+  }
+
+  getActions() {
+    return ['click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    if (elementType.type !== 'input') return false;
+    return elementType.metadata?.inputType === 'file';
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * Color Input Model
+ * Handles: <input type="color">
+ */
+class ColorInputModel extends ElementModel {
+  getName() {
+    return 'ColorInp';
+  }
+
+  getActions() {
+    return ['setValue', 'click', 'hover', 'screenshot'];
+  }
+
+  matches(element, elementType) {
+    if (elementType.type !== 'input') return false;
+    return elementType.metadata?.inputType === 'color';
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'setValue': 'executeTypeAction',
+      'click': 'executeClickAction',
+      'hover': 'executeHoverAction',
+      'screenshot': 'executeScreenshotAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
+ * Default Model (fallback for non-interactive elements)
+ */
+class DefaultModel extends ElementModel {
+  getName() {
+    return 'default';
+  }
+
+  getActions() {
+    return ['screenshot', 'scrollTo'];
+  }
+
+  matches(element, elementType) {
+    return true; // Always matches (fallback)
+  }
+
+  getPriority() {
+    return -1000; // Checked last
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'screenshot': 'executeScreenshotAction',
+      'scrollTo': 'executeScrollToAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+// Export all models
+const MODELS = [
+  TextInputModel,
   SelectModel,
-  TextareaModel,
-  TextInputModel,  // Default fallback for text-like inputs
+  ButtonModel,
+  CheckboxModel,
+  RadioModel,
+  TextAreaModel,
+  LinkModel,
+  RangeInputModel,
+  DatePickerModel,
+  DateInputModel,
+  FileInputModel,
+  ColorInputModel,
+  DefaultModel
 ];
 
-/**
- * Wrap operation with timeout to prevent hanging
- */
-async function withTimeout(operation, timeoutMs, operationName) {
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`${operationName} timed out after ${timeoutMs}ms`)), timeoutMs)
-  );
-  return Promise.race([operation(), timeoutPromise]);
+// Export for Node.js
+if (typeof module !== 'undefined' && module.exports) {
+  // In Node.js, ElementModel needs to be imported
+  const ElementModel = require('./ElementModel');
+  module.exports = { ElementModel, MODELS };
 }
 
-/**
- * Factory class for creating appropriate input models
- */
-export class InputModelFactory {
-  /**
-   * Get element info (tagName, inputType) with timeout
-   */
-  static async getElementInfo(element, timeoutMs = 5000) {
-    return await withTimeout(
-      () => element.evaluate(el => ({
-        tagName: el.tagName.toLowerCase(),
-        inputType: el.type?.toLowerCase() || null,
-      })),
-      timeoutMs,
-      'getElementInfo'
-    );
-  }
-
-  /**
-   * Find the appropriate model class for an element
-   */
-  static findModelClass(tagName, inputType) {
-    // Check for element-specific handlers first (select, textarea)
-    for (const ModelClass of MODEL_REGISTRY) {
-      if (ModelClass.handlesElement && ModelClass.handlesElement(tagName, inputType)) {
-        return ModelClass;
-      }
-    }
-
-    // Then check input type handlers
-    for (const ModelClass of MODEL_REGISTRY) {
-      if (ModelClass.handles(inputType)) {
-        return ModelClass;
-      }
-    }
-
-    // Fallback to TextInputModel for unknown types
-    return TextInputModel;
-  }
-
-  /**
-   * Create a model instance for the given element
-   * @param {ElementHandle} element - Puppeteer element handle
-   * @param {Page} page - Puppeteer page
-   * @returns {Promise<BaseInputModel>} Model instance
-   */
-  static async create(element, page) {
-    const { tagName, inputType } = await this.getElementInfo(element);
-    const ModelClass = this.findModelClass(tagName, inputType);
-    return new ModelClass(element, page);
-  }
-
-  /**
-   * Get model class name for an element (useful for logging)
-   */
-  static async getModelName(element) {
-    const { tagName, inputType } = await this.getElementInfo(element);
-    const ModelClass = this.findModelClass(tagName, inputType);
-    return ModelClass.name;
-  }
+// Export for browser (ElementModel already loaded via ElementModel.js)
+if (typeof window !== 'undefined') {
+  window.ELEMENT_MODELS_CLASSES = MODELS;
 }
-
-/**
- * Convenience function to get a model for an element
- * @param {ElementHandle} element - Puppeteer element handle
- * @param {Page} page - Puppeteer page
- * @returns {Promise<BaseInputModel>} Model instance
- */
-export async function getInputModel(element, page) {
-  return await InputModelFactory.create(element, page);
-}
-
-// Export all models for direct use if needed
-export {
-  BaseInputModel,
-  TextInputModel,
-  TimeInputModel,
-  DateInputModel,
-  ColorInputModel,
-  RangeInputModel,
-  SelectModel,
-  CheckboxModel,
-  TextareaModel,
-  RadioGroupModel,
-  CheckboxGroupModel,
-};

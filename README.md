@@ -7,7 +7,7 @@
 ## Why ChromeTools MCP?
 
 **For AI Agents & Developers:**
-- 🎯 **56 specialized tools** for browser automation - from simple clicks to Figma comparisons
+- 🎯 **56+ specialized tools** for browser automation - from simple clicks to Figma comparisons
 - 🧠 **APOM (Agent Page Object Model)** - AI-friendly page representation (~8-10k tokens vs 15-25k for screenshots)
 - 🔄 **Persistent browser sessions** - pages stay open between commands for iterative workflows
 - ⚡ **Framework-aware** - handles React, Vue, Angular events and state updates automatically
@@ -326,6 +326,15 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
 2. ✅ **`findElementsByText()`** - Find specific elements by visible text
 3. ✅ **`getElement()`** - Get HTML of specific element
 4. ⚠️ **`executeScript()`** - LAST RESORT, only if above failed
+
+#### Model-Based Interaction (Advanced)
+1. ✅ **`executeModelAction()`** - Universal tool for model-specific actions
+   - Works with element models (Strategy Pattern)
+   - Supports both APOM ID and CSS selector
+   - Framework-specific actions (e.g., DatePicker SetDate, Checkbox toggle)
+   - Example: `executeModelAction({id: "input_34", action: "check"})`
+   - Example: `executeModelAction({selector: ".datepicker", action: "SetDate", params: {date: "2024-03-15"}})`
+   - See `models/` directory for available models and actions
 
 **Why specialized tools matter:**
 - ✅ Trigger proper browser events (click, input, change)
@@ -1733,9 +1742,9 @@ npx @modelcontextprotocol/inspector node index.js
 
 ## Features
 
-- **48+ Powerful Tools**: Complete toolkit for browser automation
+- **56+ Powerful Tools**: Complete toolkit for browser automation (including model-based interaction system)
   - Core: ping, openBrowser
-  - Interaction: click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
+  - Interaction: click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal, executeModelAction
   - Inspection: getElement, getComputedCss, getBoxModel, screenshot, saveScreenshot
   - Advanced: executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo, waitForElement
   - AI-Powered: smartFindElement, analyzePage, getElementDetails (with children analysis), findElementsByText  - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject

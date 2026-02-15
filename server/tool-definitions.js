@@ -237,6 +237,31 @@ export const toolDefinitions = [
         },
       },
       {
+        name: "executeModelAction",
+        description: `Universal tool to execute any model-specific action on element.
+
+This tool works with element models (Strategy Pattern) and can execute any action defined by the model.
+Use analyzePage() first to see element's model and available actions in the 'models' map.
+
+Models: TxtInp (text input), Sel (select), Btn (button), Chk (checkbox), Radio (radio), TxtArea (textarea), Link (link), Range (range), DatePicker (custom date picker), DateInp (HTML5 date), FileInp (file), ColorInp (color).
+
+Examples:
+- executeModelAction({id: "input_20", action: "type", params: {text: "hello"}})
+- executeModelAction({id: "select_5", action: "selectOption", params: {value: "US"}})
+- executeModelAction({id: "datepicker_3", action: "SetDate", params: {date: "2024-03-15"}})
+- executeModelAction({id: "checkbox_7", action: "check"})`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Element APOM ID (e.g., 'input_20') from analyzePage. Either id or selector required." },
+            selector: { type: "string", description: "CSS selector (alternative to id). Either id or selector required." },
+            action: { type: "string", description: "Action name to execute (e.g., 'type', 'click', 'SetDate'). See element's model in analyzePage 'models' map for available actions." },
+            params: { type: "object", description: "Action parameters (depends on action). Examples: {text: 'hello'} for type, {date: '2024-03-15'} for SetDate, {value: 'US'} for selectOption" },
+          },
+          required: ["action"],
+        },
+      },
+      {
         name: "drag",
         description: "Drag element in any direction. For maps, charts, SVG, canvas, sliders. Use mode='synthetic' for JS libraries (frappe-gantt, jQuery UI). Use scrollHorizontal for scrollbars.",
         inputSchema: {

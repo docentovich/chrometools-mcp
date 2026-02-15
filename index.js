@@ -66,8 +66,18 @@ import {generatePageObject} from './recorder/page-object-generator.js';
 // Import Code Generators
 import {PlaywrightTypeScriptGenerator} from './utils/code-generators/playwright-typescript.js';
 
-// Import Input Models
-import { getInputModel, RadioGroupModel, CheckboxGroupModel } from './models/index.js';
+// Import Input Models (Puppeteer-based)
+import { getInputModel, RadioGroupModel, CheckboxGroupModel } from './models/puppeteer-models.js';
+
+// Import Action Handlers
+import {
+  executeClickAction,
+  executeTypeAction,
+  executeHoverAction,
+  executeScreenshotAction,
+  executeSelectOptionAction,
+  executeCheckAction
+} from './utils/actions/index.js';
 import {PlaywrightPythonGenerator} from './utils/code-generators/playwright-python.js';
 import {SeleniumPythonGenerator} from './utils/code-generators/selenium-python.js';
 import {SeleniumJavaGenerator} from './utils/code-generators/selenium-java.js';
@@ -132,6 +142,11 @@ const apomConverter = readFileSync(path.join(__dirname, 'pom', 'apom-converter.j
 
 // Load APOM Tree converter utilities (v2 - tree structure with positioning)
 const apomTreeConverter = readFileSync(path.join(__dirname, 'pom', 'apom-tree-converter.js'), 'utf-8');
+
+// Load Element Models (Strategy Pattern for element actions)
+const elementModelBase = readFileSync(path.join(__dirname, 'models', 'ElementModel.js'), 'utf-8');
+const elementModels = readFileSync(path.join(__dirname, 'models', 'index.js'), 'utf-8');
+const modelRegistry = readFileSync(path.join(__dirname, 'models', 'ModelRegistry.js'), 'utf-8');
 
 // Base storage directory in user's home folder
 const BASE_STORAGE_DIR = path.join(homedir(), '.config', 'chrometools-mcp');
@@ -481,173 +496,13 @@ async function executeToolInternal(name, args) {
           throw new Error(`Element not found: ${identifier}`);
         }
 
-        // Capture timestamp and URL BEFORE click for diagnostics
-        const beforeClickTimestamp = Date.now();
-        const urlBeforeClick = page.url();
-
-        // ALWAYS scroll to element first to ensure it's in viewport
-        await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
-
-        // Click with adaptive fallback strategy:
-        //
-        // Pre-check: elementFromPoint() determines if element is the topmost at its center.
-        // This decides the click path — Puppeteer's click() doesn't always throw on interception.
-        //
-        // Path A (element covered by another, e.g. small button under <a routerLink>):
-        //   → JS element.click() — DOM dispatch bypasses coordinate hit-testing
-        //
-        // Path B (element is topmost — normal case):
-        //   Tier 1: Puppeteer native click (trusted CDP events)
-        //   Tier 2: page.mouse.click at coordinates (trusted CDP, no interception check)
-        //   Tier 3: JS element.click() (untrusted, last resort)
-        //   Trusted CDP events (Tier 1 & 2) are critical for Angular/Zone.js apps where
-        //   untrusted .click() triggers change detection mid-dispatch, destroying *ngFor elements.
-        const clickWithTimeout = async (timeoutMs = 5000) => {
-          const withTimeout = (promise) => Promise.race([
-            promise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('click timeout')), timeoutMs))
-          ]);
-
-          // Pre-check: is another element covering our target at its center coordinates?
-          const intercepted = await element.evaluate(el => {
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) return false;
-            const cx = rect.left + rect.width / 2;
-            const cy = rect.top + rect.height / 2;
-            const topEl = document.elementFromPoint(cx, cy);
-            // topEl is our element or a child of it — not intercepted
-            return topEl !== el && !el.contains(topEl);
-          });
-
-          if (intercepted) {
-            // Path A: Element is covered (e.g., small button under <a routerLink>)
-            // Coordinate clicks would hit the covering element — use DOM dispatch
-            await element.evaluate(el => el.click());
-            return;
-          }
-
-          // Path B: Element is topmost — use trusted CDP events
-          // Tier 1: Puppeteer native click
-          try {
-            await withTimeout(element.click());
-            return;
-          } catch (e) { /* fall through to Tier 2 */ }
-
-          // Tier 2: CDP coordinate click — trusted events, bypasses Puppeteer's own checks
-          try {
-            const box = await element.boundingBox();
-            if (box) {
-              await withTimeout(page.mouse.click(box.x + box.width / 2, box.y + box.height / 2));
-              return;
-            }
-          } catch (e) { /* fall through to Tier 3 */ }
-
-          // Tier 3: JS click — untrusted, last resort
-          await element.evaluate(el => el.click());
-        };
-
-        await clickWithTimeout();
-
-        // Check if element was detached from DOM during click (Angular *ngFor + Zone.js pattern)
-        let elementDetached = false;
-        try {
-          elementDetached = await element.evaluate(el => !el.parentNode);
-        } catch (e) {
-          // Element handle may be invalid if page navigated — not a detachment issue
-        }
-
-        // NEW POST-CLICK PATTERN:
-        // 1. Run post-click diagnostics (waits for network requests within 200ms, max 10s timeout)
-        let diagnostics;
-        try {
-          diagnostics = await runPostClickDiagnostics(page, beforeClickTimestamp, {
-            skipNetworkWait: validatedArgs.skipNetworkWait,
-            networkWaitTimeout: validatedArgs.networkWaitTimeout,
-            urlBeforeAction: urlBeforeClick
-          });
-        } catch (diagError) {
-          // Diagnostics may fail if page navigated - create minimal diagnostics
-          diagnostics = {
-            networkActivity: { trackedRequests: [], bridgeRequests: [], stillPending: 0, pendingRequests: [] },
-            navigation: { from: urlBeforeClick, to: page.url(), likelyFormSubmit: true },
-            errors: { consoleErrors: [], networkErrors: [], totalErrors: 0 },
-            hasErrors: false
-          };
-        }
-
-        // 2. Generate AI hints after click
-        let hints;
-        try {
-          hints = await generateClickHints(page, identifier);
-        } catch (hintsError) {
-          hints = { modalOpened: false, newElements: [], suggestedNext: [] };
-        }
-
-        // 3. Format output with hints and diagnostics
-        let hintsText = '\n\n** AI HINTS **';
-
-        // Modal: show title, body text, and actions
-        if (hints.modalOpened && hints.newElements.some(e => e.type === 'modal')) {
-          const modal = hints.newElements.find(e => e.type === 'modal');
-          let modalText = 'Modal opened';
-          if (modal.title) modalText += `: "${modal.title}"`;
-          if (modal.text) modalText += `\n  ${modal.text}`;
-          if (modal.actions?.length) modalText += `\n  Actions: [${modal.actions.join('] [')}]`;
-          hintsText += '\n' + modalText;
-        } else if (hints.modalOpened) {
-          hintsText += '\nModal opened - interact with it or close';
-        }
-
-        // Overlay: show items
-        const overlay = hints.newElements.find(e => e.type === 'dropdown' || e.type === 'menu');
-        if (overlay?.items?.length) {
-          const label = overlay.type === 'menu' ? 'Menu' : 'Dropdown';
-          hintsText += `\n${label} with ${overlay.totalCount} options: ${overlay.items.join(', ')}`;
-        }
-
-        // Other new elements (alerts, etc.)
-        const otherElements = hints.newElements.filter(e => e.type !== 'modal' && e.type !== 'dropdown' && e.type !== 'menu');
-        if (otherElements.length > 0) {
-          hintsText += `\nNew elements appeared: ${otherElements.map(e => e.text ? `${e.type}: ${e.text}` : e.type).join(', ')}`;
-        }
-
-        // Auth redirect after click (session expired, protected route)
-        if (hints.authRedirect) {
-          hintsText += '\n⚠️ AUTH REDIRECT: Landed on login page. Session may have expired.';
-        }
-
-        // Element detached during click (Angular *ngFor + Zone.js)
-        if (elementDetached) {
-          hintsText += '\n⚠️ ELEMENT DETACHED: Element was removed from DOM during click — handler did NOT fire.';
-          hintsText += '\n   Cause: Angular Zone.js triggers change detection mid-click, *ngFor recreates elements.';
-          hintsText += '\n   App fix: add trackBy to *ngFor, or cache array reference instead of returning new one.';
-          hintsText += '\n   Workaround options:';
-          hintsText += '\n   1. Click via executeScript (bypasses Puppeteer element handle):';
-          hintsText += '\n      executeScript({ script: "document.querySelector(\'YOUR_SELECTOR\').click()" })';
-          hintsText += '\n   2. Call Angular component method directly:';
-          hintsText += '\n      executeScript({ script: "ng.getComponent(document.querySelector(\'component-tag\')).methodName()" })';
-          hintsText += '\n   3. Re-analyze page and use new element ID:';
-          hintsText += '\n      analyzePage({ refresh: true }) → click({ id: "NEW_ID" })';
-        }
-
-        if (hints.suggestedNext.length > 0) {
-          hintsText += `\nSuggested next: ${hints.suggestedNext.join('; ')}`;
-        }
-
-        // 4. Add diagnostics to output
-        const diagnosticsText = formatDiagnosticsForAI(diagnostics);
-
-        const content = [
-          { type: "text", text: `Clicked: ${identifier}${hintsText}${diagnosticsText}` }
-        ];
-
-        // Only add screenshot if requested
-        if (validatedArgs.screenshot === true) {
-          const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
-          content.push({ type: "image", data: screenshot, mimeType: "image/png" });
-        }
-
-        return { content };
+        // Use shared click action handler
+        return await executeClickAction(page, element, {
+          identifier,
+          screenshot: validatedArgs.screenshot,
+          skipNetworkWait: validatedArgs.skipNetworkWait,
+          networkWaitTimeout: validatedArgs.networkWaitTimeout
+        });
       };
 
       // Execute with timeout
@@ -679,34 +534,12 @@ async function executeToolInternal(name, args) {
           throw new Error(`Element not found: ${identifier}`);
         }
 
-        // ALWAYS scroll to element first to ensure it's in viewport
-        await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Use input model to handle the element appropriately
-        const model = await getInputModel(element, page);
-        const options = {
-          delay: validatedArgs.delay !== undefined ? validatedArgs.delay : 30,
-          clearFirst: validatedArgs.clearFirst !== undefined ? validatedArgs.clearFirst : true,
-        };
-
-        await model.setValue(validatedArgs.text, options);
-        const description = model.getActionDescription(validatedArgs.text, identifier);
-
-        // Capture timestamp AFTER typing finishes - requests should start within 200ms of this
-        const afterTypeTimestamp = Date.now();
-
-        // Run diagnostics with 3s timeout for type (shorter than click's 10s)
-        const diagnostics = await runPostClickDiagnostics(page, afterTypeTimestamp, {
-          networkWaitTimeout: 3000
+        // Use shared type action handler
+        return await executeTypeAction(page, element, validatedArgs.text, {
+          identifier,
+          delay: validatedArgs.delay,
+          clearFirst: validatedArgs.clearFirst
         });
-        const diagnosticsText = formatDiagnosticsForAI(diagnostics);
-
-        return {
-          content: [
-            { type: "text", text: `${description}${diagnosticsText}` }
-          ],
-        };
       };
 
       // Execute with timeout
@@ -715,6 +548,129 @@ async function executeToolInternal(name, args) {
       );
 
       return Promise.race([typeOperation(), timeoutPromise]);
+    }
+
+    if (name === "executeModelAction") {
+      const validatedArgs = schemas.ExecuteModelActionSchema.parse(args);
+      const page = await getLastOpenPage();
+      const timeout = 30000;
+
+      // Wrap operation in timeout
+      const executeOperation = async () => {
+        // Get identifier (id or selector)
+        const identifier = validatedArgs.id || validatedArgs.selector;
+
+        // Resolve selector (supports both APOM ID and CSS selector)
+        const resolved = await resolveSelector(page, identifier);
+        if (!resolved.found) {
+          throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
+        }
+
+        const element = await page.$(resolved.selector);
+        if (!element) {
+          throw new Error(`Element not found: ${identifier}`);
+        }
+
+        // Determine which action handler to use via Model Registry (in browser context)
+        const handlerInfo = await page.evaluate((modelsCode, elementSelector, actionName) => {
+          try {
+            // Initialize models if needed
+            if (typeof window.ModelRegistry === 'undefined') {
+              eval(modelsCode);
+            }
+
+            // Initialize registry if needed
+            const registry = window.__MODEL_REGISTRY__ || (() => {
+              const reg = new ModelRegistry();
+              if (window.ELEMENT_MODELS_CLASSES) {
+                reg.registerAll(window.ELEMENT_MODELS_CLASSES);
+              }
+              window.__MODEL_REGISTRY__ = reg;
+              return reg;
+            })();
+
+            // Find element
+            const element = document.querySelector(elementSelector);
+            if (!element) {
+              return { error: `Element not found: ${elementSelector}` };
+            }
+
+            // Determine element type (simplified)
+            function determineElementType(el) {
+              const tag = el.tagName.toLowerCase();
+              const type = el.type?.toLowerCase();
+              const role = el.getAttribute('role');
+
+              if (tag === 'form') return { type: 'form', metadata: {} };
+              if (tag === 'input') {
+                const inputType = type || 'text';
+                return {
+                  type: inputType === 'submit' || inputType === 'button' ? 'button' : 'input',
+                  metadata: { inputType }
+                };
+              }
+              if (tag === 'textarea') return { type: 'textarea', metadata: {} };
+              if (tag === 'select') return { type: 'select', metadata: {} };
+              if (tag === 'button' || role === 'button') return { type: 'button', metadata: {} };
+              if (tag === 'a') return { type: 'link', metadata: {} };
+              return { type: 'container', metadata: {} };
+            }
+
+            const elementType = determineElementType(element);
+
+            // Get action handler name from registry
+            return registry.getActionHandler(element, elementType, actionName);
+          } catch (error) {
+            return { error: error.message };
+          }
+        }, elementModelBase + '\n' + elementModels + '\n' + modelRegistry, resolved.selector, validatedArgs.action);
+
+        if (handlerInfo.error) {
+          throw new Error(handlerInfo.error);
+        }
+
+        // Map handler name to actual function
+        const actionHandlers = {
+          'executeClickAction': executeClickAction,
+          'executeTypeAction': executeTypeAction,
+          'executeHoverAction': executeHoverAction,
+          'executeScreenshotAction': executeScreenshotAction,
+          'executeSelectOptionAction': executeSelectOptionAction,
+          'executeCheckAction': executeCheckAction
+        };
+
+        const handlerFunction = actionHandlers[handlerInfo.handlerName];
+        if (!handlerFunction) {
+          throw new Error(`Action handler "${handlerInfo.handlerName}" not implemented yet`);
+        }
+
+        // Execute action via appropriate handler
+        const actionParams = validatedArgs.params || {};
+        const options = { identifier };
+
+        // Call the action handler based on its signature
+        let result;
+        if (handlerInfo.handlerName === 'executeTypeAction') {
+          result = await handlerFunction(page, element, actionParams.text || '', { ...options, ...actionParams });
+        } else if (handlerInfo.handlerName === 'executeSelectOptionAction') {
+          result = await handlerFunction(page, element, actionParams, options);
+        } else if (handlerInfo.handlerName === 'executeClickAction') {
+          result = await handlerFunction(page, element, { ...options, screenshot: actionParams.screenshot });
+        } else if (handlerInfo.handlerName === 'executeCheckAction') {
+          result = await handlerFunction(page, element, validatedArgs.action, options);
+        } else {
+          result = await handlerFunction(page, element, { ...options, ...actionParams });
+        }
+
+        return result;
+      };
+
+      // Execute with timeout
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`executeModelAction timed out after ${timeout}ms`)), timeout)
+      );
+
+      return Promise.race([executeOperation(), timeoutPromise]);
     }
 
     if (name === "getComputedCss") {
@@ -2454,10 +2410,17 @@ Start coding now.`;
       const pageUrl = page.url();
 
       // APOM Tree format (default) - v2 with tree structure and positioning
-      const apomResult = await page.evaluate((apomTreeConverterCode, selectorResolverCode, shouldRegister, includeAll, viewportOnly) => {
-        // Inject utilities
-        eval(apomTreeConverterCode);
-        eval(selectorResolverCode);
+      const apomResult = await page.evaluate((apomTreeConverterCode, selectorResolverCode, modelsCode, shouldRegister, includeAll, viewportOnly) => {
+        // Inject utilities if not already loaded
+        if (typeof buildAPOMTree === 'undefined') {
+          eval(apomTreeConverterCode);
+        }
+        if (typeof resolveSelector === 'undefined') {
+          eval(selectorResolverCode);
+        }
+        if (typeof ElementModel === 'undefined') {
+          eval(modelsCode);
+        }
 
         // Build APOM tree
         // interactiveOnly = !includeAll (if includeAll is true, we want ALL elements)
@@ -2494,7 +2457,7 @@ Start coding now.`;
         }
 
         return apomData;
-      }, apomTreeConverter, selectorResolver, validatedArgs.registerElements !== false, validatedArgs.includeAll || false, validatedArgs.viewportOnly || false);
+      }, apomTreeConverter, selectorResolver, elementModelBase + '\n' + elementModels + '\n' + modelRegistry, validatedArgs.registerElements !== false, validatedArgs.includeAll || false, validatedArgs.viewportOnly || false);
 
       // Handle diff mode
       if (validatedArgs.diff) {
