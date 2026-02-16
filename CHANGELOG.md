@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.3] - 2026-02-16
+
+### Fixed
+- **Bridge connection errors flooding stderr** — Bridge client no longer prints `console.error` on connection failures (ECONNREFUSED). All bridge connection errors are now debug-level only (visible with `DEBUG=1`). Fixes MCP clients showing scary error messages for users without Chrome Extension
+- **Unwanted auto-reconnect on startup** — `scheduleReconnect` now only triggers when a previously established connection is lost, not on initial connection failure. Eliminates 5 retry attempts when bridge service is simply not running
+- **Removed auto-install bridge from startup** — Bridge auto-installation via `reg add` (Windows registry) was running on every server start, which is intrusive and unnecessary for users without Chrome Extension. Bridge installation remains available via `npx chrometools-mcp --install-bridge`
+
 ## [3.5.2] - 2026-02-16
 
 ### Added

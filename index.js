@@ -3916,18 +3916,7 @@ async function main() {
     console.error("[chrometools-mcp] GUI mode requires X server (DISPLAY=" + (process.env.DISPLAY || "not set") + ")");
   }
 
-  // Auto-install bridge if not yet registered (required for extension <-> MCP communication)
-  try {
-    const { isBridgeInstalled, installBridge } = await import('./bridge/install.js');
-    if (!isBridgeInstalled()) {
-      console.error('[chrometools-mcp] Bridge not installed. Auto-installing...');
-      await installBridge({ silent: true });
-    }
-  } catch (e) {
-    console.error('[chrometools-mcp] Bridge auto-install failed:', e.message);
-  }
-
-  // Connect to Bridge Service (if running)
+  // Connect to Bridge Service (if running — optional, for Chrome Extension integration)
   await startWebSocketServer();
 
   // Register handler for syncing active tab when user switches tabs

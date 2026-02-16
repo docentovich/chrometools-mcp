@@ -264,7 +264,7 @@ function scheduleBridgeReconnect() {
     if (attempt < delays.length) {
       setTimeout(tryConnect, delays[attempt]);
     } else {
-      console.error('[chrometools-mcp] Bridge not available after Chrome launch. Run: npx chrometools-mcp --install-bridge');
+      debugLog('Bridge not available after Chrome launch (extension may not be installed)');
     }
   }
 

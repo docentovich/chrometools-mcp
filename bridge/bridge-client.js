@@ -89,7 +89,7 @@ export async function connectToBridge() {
       ws = new WebSocket(`ws://127.0.0.1:${BRIDGE_PORT}`);
 
       const connectTimeout = setTimeout(() => {
-        console.error('[chrometools-mcp] Bridge connection timeout (5s)');
+        debugLog('Bridge connection timeout (5s)');
         logToFile('TIMEOUT: Connection timeout after 5s');
         ws?.close();
         resolve(false);
@@ -115,22 +115,27 @@ export async function connectToBridge() {
       });
 
       ws.on('close', (code, reason) => {
-        console.error(`[chrometools-mcp] Bridge disconnected (code=${code}, reason=${reason || 'none'})`);
+        debugLog(`Bridge disconnected (code=${code}, reason=${reason || 'none'})`);
         logToFile(`CLOSE: WebSocket closed, code=${code}, reason=${reason || 'none'}`);
+        const wasConnected = isConnected;
         isConnected = false;
         ws = null;
-        scheduleReconnect();
+        // Only reconnect if we were previously connected (lost connection)
+        // Don't reconnect if initial connection failed (bridge not running)
+        if (wasConnected) {
+          scheduleReconnect();
+        }
       });
 
       ws.on('error', (error) => {
         clearTimeout(connectTimeout);
-        console.error(`[chrometools-mcp] Bridge connection error: ${error.message}`);
+        debugLog(`Bridge connection error: ${error.message}`);
         logToFile(`ERROR: WebSocket error: ${error.message}`);
         resolve(false);
       });
 
     } catch (error) {
-      console.error(`[chrometools-mcp] Failed to create WebSocket: ${error.message}`);
+      debugLog(`Failed to create WebSocket: ${error.message}`);
       logToFile(`EXCEPTION: Failed to create WebSocket: ${error.message}`);
       resolve(false);
     }
@@ -143,12 +148,12 @@ export async function connectToBridge() {
 function scheduleReconnect() {
   if (reconnectTimer) return;
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    console.error(`[chrometools-mcp] Bridge: max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached, giving up`);
+    debugLog(`Bridge: max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached, giving up`);
     return;
   }
 
   reconnectAttempts++;
-  debugLog(`Scheduling reconnect attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
+  debugLog(`Scheduling Bridge reconnect attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
 
   reconnectTimer = setTimeout(async () => {
     reconnectTimer = null;
