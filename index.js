@@ -2334,7 +2334,7 @@ Start coding now.`;
             return {
               content: [
                 { type: 'text', text: JSON.stringify(response, null, 2) },
-                { type: 'image', data: actionResult.screenshot, mimeType: 'image/png' }
+                { type: 'image', data: actionResult.screenshot, mimeType: actionResult.screenshotMimeType || 'image/png' }
               ]
             };
           }
@@ -2760,7 +2760,7 @@ Start coding now.`;
             return {
               content: [
                 { type: 'text', text: JSON.stringify(response, null, 2) },
-                { type: 'image', data: actionResult.screenshot, mimeType: 'image/png' }
+                { type: 'image', data: actionResult.screenshot, mimeType: actionResult.screenshotMimeType || 'image/png' }
               ]
             };
           }
@@ -3938,6 +3938,19 @@ async function main() {
 
   console.error("chrometools-mcp server running on stdio");
   console.error("Browser will be initialized on first openBrowser call");
+
+  // Pre-warm Jimp AFTER server is connected (non-blocking)
+  // Jimp v0.22 constructor is thenable - awaiting it before server.connect()
+  // would block transport and cause MCP client timeout
+  (async () => {
+    try {
+      const img = await new Jimp(1, 1, 0x000000ff);
+      await img.getBufferAsync(Jimp.MIME_JPEG);
+      console.error("[chrometools-mcp] Jimp pre-warmed");
+    } catch (e) {
+      console.error("[chrometools-mcp] Jimp pre-warm failed:", e.message);
+    }
+  })();
 }
 
 main().catch((error) => {

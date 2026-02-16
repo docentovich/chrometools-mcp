@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.1] - 2026-02-16
+
+### Fixed
+- **APOM selector uniqueness** — `generateSelector()` in APOM tree converter now verifies CSS selector uniqueness against the entire document instead of just parent element. Fixes critical bug where `click(id: "button_X")` could click the wrong element (e.g., navigation button instead of action button) when multiple elements shared the same class like `.ant-btn`
+- **findElementsByText click timeout** — `executeElementAction` click now uses adaptive strategy with 5s timeout and JS fallback instead of raw Puppeteer `element.click()` which could hang indefinitely on elements inside complex layouts (antd Tabs, scrollable containers)
+- **findElementsByText non-unique selectors** — `getUniqueSelectorInPage` fallback now checks selector uniqueness at each level of path building (max depth 5→8), preventing clicks on wrong elements when multiple matches exist
+
+### Changed
+- **Screenshot defaults optimized** — Default format changed from PNG/auto to JPEG quality 40 for all screenshot tools, reducing token usage from ~15-25k to ~5-10k tokens per screenshot
+- **Action screenshots compressed** — Screenshots from click/findElementsByText/hover with `screenshot: true` now use lightweight JPEG (quality 40, maxWidth 800) instead of raw PNG, dramatically reducing context consumption
+- **Jimp warmup** — Pre-warms Jimp image processor at server startup (non-blocking, after transport connect) to avoid cold-start delays on first screenshot
+
 ## [3.5.0] - 2026-02-16
 
 ### Added

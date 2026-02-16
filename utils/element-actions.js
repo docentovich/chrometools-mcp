@@ -1,3 +1,25 @@
+import { processScreenshot } from './screenshot-processor.js';
+
+// Lightweight action screenshot: small JPEG for confirming actions worked
+// These are "report" screenshots, not for detailed analysis
+async function takeActionScreenshot(page, clip) {
+  const screenshotBuffer = await page.screenshot({
+    encoding: 'binary',
+    fullPage: false,
+    ...(clip ? { clip } : {})
+  });
+  const processed = await processScreenshot(screenshotBuffer, {
+    maxWidth: 800,
+    maxHeight: 4000,
+    quality: 40,
+    format: 'jpeg',
+  });
+  return {
+    data: processed.buffer.toString('base64'),
+    mimeType: processed.mimeType,
+  };
+}
+
 // Helper function to execute actions on elements
 export async function executeElementAction(page, selector, action) {
   if (!action || !action.type) {
@@ -17,13 +39,27 @@ export async function executeElementAction(page, selector, action) {
 
   switch (action.type) {
     case 'click':
-      await element.click();
+      // Scroll element into view first (direct JS, avoids Puppeteer's scrollIntoViewIfNeeded hang)
+      await element.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
+
+      // Click with timeout + JS fallback (Puppeteer's click can hang in complex layouts)
+      try {
+        await Promise.race([
+          element.click(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('click timeout')), 5000))
+        ]);
+      } catch (e) {
+        // Fallback to JS click (bypasses Puppeteer's coordinate-based click)
+        await element.evaluate(el => el.click());
+      }
+
       await new Promise(resolve => setTimeout(resolve, action.waitAfter || 1500));
       result.message = `Clicked on ${selector}`;
 
       if (action.screenshot) {
-        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
-        result.screenshot = screenshot;
+        const { data, mimeType } = await takeActionScreenshot(page);
+        result.screenshot = data;
+        result.screenshotMimeType = mimeType;
       }
       break;
 
@@ -38,8 +74,9 @@ export async function executeElementAction(page, selector, action) {
       result.message = `Typed "${action.text}" into ${selector}`;
 
       if (action.screenshot) {
-        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
-        result.screenshot = screenshot;
+        const { data, mimeType } = await takeActionScreenshot(page);
+        result.screenshot = data;
+        result.screenshotMimeType = mimeType;
       }
       break;
 
@@ -65,9 +102,10 @@ export async function executeElementAction(page, selector, action) {
         width: Math.max(box.width, 1),
         height: Math.max(box.height, 1)
       };
-      const screenshot = await page.screenshot({ clip, encoding: 'base64' });
+      const { data: screenshotData, mimeType: screenshotMime } = await takeActionScreenshot(page, clip);
       result.message = `Captured screenshot of ${selector}`;
-      result.screenshot = screenshot;
+      result.screenshot = screenshotData;
+      result.screenshotMimeType = screenshotMime;
       break;
 
     case 'hover':
@@ -76,8 +114,9 @@ export async function executeElementAction(page, selector, action) {
       result.message = `Hovered over ${selector}`;
 
       if (action.screenshot) {
-        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
-        result.screenshot = screenshot;
+        const { data, mimeType } = await takeActionScreenshot(page);
+        result.screenshot = data;
+        result.screenshotMimeType = mimeType;
       }
       break;
 
@@ -101,8 +140,9 @@ export async function executeElementAction(page, selector, action) {
       result.message = `Applied styles to ${selector}`;
 
       if (action.screenshot) {
-        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
-        result.screenshot = screenshot;
+        const { data, mimeType } = await takeActionScreenshot(page);
+        result.screenshot = data;
+        result.screenshotMimeType = mimeType;
       }
       break;
 

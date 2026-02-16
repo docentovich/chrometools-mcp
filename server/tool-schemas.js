@@ -115,8 +115,8 @@ export const ScreenshotSchema = z.object({
   padding: z.number().optional().describe("Padding around element in pixels (default: 0)"),
   maxWidth: z.number().nullable().optional().describe("Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)"),
   maxHeight: z.number().nullable().optional().describe("Maximum height in pixels, auto-scales if larger (default: 8000 for API limit, set to null for original size)"),
-  quality: z.number().min(1).max(100).optional().describe("JPEG quality 1-100 (default: 80, only applies to JPEG format)"),
-  format: z.enum(['png', 'jpeg', 'auto']).optional().describe("Image format: 'png', 'jpeg', or 'auto' (default: 'auto' - chooses based on size)"),
+  quality: z.number().min(1).max(100).optional().describe("JPEG quality 1-100 (default: 40)"),
+  format: z.enum(['png', 'jpeg', 'auto']).optional().describe("Image format (default: 'jpeg')"),
 }).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
   message: "Either 'id' or 'selector' must be provided, but not both"
 });

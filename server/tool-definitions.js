@@ -92,7 +92,7 @@ export const toolDefinitions = [
       },
       {
         name: "screenshot",
-        description: "Capture element image (15-25k tokens). Use analyzePage for form data/validation (8-10k tokens).",
+        description: "Capture element image (5-10k tokens). Use analyzePage for form data/validation (8-10k tokens).",
         inputSchema: {
           type: "object",
           properties: {
@@ -100,8 +100,8 @@ export const toolDefinitions = [
             padding: { type: "number", description: "Padding px (default: 0)" },
             maxWidth: { type: "number", description: "Max width px (default: 1024, null=original)" },
             maxHeight: { type: "number", description: "Max height px (default: 8000, null=original)" },
-            quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality (default: 80)" },
-            format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Format (default: auto)" },
+            quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality (default: 40)" },
+            format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Format (default: jpeg)" },
           },
           required: ["selector"],
         },

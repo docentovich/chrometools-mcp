@@ -462,8 +462,10 @@ function getUniqueSelectorInPage(element) {
   }
 
   // 8. Fallback: nth-of-type with path
+  // Build path up to 8 levels, verifying uniqueness
   let current = element;
   const path = [];
+  const MAX_PATH_DEPTH = 8;
 
   while (current && current.tagName) {
     let selector = current.tagName.toLowerCase();
@@ -497,10 +499,21 @@ function getUniqueSelectorInPage(element) {
     }
 
     path.unshift(selector);
+
+    // Check if current path is already unique
+    try {
+      const candidateSelector = path.join(' > ');
+      if (document.querySelectorAll(candidateSelector).length === 1) {
+        return candidateSelector;
+      }
+    } catch (e) {
+      // Invalid selector, continue building path
+    }
+
     current = current.parentElement;
 
-    // Stop at body or after 5 levels
-    if (!current || current.tagName === 'BODY' || path.length >= 5) {
+    // Stop at body or after max depth
+    if (!current || current.tagName === 'BODY' || path.length >= MAX_PATH_DEPTH) {
       break;
     }
   }

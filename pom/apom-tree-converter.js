@@ -1003,30 +1003,29 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
     if (stableClass) {
       const escapedClass = CSS.escape(stableClass);
       const classSelector = `.${escapedClass}`;
-      // Verify it's unique within parent context
-      if (element.parentElement) {
-        try {
-          const matches = element.parentElement.querySelectorAll(classSelector);
-          if (matches.length === 1 && matches[0] === element) {
-            return classSelector;
-          }
-        } catch (e) {
-          // Invalid selector, continue to path-based approach
+      // Verify it's unique in the ENTIRE document (not just parent)
+      try {
+        const matches = document.querySelectorAll(classSelector);
+        if (matches.length === 1 && matches[0] === element) {
+          return classSelector;
         }
+      } catch (e) {
+        // Invalid selector, continue to path-based approach
       }
     }
 
-    // Build path from parent
+    // Build path from element to body, checking uniqueness at each level
     const path = [];
     let current = element;
+    const MAX_PATH_DEPTH = 8;
 
-    while (current && current !== document.body) {
+    while (current && current !== document.body && path.length < MAX_PATH_DEPTH) {
       let selector = current.tagName.toLowerCase();
 
       // Add stable class if available (escaped for CSS selector safety)
-      const stableClass = getStableClassName(current);
-      if (stableClass) {
-        selector += `.${CSS.escape(stableClass)}`;
+      const cls = getStableClassName(current);
+      if (cls) {
+        selector += `.${CSS.escape(cls)}`;
       }
 
       // Add nth-of-type if needed
@@ -1041,6 +1040,15 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
       }
 
       path.unshift(selector);
+
+      // Check if current path is already unique in the document
+      try {
+        const candidateSelector = path.join(' > ');
+        if (document.querySelectorAll(candidateSelector).length === 1) {
+          return candidateSelector;
+        }
+      } catch (e) { /* continue building path */ }
+
       current = current.parentElement;
     }
 

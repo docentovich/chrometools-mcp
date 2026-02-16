@@ -14,8 +14,8 @@ import { processScreenshot } from '../image-processing.js';
  * @param {number} options.padding - Padding around element in pixels (default: 0)
  * @param {number|null} options.maxWidth - Max width for scaling (default: 1024, null for original)
  * @param {number|null} options.maxHeight - Max height for scaling (default: 8000, null for original)
- * @param {number} options.quality - JPEG quality 1-100 (default: 80)
- * @param {string} options.format - Image format: 'png', 'jpeg', 'auto' (default: 'auto')
+ * @param {number} options.quality - JPEG quality 1-100 (default: 50)
+ * @param {string} options.format - Image format: 'png', 'jpeg', 'auto' (default: 'jpeg')
  * @returns {Promise<Object>} Result with content array (text + image)
  */
 export async function executeScreenshotAction(page, element, options = {}) {
@@ -24,8 +24,8 @@ export async function executeScreenshotAction(page, element, options = {}) {
     padding = 0,
     maxWidth = 1024,
     maxHeight = 8000,
-    quality = 80,
-    format = 'auto'
+    quality = 40,
+    format = 'jpeg'
   } = options;
 
   // Scroll to element to ensure it's in viewport

@@ -8,7 +8,7 @@
 
 **For AI Agents & Developers:**
 - 🎯 **56+ specialized tools** for browser automation - from simple clicks to Figma comparisons
-- 🧠 **APOM (Agent Page Object Model)** - AI-friendly page representation (~8-10k tokens vs 15-25k for screenshots)
+- 🧠 **APOM (Agent Page Object Model)** - AI-friendly page representation (~8-10k tokens vs 5-10k for screenshots)
 - 🔄 **Persistent browser sessions** - pages stay open between commands for iterative workflows
 - ⚡ **Framework-aware** - handles React, Vue, Angular events and state updates automatically
 - 📸 **Visual testing** - compare designs pixel-by-pixel with Figma integration
@@ -322,7 +322,7 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
 1. ✅ **`analyzePage()`** - PRIMARY tool for reading page content
    - Gets forms, inputs, buttons, links with current values
    - Use `refresh: true` after interactions to see updated state
-   - Efficient: 2-5k tokens vs screenshot 15-25k
+   - Efficient: 2-5k tokens vs screenshot 5-10k
 2. ✅ **`findElementsByText()`** - Find specific elements by visible text
 3. ✅ **`getElement()`** - Get HTML of specific element
 4. ⚠️ **`executeScript()`** - LAST RESORT, only if above failed
@@ -397,7 +397,7 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
   - `useLegacyFormat` (optional): Return legacy format instead of APOM (default: false - APOM is the default)
   - `registerElements` (optional): Auto-register elements for ID-based usage (default: true)   - `groupBy` (optional): 'type' or 'flat' - how to group elements (default: 'type') - **Why better than screenshot**:
   - Shows actual data (form values, validation errors) not just visual
-  - Uses 2-5k tokens vs screenshot 15-25k tokens
+  - Uses 2-5k tokens vs screenshot 5-10k tokens
   - Returns structured data with **unique element IDs** for easy interaction
   - **Detects UI frameworks** (MUI, Ant Design, Chakra, Bootstrap, Vuetify, Semantic UI)  - **Extracts dropdown options** from both native `<select>` and custom UI components- **Returns**:
   - **APOM format** (default): Tree-structured Page Object Model with unique IDs     - `tree` - Hierarchical tree of page elements (optimized: ~82% smaller than flat format)
@@ -674,11 +674,11 @@ Capture optimized screenshot of specific element with smart compression and auto
   - `padding` (optional): Padding in pixels (default: 0)
   - `maxWidth` (optional): Max width for auto-scaling (default: 1024, null for original size)
   - `maxHeight` (optional): Max height for auto-scaling (default: 8000, null for original size)
-  - `quality` (optional): JPEG quality 1-100 (default: 80)
-  - `format` (optional): 'png', 'jpeg', or 'auto' (default: 'auto')
+  - `quality` (optional): JPEG quality 1-100 (default: 40)
+  - `format` (optional): 'png', 'jpeg', or 'auto' (default: 'jpeg')
 - **Use case**: Visual documentation, bug reports
-- **Returns**: Optimized image with metadata
-- **Default behavior**: Auto-scales to 1024px width and 8000px height (API limit) and uses smart compression to reduce AI token usage
+- **Returns**: Optimized image with metadata (~5-10k tokens)
+- **Default behavior**: JPEG at quality 40, auto-scales to 1024px width and 8000px height (API limit). For higher quality, explicitly set `quality` and `format` parameters
 - **Automatic compression**: If image exceeds 3 MB, automatically reduces quality or scales down to fit within limit
 - **For original quality**: Set `maxWidth: null`, `maxHeight: null` and `format: 'png'` (still enforces 3 MB limit)
 
@@ -692,7 +692,7 @@ Save optimized screenshot to filesystem without returning in context, with autom
   - `maxHeight` (optional): Max height for auto-scaling (default: 8000, null for original)
   - `quality` (optional): JPEG quality 1-100 (default: 80)
   - `format` (optional): 'png', 'jpeg', or 'auto' (default: 'auto')
-- **Use case**: Baseline screenshots, file storage
+- **Use case**: Baseline screenshots, file storage (higher quality defaults than `screenshot` tool)
 - **Returns**: File path and metadata (not image data)
 - **Default behavior**: Auto-scales and compresses to save disk space
 - **Automatic compression**: If image exceeds 3 MB, automatically reduces quality or scales down to fit within limit

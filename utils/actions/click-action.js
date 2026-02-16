@@ -5,6 +5,7 @@
 
 import { runPostClickDiagnostics, formatDiagnosticsForAI } from '../post-click-diagnostics.js';
 import { generateClickHints } from '../hints-generator.js';
+import { processScreenshot } from '../screenshot-processor.js';
 
 /**
  * Execute click action on element with adaptive strategy
@@ -186,10 +187,16 @@ export async function executeClickAction(page, element, options = {}) {
     { type: "text", text: `Clicked: ${identifier}${hintsText}${diagnosticsText}` }
   ];
 
-  // Only add screenshot if requested
+  // Only add screenshot if requested — lightweight JPEG for action confirmation
   if (screenshot === true) {
-    const screenshotData = await page.screenshot({ encoding: 'base64', fullPage: false });
-    content.push({ type: "image", data: screenshotData, mimeType: "image/png" });
+    const screenshotBuffer = await page.screenshot({ encoding: 'binary', fullPage: false });
+    const processed = await processScreenshot(screenshotBuffer, {
+      maxWidth: 800,
+      maxHeight: 4000,
+      quality: 40,
+      format: 'jpeg',
+    });
+    content.push({ type: "image", data: processed.buffer.toString('base64'), mimeType: processed.mimeType });
   }
 
   return { content };
