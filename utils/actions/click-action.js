@@ -163,17 +163,11 @@ export async function executeClickAction(page, element, options = {}) {
   }
 
   // Element detached during click (Angular *ngFor + Zone.js)
+  // This is NORMAL for Angular apps: click fires → handler runs → Zone.js triggers
+  // change detection → *ngFor recreates elements → original handle is detached.
+  // The click DID work — detachment is a consequence of successful state change.
   if (elementDetached) {
-    hintsText += '\n⚠️ ELEMENT DETACHED: Element was removed from DOM during click — handler did NOT fire.';
-    hintsText += '\n   Cause: Angular Zone.js triggers change detection mid-click, *ngFor recreates elements.';
-    hintsText += '\n   App fix: add trackBy to *ngFor, or cache array reference instead of returning new one.';
-    hintsText += '\n   Workaround options:';
-    hintsText += '\n   1. Click via executeScript (bypasses Puppeteer element handle):';
-    hintsText += '\n      executeScript({ script: "document.querySelector(\'YOUR_SELECTOR\').click()" })';
-    hintsText += '\n   2. Call Angular component method directly:';
-    hintsText += '\n      executeScript({ script: "ng.getComponent(document.querySelector(\'component-tag\')).methodName()" })';
-    hintsText += '\n   3. Re-analyze page and use new element ID:';
-    hintsText += '\n      analyzePage({ refresh: true }) → click({ id: "NEW_ID" })';
+    hintsText += '\nNote: Element was re-rendered after click (Angular change detection). Click was successful — use analyzePage to see updated state.';
   }
 
   if (hints.suggestedNext.length > 0) {

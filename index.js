@@ -2362,7 +2362,7 @@ Start coding now.`;
       const pageUrl = page.url();
 
       // APOM Tree format (default) - v2 with tree structure and positioning
-      const apomResult = await page.evaluate((apomTreeConverterCode, selectorResolverCode, modelsCode, shouldRegister, includeAll, viewportOnly) => {
+      const apomResult = await page.evaluate(async (apomTreeConverterCode, selectorResolverCode, modelsCode, shouldRegister, includeAll, viewportOnly) => {
         // Inject utilities if not already loaded
         if (typeof buildAPOMTree === 'undefined') {
           eval(apomTreeConverterCode);
@@ -2372,6 +2372,29 @@ Start coding now.`;
         }
         if (typeof ElementModel === 'undefined') {
           eval(modelsCode);
+        }
+
+        // Wait for Angular stability before DOM traversal (like Protractor's whenStable).
+        // Prevents reading intermediate DOM state during Angular change detection.
+        // whenStable() resolves immediately if Angular is already stable (zero overhead).
+        if (typeof window.getAllAngularTestabilities === 'function') {
+          try {
+            const testabilities = window.getAllAngularTestabilities();
+            if (testabilities && testabilities.length > 0) {
+              await Promise.race([
+                new Promise(resolve => testabilities[0].whenStable(resolve)),
+                new Promise(resolve => setTimeout(resolve, 3000))
+              ]);
+            }
+          } catch (e) {
+            // Angular testability API not available or errored — proceed without waiting
+          }
+        }
+
+        // Clear stale element registry before building new tree.
+        // Old IDs from previous analyses may point to elements that no longer exist.
+        if (typeof clearRegistry === 'function') {
+          clearRegistry();
         }
 
         // Build APOM tree

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.4] - 2026-02-16
+
+### Fixed
+- **Angular stale DOM in analyzePage** — Added `whenStable()` wait (Protractor-style) before DOM traversal. Prevents reading intermediate DOM state during Angular change detection after user interactions. Zero overhead when Angular is already stable; 3s timeout safety net
+- **Stale element registry** — `window.__ELEMENT_REGISTRY__` is now cleared before each `analyzePage` call. Old APOM IDs from previous analyses no longer point to non-existent elements
+- **False "ELEMENT DETACHED" warning on click** — Click tool no longer reports "handler did NOT fire" when Angular re-renders DOM after a successful click. The scary warning with executeScript workaround suggestions is replaced with a neutral "Click was successful" note
+
 ## [3.5.3] - 2026-02-16
 
 ### Fixed
