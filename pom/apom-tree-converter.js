@@ -16,7 +16,7 @@ function initializeModelRegistry() {
   }
 
   // Create and populate registry
-  const registry = new ModelRegistry();
+  const registry = new (window.ModelRegistry || ModelRegistry)();
 
   // Register all models (order doesn't matter, priority is handled internally)
   if (typeof window !== 'undefined' && window.ELEMENT_MODELS_CLASSES) {
@@ -73,10 +73,49 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
   let idCounter = 0;
   const elementIds = new WeakMap();
   const interactiveElements = new WeakSet();
+  const modalElements = new WeakSet(); // Elements inside modal portals (skip visibility checks)
+  const modalAncestors = new WeakSet(); // Portal wrapper ancestors (force compact format)
 
   // First pass: mark all interactive elements
   if (interactiveOnly) {
     markInteractiveElements(document.body);
+  }
+
+  // Second pass: detect modal/dialog portals and force-mark for inclusion
+  // Modals are rendered via React Portals outside the main tree and may have
+  // opacity: 0 during animation — force-include them and all their descendants
+  if (interactiveOnly) {
+    // Framework-specific portal container patterns (used only for detection, not model assignment)
+    const portalPatterns = [
+      'ant-modal-root', 'ant-modal-wrap',
+      'MuiDialog-root', 'MuiModal-root',
+      'modal-dialog',
+      'chakra-modal__content-container',
+      'el-dialog__wrapper', 'el-overlay-dialog',
+      'headlessui-dialog',
+      'radix-dialog',
+      'mantine-Modal-root',
+    ];
+    function isPortalElement(el) {
+      if (el.getAttribute('role') === 'dialog') return true;
+      if (el.getAttribute('aria-modal') === 'true') return true;
+      const classes = el.className || '';
+      if (typeof classes !== 'string') return false;
+      return portalPatterns.some(p => classes.includes(p));
+    }
+
+    // Scan body direct children for framework-specific portal roots
+    for (const child of document.body.children) {
+      if (isPortalElement(child)) {
+        forceMarkModalTree(child);
+      }
+    }
+    // Also find deeper dialog elements (some frameworks nest portals)
+    document.querySelectorAll('[role="dialog"], [aria-modal="true"]').forEach(el => {
+      if (!modalElements.has(el)) {
+        forceMarkModalTree(el);
+      }
+    });
   }
 
   // Build tree from body
@@ -409,6 +448,31 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
   }
 
   /**
+   * Force-mark modal portal element and all its descendants for inclusion in APOM tree.
+   * Modal portals (React Portals) are rendered outside the main tree and may have
+   * opacity: 0 during CSS animations — this ensures they're always included.
+   */
+  function forceMarkModalTree(element) {
+    modalElements.add(element);
+    interactiveElements.add(element);
+    // Mark all descendants — inputs, buttons, etc. inside the modal
+    element.querySelectorAll('*').forEach(el => {
+      modalElements.add(el);
+      interactiveElements.add(el);
+    });
+    // Mark ancestors up to body (so the path from body to modal is traversed)
+    // Must add to modalElements for isVisible() bypass (0x0 dimensions, opacity:0)
+    // Also mark as modalAncestors to force compact format (portal wrappers are pass-through)
+    let current = element.parentElement;
+    while (current && current !== document.body) {
+      modalElements.add(current);
+      modalAncestors.add(current);
+      interactiveElements.add(current);
+      current = current.parentElement;
+    }
+  }
+
+  /**
    * Check if element is in viewport
    */
   function isInViewport(el) {
@@ -431,7 +495,11 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
    */
   function isVisible(el) {
     // Check dimensions first (works for fixed position elements)
-    if (el.offsetWidth === 0 || el.offsetHeight === 0) return false;
+    // Exception: modal portal wrapper divs may have 0x0 dimensions
+    // while their visible content (dialog, inputs, buttons) does not
+    if (el.offsetWidth === 0 || el.offsetHeight === 0) {
+      if (!modalElements.has(el)) return false;
+    }
 
     // Check computed styles
     const style = window.getComputedStyle(el);
@@ -439,11 +507,12 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
       return false;
     }
 
-    // Check opacity, but allow exceptions for inputs that are commonly styled with opacity:0
-    // (checkboxes, radios, file inputs often use opacity:0 with custom visual overlay)
+    // Check opacity, but allow exceptions for:
+    // - inputs styled with opacity:0 (checkboxes, radios, file inputs with custom overlay)
+    // - elements inside modal portals (opacity: 0 during CSS appear animation)
     const tag = el.tagName.toLowerCase();
     const isStylableInput = tag === 'input' && ['checkbox', 'radio', 'file'].includes(el.type);
-    if (style.opacity === '0' && !isStylableInput) {
+    if (style.opacity === '0' && !isStylableInput && !modalElements.has(el)) {
       return false;
     }
 
@@ -457,7 +526,8 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
 
     // Additional check: element should be in viewport or have offsetParent
     // This handles elements inside position:fixed containers (Angular Material)
-    return el.offsetParent !== null || style.position === 'fixed' || style.position === 'sticky';
+    // Exception: modal portal elements may lack offsetParent
+    return el.offsetParent !== null || style.position === 'fixed' || style.position === 'sticky' || modalElements.has(el);
   }
 
   /**
@@ -505,8 +575,31 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
       }
     }
 
+    // Modal containers: promote to interactive node with metadata
+    if (modelName === 'Modal') {
+      elementType.isInteractive = true;
+      elementType.type = 'dialog';
+      // Extract modal title
+      const titleEl = element.querySelector(
+        '.ant-modal-title, .MuiDialogTitle-root, [class*="modal-title"], [class*="dialog-title"], .modal-header h5, .modal-header h4'
+      );
+      const titleText = titleEl ? titleEl.textContent.trim().substring(0, 100) : null;
+      // Extract action buttons
+      const buttons = element.querySelectorAll('button');
+      const actions = Array.from(buttons)
+        .map(b => b.textContent.trim())
+        .filter(t => t && t.length > 0 && t.length < 30);
+      elementType.metadata = {
+        ...(elementType.metadata || {}),
+        ...(titleText ? { title: titleText } : {}),
+        ...(actions.length ? { actions: actions.slice(0, 5) } : {})
+      };
+    }
+
     // Build node - minimize non-interactive parents
-    const isInteractive = elementType.isInteractive;
+    // Modal ancestors (portal wrappers) are forced to compact format —
+    // they have onclick handlers (close on outside click) but are just pass-through containers
+    const isInteractive = elementType.isInteractive && !modalAncestors.has(element);
 
     // Build node structure based on mode
     let node;
@@ -562,16 +655,14 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
 
     // Update metadata counters
     result.metadata.totalElements++;
-    if (elementType.isInteractive) {
+    if (isInteractive) {
       result.metadata.interactiveCount++;
     }
     if (elementType.type === 'form') {
       result.metadata.formCount++;
     }
-    if (position && (position.type === 'fixed' || position.type === 'absolute')) {
-      if (position.zIndex && position.zIndex >= 100) {
-        result.metadata.modalCount++;
-      }
+    if (modelName === 'Modal') {
+      result.metadata.modalCount++;
     }
     if (depth > result.metadata.maxDepth) {
       result.metadata.maxDepth = depth;

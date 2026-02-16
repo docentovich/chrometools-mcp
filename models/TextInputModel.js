@@ -42,13 +42,22 @@ export class TextInputModel extends BaseInputModel {
     try {
       // Method 1: Try Puppeteer typing (works for most cases)
       try {
-        // Focus and clear using JS (most reliable)
+        // Focus and clear using native setter (works with React/Vue/Angular controlled inputs)
         await withTimeout(
           () => this.element.evaluate((el, shouldClear) => {
             el.focus();
             el.click();
             if (shouldClear) {
-              el.value = '';
+              // Use native HTMLInputElement setter to bypass React's value tracker
+              // React overrides the value setter and ignores programmatic changes via el.value = ''
+              const nativeSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value'
+              )?.set;
+              if (nativeSetter) {
+                nativeSetter.call(el, '');
+              } else {
+                el.value = '';
+              }
               el.dispatchEvent(new Event('input', { bubbles: true }));
               el.dispatchEvent(new Event('change', { bubbles: true }));
             }
@@ -78,11 +87,20 @@ export class TextInputModel extends BaseInputModel {
         // Fall through to JS method
       }
 
-      // Method 2: Fallback to direct JS value setting
+      // Method 2: Fallback to direct JS value setting (with React-compatible native setter)
       await withTimeout(
         () => this.element.evaluate((el, newValue, shouldClear) => {
           el.focus();
-          el.value = shouldClear ? newValue : el.value + newValue;
+          const finalValue = shouldClear ? newValue : el.value + newValue;
+          // Use native setter to bypass React's value tracker
+          const nativeSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          )?.set;
+          if (nativeSetter) {
+            nativeSetter.call(el, finalValue);
+          } else {
+            el.value = finalValue;
+          }
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
         }, value, clearFirst),

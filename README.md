@@ -335,6 +335,14 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
    - Example: `executeModelAction({id: "input_34", action: "check"})`
    - Example: `executeModelAction({selector: ".datepicker", action: "SetDate", params: {date: "2024-03-15"}})`
    - See `models/` directory for available models and actions
+   - Available models: TxtInp, Sel, Btn, Chk, Radio, TxtArea, Link, Range, DatePicker, DateInp, FileInp, ColorInp, **Modal**, default
+
+#### Modal/Dialog Support
+- **Automatic detection**: APOM detects modals rendered via React Portals (antd, MUI, Bootstrap, Chakra, Mantine, Element UI, Headless UI, Radix)
+- **Detection methods**: `role="dialog"`, `aria-modal="true"`, framework-specific CSS classes
+- **Animation-proof**: Modal elements are included even during CSS appear animations (opacity: 0)
+- **Rich metadata**: Modal nodes include `title` and `actions` (button labels) in metadata
+- **In APOM tree**: Modals appear as `type: "dialog"` with `model: "Modal"`, containing all interactive children
 
 **Why specialized tools matter:**
 - ✅ Trigger proper browser events (click, input, change)

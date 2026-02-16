@@ -19,7 +19,7 @@ class TextInputModel extends ElementModel {
   }
 
   getActions() {
-    return ['type', 'click', 'hover', 'screenshot'];
+    return ['type', 'clear', 'click', 'hover', 'screenshot'];
   }
 
   matches(element, elementType) {
@@ -32,6 +32,7 @@ class TextInputModel extends ElementModel {
   getActionHandler(actionName) {
     const handlers = {
       'type': 'executeTypeAction',
+      'clear': 'executeTypeAction',
       'click': 'executeClickAction',
       'hover': 'executeHoverAction',
       'screenshot': 'executeScreenshotAction'
@@ -382,6 +383,42 @@ class ColorInputModel extends ElementModel {
 }
 
 /**
+ * Modal/Dialog Model
+ * Handles: Modal dialogs, popups, overlays (React Portals, framework modals)
+ * Detects elements rendered via portals outside the main React tree
+ */
+class ModalModel extends ElementModel {
+  getName() {
+    return 'Modal';
+  }
+
+  getActions() {
+    return ['screenshot', 'close', 'scrollTo'];
+  }
+
+  getPriority() {
+    return 200; // High priority — check before containers
+  }
+
+  matches(element, elementType) {
+    // Only match actual dialog elements, not framework wrappers
+    // Framework wrappers are detected separately for portal inclusion
+    if (element.getAttribute('role') === 'dialog') return true;
+    if (element.getAttribute('aria-modal') === 'true') return true;
+    return false;
+  }
+
+  getActionHandler(actionName) {
+    const handlers = {
+      'screenshot': 'executeScreenshotAction',
+      'close': 'executeClickAction',
+      'scrollTo': 'executeScrollToAction'
+    };
+    return handlers[actionName] || null;
+  }
+}
+
+/**
  * Default Model (fallback for non-interactive elements)
  */
 class DefaultModel extends ElementModel {
@@ -424,6 +461,7 @@ const MODELS = [
   DateInputModel,
   FileInputModel,
   ColorInputModel,
+  ModalModel,
   DefaultModel
 ];
 

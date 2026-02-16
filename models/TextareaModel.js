@@ -54,7 +54,15 @@ export class TextareaModel extends BaseInputModel {
           await withTimeout(
             () => this.element.evaluate(el => {
               el.focus();
-              el.value = '';
+              // Use native setter to bypass React's value tracker
+              const nativeSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLTextAreaElement.prototype, 'value'
+              )?.set;
+              if (nativeSetter) {
+                nativeSetter.call(el, '');
+              } else {
+                el.value = '';
+              }
               el.dispatchEvent(new Event('input', { bubbles: true }));
               el.dispatchEvent(new Event('change', { bubbles: true }));
             }),
@@ -82,11 +90,19 @@ export class TextareaModel extends BaseInputModel {
         // Fall through to JS method
       }
 
-      // Method 2: Fallback to direct JS value setting
+      // Method 2: Fallback to direct JS value setting (with React-compatible native setter)
       await withTimeout(
         () => this.element.evaluate((el, newValue, shouldClear) => {
           el.focus();
-          el.value = shouldClear ? newValue : el.value + newValue;
+          const finalValue = shouldClear ? newValue : el.value + newValue;
+          const nativeSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLTextAreaElement.prototype, 'value'
+          )?.set;
+          if (nativeSetter) {
+            nativeSetter.call(el, finalValue);
+          } else {
+            el.value = finalValue;
+          }
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
         }, value, clearFirst),

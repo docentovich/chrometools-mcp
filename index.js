@@ -584,7 +584,7 @@ async function executeToolInternal(name, args) {
 
             // Initialize registry if needed
             const registry = window.__MODEL_REGISTRY__ || (() => {
-              const reg = new ModelRegistry();
+              const reg = new window.ModelRegistry();
               if (window.ELEMENT_MODELS_CLASSES) {
                 reg.registerAll(window.ELEMENT_MODELS_CLASSES);
               }

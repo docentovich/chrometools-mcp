@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.2] - 2026-02-16
+
+### Added
+- **Modal/Dialog detection (React Portals)** — `analyzePage` now detects modals rendered via React Portals (antd, MUI, Bootstrap, Chakra, Element UI, Headless UI, Radix, Mantine). ModalModel class in Element Model system with `role="dialog"` / `aria-modal="true"` matching. Portal wrapper ancestors are force-included in APOM tree with compact format. Modal metadata includes title and action buttons
+- **TxtInp `clear` action** — TextInput model now supports `executeModelAction(action: "clear")` for clearing pre-filled form fields
+
+### Fixed
+- **React controlled input clearing** — `type(clearFirst: true)` now works correctly with React/Vue/Angular controlled inputs (antd `<Input>`, MUI `<TextField>`, etc.). Uses native `HTMLInputElement.prototype.value` setter to bypass framework value trackers that ignored programmatic `el.value = ''` changes. Applied to both TextInputModel and TextareaModel
+- **"ModelRegistry is not defined" error** — Fixed sporadic ReferenceError when calling `executeModelAction` or `click` after page navigation. Bare `ModelRegistry` identifier was inaccessible after `eval()` in strict mode contexts; changed to `window.ModelRegistry` reference
+- **Modal output bloat** — ModalModel now only matches actual dialog elements (`role="dialog"`), not framework wrapper divs (`ant-modal-root`, `ant-modal-wrap`). Reduces `modalCount` from 3 to 1 per modal and forces wrapper ancestors to compact container format
+
 ## [3.5.1] - 2026-02-16
 
 ### Fixed
