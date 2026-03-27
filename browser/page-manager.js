@@ -101,8 +101,14 @@ function cleanOldNetworkRequests() {
 // Page analysis cache
 export const pageAnalysisCache = new Map();
 
+/** Get the CDP client used for network monitoring on a page (for Network.getResponseBody) */
+export function getNetworkCDPClient(page) {
+  return networkCDPClients.get(page) || null;
+}
+
 // Track pages with network monitoring to prevent duplicate setup
 const pagesWithNetworkMonitoring = new WeakSet();
+const networkCDPClients = new WeakMap();
 
 /**
  * Setup network monitoring with auto-reinitialization on navigation
@@ -117,6 +123,7 @@ export async function setupNetworkMonitoring(page) {
 
   const client = await page.target().createCDPSession();
   await client.send('Network.enable');
+  networkCDPClients.set(page, client);
 
   client.on('Network.requestWillBeSent', (event) => {
     const timestamp = new Date().toISOString();

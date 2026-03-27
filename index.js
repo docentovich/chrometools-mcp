@@ -36,7 +36,8 @@ import {
     getAndClearNewTabEvents,
     getAllPages,
     switchToPage,
-    connectToTabByUrl
+    connectToTabByUrl,
+    getNetworkCDPClient
 } from './browser/page-manager.js';
 
 // Import image processing utilities
@@ -941,10 +942,16 @@ async function executeToolInternal(name, args) {
 
       // Wrap operation in timeout
       const executeOperation = async () => {
-        const result = await page.evaluate((code) => {
+        // Use page.evaluate with async support — if eval returns a Promise,
+        // await it so async IIFEs work correctly instead of returning {}
+        const result = await page.evaluate(async (code) => {
           try {
             // eslint-disable-next-line no-eval
-            const evalResult = eval(code);
+            let evalResult = eval(code);
+            // Await promises (async IIFE, fetch, etc.)
+            if (evalResult && typeof evalResult === 'object' && typeof evalResult.then === 'function') {
+              evalResult = await evalResult;
+            }
             return { success: true, result: evalResult };
           } catch (error) {
             return { success: false, error: error.message };
@@ -1083,6 +1090,31 @@ async function executeToolInternal(name, args) {
         }
       };
 
+      // Retrieve response body via CDP using the same session that captured the request
+      let responseBody = undefined;
+      if (req.finishedTimestamp && !req.errorText) {
+        try {
+          const page = await getLastOpenPage();
+          const client = getNetworkCDPClient(page);
+          if (client) {
+            const { body, base64Encoded } = await client.send('Network.getResponseBody', { requestId: req.requestId });
+            if (base64Encoded) {
+              responseBody = `[base64 encoded, ${body.length} chars]`;
+            } else {
+              // Minify JSON responses, truncate large bodies
+              const maxBodySize = 50000;
+              responseBody = body.length > maxBodySize
+                ? minifyJson(body.substring(0, maxBodySize)) + `... [truncated, total ${body.length} chars]`
+                : minifyJson(body);
+            }
+          } else {
+            responseBody = '[unavailable: no network CDP session]';
+          }
+        } catch (e) {
+          responseBody = `[unavailable: ${e.message}]`;
+        }
+      }
+
       const result = {
         requestId: req.requestId,
         url: req.url,
@@ -1098,6 +1130,7 @@ async function executeToolInternal(name, args) {
         headers: req.headers,
         postData: req.postData ? minifyJson(req.postData) : undefined,
         responseHeaders: req.responseHeaders,
+        responseBody,
         mimeType: req.mimeType,
         errorText: req.errorText,
         canceled: req.canceled,
@@ -2360,6 +2393,32 @@ Start coding now.`;
       const validatedArgs = schemas.AnalyzePageSchema.parse(args);
       const page = await getLastOpenPage();
       const pageUrl = page.url();
+
+      // Check for non-HTML pages (JSON, plain text, XML) — return raw content instead of empty tree
+      const contentType = await page.evaluate(() => document.contentType || '');
+      if (contentType && !contentType.includes('html')) {
+        const rawContent = await page.evaluate(() => {
+          // For JSON/text pages, browser wraps content in <pre> inside <body>
+          const pre = document.querySelector('pre');
+          const text = pre ? pre.textContent : document.body?.innerText || '';
+          // Truncate large content
+          const maxSize = 50000;
+          return text.length > maxSize ? text.substring(0, maxSize) + `\n... [truncated, total ${text.length} chars]` : text;
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              pageId: `page_${Buffer.from(pageUrl).toString('base64').substring(0, 20)}_${Date.now()}`,
+              url: pageUrl,
+              contentType,
+              rawContent,
+              metadata: { totalElements: 0, interactiveCount: 0, nonHtmlPage: true }
+            })
+          }]
+        };
+      }
 
       // APOM Tree format (default) - v2 with tree structure and positioning
       const apomResult = await page.evaluate(async (apomTreeConverterCode, selectorResolverCode, modelsCode, shouldRegister, includeAll, viewportOnly) => {

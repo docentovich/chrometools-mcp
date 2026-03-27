@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.5] - 2026-03-27
+
+### Added
+- **getNetworkRequest responseBody** — Response body now included via CDP `Network.getResponseBody` using the same session that captured the request. JSON auto-minified, large bodies truncated at 50KB
+- **analyzePage non-HTML support** — JSON, XML, and plain text pages now return `rawContent` field instead of an empty APOM tree. Detects `document.contentType` and extracts text content
+- **async executeScript** — Async IIFEs and Promises are now automatically awaited. Previously returned `{}`, now returns actual resolved values
+- **Click diagnostics** — Click tool output now shows which method was used (`[cdp-coordinates]`, `[dom-sequence-intercepted]`, `[dom-sequence-fallback]`) for non-default click paths
+
+### Changed
+- **Click fallback event sequence** — Path A (intercepted) and Tier 3 (last resort) now dispatch full `pointerdown → mousedown → focus → pointerup → mouseup → click` sequence instead of bare `el.click()`. Improves compatibility with UI Kit components using Pointer Events API
+- **executeScript description** — Added `scrollTo`, `listNetworkRequests`, `getNetworkRequest` to the "don't use for" guidance
+
 ## [3.5.4] - 2026-02-16
 
 ### Fixed

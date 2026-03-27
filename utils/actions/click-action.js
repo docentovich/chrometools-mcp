@@ -40,14 +40,16 @@ export async function executeClickAction(page, element, options = {}) {
   // This decides the click path — Puppeteer's click() doesn't always throw on interception.
   //
   // Path A (element covered by another, e.g. small button under <a routerLink>):
-  //   → JS element.click() — DOM dispatch bypasses coordinate hit-testing
+  //   → Full DOM event sequence — bypasses coordinate hit-testing, fires pointer+mouse+click
   //
   // Path B (element is topmost — normal case):
   //   Tier 1: Puppeteer native click (trusted CDP events)
   //   Tier 2: page.mouse.click at coordinates (trusted CDP, no interception check)
-  //   Tier 3: JS element.click() (untrusted, last resort)
+  //   Tier 3: Full DOM event sequence (untrusted, last resort)
   //   Trusted CDP events (Tier 1 & 2) are critical for Angular/Zone.js apps where
   //   untrusted .click() triggers change detection mid-dispatch, destroying *ngFor elements.
+  let clickMethod = 'unknown';
+
   const clickWithTimeout = async (timeoutMs = 5000) => {
     const withTimeout = (promise) => Promise.race([
       promise,
@@ -67,8 +69,22 @@ export async function executeClickAction(page, element, options = {}) {
 
     if (intercepted) {
       // Path A: Element is covered (e.g., small button under <a routerLink>)
-      // Coordinate clicks would hit the covering element — use DOM dispatch
-      await element.evaluate(el => el.click());
+      // Coordinate clicks would hit the covering element — dispatch full event sequence
+      // directly on the element to bypass hit-testing while still triggering framework handlers
+      clickMethod = 'dom-sequence-intercepted';
+      await element.evaluate(el => {
+        const rect = el.getBoundingClientRect();
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        const common = { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window };
+        const pOpts = { ...common, pointerId: 1, pointerType: 'mouse', isPrimary: true, width: 1, height: 1 };
+        el.dispatchEvent(new PointerEvent('pointerdown', pOpts));
+        el.dispatchEvent(new MouseEvent('mousedown', common));
+        if (el.focus) el.focus();
+        el.dispatchEvent(new PointerEvent('pointerup', pOpts));
+        el.dispatchEvent(new MouseEvent('mouseup', common));
+        el.dispatchEvent(new MouseEvent('click', common));
+      });
       return;
     }
 
@@ -76,6 +92,7 @@ export async function executeClickAction(page, element, options = {}) {
     // Tier 1: Puppeteer native click
     try {
       await withTimeout(element.click());
+      clickMethod = 'puppeteer-native';
       return;
     } catch (e) { /* fall through to Tier 2 */ }
 
@@ -84,12 +101,28 @@ export async function executeClickAction(page, element, options = {}) {
       const box = await element.boundingBox();
       if (box) {
         await withTimeout(page.mouse.click(box.x + box.width / 2, box.y + box.height / 2));
+        clickMethod = 'cdp-coordinates';
         return;
       }
     } catch (e) { /* fall through to Tier 3 */ }
 
-    // Tier 3: JS click — untrusted, last resort
-    await element.evaluate(el => el.click());
+    // Tier 3: Full DOM event sequence — untrusted, last resort
+    // Dispatches pointer+mouse+click events for compatibility with UI frameworks
+    // that rely on the full browser event sequence (e.g., components with pressed states)
+    clickMethod = 'dom-sequence-fallback';
+    await element.evaluate(el => {
+      const rect = el.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const common = { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window };
+      const pOpts = { ...common, pointerId: 1, pointerType: 'mouse', isPrimary: true, width: 1, height: 1 };
+      el.dispatchEvent(new PointerEvent('pointerdown', pOpts));
+      el.dispatchEvent(new MouseEvent('mousedown', common));
+      if (el.focus) el.focus();
+      el.dispatchEvent(new PointerEvent('pointerup', pOpts));
+      el.dispatchEvent(new MouseEvent('mouseup', common));
+      el.dispatchEvent(new MouseEvent('click', common));
+    });
   };
 
   await clickWithTimeout();
@@ -177,8 +210,11 @@ export async function executeClickAction(page, element, options = {}) {
   // 4. Add diagnostics to output
   const diagnosticsText = formatDiagnosticsForAI(diagnostics);
 
+  // Include click method in output for diagnostics (only non-default methods)
+  const methodNote = clickMethod !== 'puppeteer-native' ? ` [${clickMethod}]` : '';
+
   const content = [
-    { type: "text", text: `Clicked: ${identifier}${hintsText}${diagnosticsText}` }
+    { type: "text", text: `Clicked: ${identifier}${methodNote}${hintsText}${diagnosticsText}` }
   ];
 
   // Only add screenshot if requested — lightweight JPEG for action confirmation

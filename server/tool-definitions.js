@@ -150,7 +150,7 @@ export const toolDefinitions = [
       },
       {
         name: "executeScript",
-        description: "⚠️ LAST RESORT tool - use ONLY when ALL specialized tools failed. NEVER use for: clicking (use click), typing (use type), reading page (use analyzePage), finding elements (use findElementsByText). May break React/Vue/Angular synthetic events. ALWAYS try specialized tools first.",
+        description: "⚠️ LAST RESORT tool - use ONLY when ALL specialized tools failed. NEVER use for: clicking (use click), typing (use type), scrolling (use scrollTo), reading page elements (use analyzePage), finding elements (use findElementsByText), fetching API data (use listNetworkRequests + getNetworkRequest). May break React/Vue/Angular synthetic events. ALWAYS try specialized tools first.",
         inputSchema: {
           type: "object",
           properties: {
