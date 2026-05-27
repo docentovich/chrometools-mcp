@@ -403,7 +403,10 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
   - `refresh` (optional): Force refresh cache to get CURRENT state after changes (default: false)
   - `includeAll` (optional): Include ALL page elements, not just interactive ones (default: false). Useful for layout work - find any element, get its selector, then use `getComputedCss` or `setStyles` on it.
   - `useLegacyFormat` (optional): Return legacy format instead of APOM (default: false - APOM is the default)
-  - `registerElements` (optional): Auto-register elements for ID-based usage (default: true)   - `groupBy` (optional): 'type' or 'flat' - how to group elements (default: 'type') - **Why better than screenshot**:
+  - `registerElements` (optional): Auto-register elements for ID-based usage (default: true)   - `groupBy` (optional): 'type' or 'flat' - how to group elements (default: 'type')
+  - `includePortals` (optional): Include contents of React Portal containers — menus, tooltips, popovers rendered outside the main React root (default: `true`). Without this, items inside dropdown popups (e.g. action menus in MTS-like apps) are invisible to `analyzePage`.
+  - `portalSelectors` (optional): Array of CSS selectors for portal root containers. Default: `['#modal-root', '#menu-popup-root', '#tooltip-root', '#popover-root', '[data-portal]']`. Override when the app uses different portal element ids.
+  - **In-tree popup heuristic**: when `includePortals` is enabled (default), `analyzePage` also detects "in-tree portal" patterns — popups rendered inside a 0-height inline wrapper and absolute-positioned out of it (Popper, Tippy, FloatingUI, custom contextMenu implementations). Without this, popup items live inside an `offsetHeight: 0` wrapper that `isVisible` drops, making the whole popup subtree invisible to `analyzePage`. - **Why better than screenshot**:
   - Shows actual data (form values, validation errors) not just visual
   - Uses 2-5k tokens vs screenshot 5-10k tokens
   - Returns structured data with **unique element IDs** for easy interaction
@@ -514,6 +517,9 @@ Click an element with optional result screenshot. **PREFERRED**: Use APOM ID fro
   - `timeout` (optional): Max operation time in ms (default: 30000)
   - `skipNetworkWait` (optional): Skip waiting for network requests (default: false). **Use for pages with continuous long-polling to get instant response.**
   - `networkWaitTimeout` (optional): Custom network wait timeout in ms (default: 10000). Only used if skipNetworkWait is false.
+  - `waitForSelector` (optional): CSS selector to wait for **after** the click — atomic click+wait. Use for dropdowns/popups that render into a React Portal and otherwise race with the next MCP call. Example: `click({ id: 'button_47', waitForSelector: '#menu-popup-root > div' })`.
+  - `waitTimeoutMs` (optional): Timeout for `waitForSelector` in ms (default: 2000). On timeout the click still succeeds but the result text reports `⚠️ WAIT_TIMEOUT`.
+  - `autoAnalyzeAfter` (optional): After click, automatically diff APOM and append the delta to the result text (e.g. `+3 appeared: button_42:"Статистика", button_43:"Настройки", link_44:"Удалить"`). New element ids are pre-registered so the next `click({ id })`/`type({ id })` call works **without an extra `analyzePage`**. Designed for the dropdown/menu pattern: one MCP call instead of three.
 - **Use case**: Buttons, links, form submissions, Django admin forms
 - **Returns**: Confirmation text + optional screenshot + network diagnostics
 - **Performance**: 2-10x faster without screenshot, instant with skipNetworkWait
@@ -676,10 +682,12 @@ Get precise dimensions, positioning, margins, padding, and borders.
 - **Returns**: Box model data + metrics
 
 #### screenshot
-Capture optimized screenshot of specific element with smart compression and automatic 3 MB limit.
+Capture optimized screenshot of a specific element, or the full viewport when no `id`/`selector` is given. Smart compression with a 3 MB hard limit.
 - **Parameters**:
-  - `selector` (required)
-  - `padding` (optional): Padding in pixels (default: 0)
+  - `id` (optional): APOM element ID from `analyzePage`. Mutually exclusive with `selector`.
+  - `selector` (optional): CSS selector. Mutually exclusive with `id`.
+  - Omit both `id` and `selector` to capture the **full viewport** (no element resolution needed).
+  - `padding` (optional): Padding in pixels (default: 0). Ignored for viewport screenshots.
   - `maxWidth` (optional): Max width for auto-scaling (default: 1024, null for original size)
   - `maxHeight` (optional): Max height for auto-scaling (default: 8000, null for original size)
   - `quality` (optional): JPEG quality 1-100 (default: 40)
@@ -717,6 +725,7 @@ Execute arbitrary JavaScript in page context with optional screenshot.
 - **Use case**: Complex interactions, custom manipulations
 - **Returns**: Execution result + optional screenshot
 - **Performance**: 2-10x faster without screenshot
+- **Top-level `return`**: snippets that start with `return ...` (e.g. `return document.title`) are auto-wrapped in an async IIFE — no need to manually wrap in `(() => { ... })()`. Scripts that declare a `function` are left unmodified so implicit-return patterns keep working.
 
 #### getConsoleLogs
 Retrieve browser console logs (log, warn, error, etc.).

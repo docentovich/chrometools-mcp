@@ -17,6 +17,8 @@ import { processScreenshot } from '../screenshot-processor.js';
  * @param {boolean} options.screenshot - Whether to capture screenshot after click
  * @param {boolean} options.skipNetworkWait - Skip waiting for network requests
  * @param {number} options.networkWaitTimeout - Network wait timeout in ms
+ * @param {string} options.waitForSelector - CSS selector to wait for after click (e.g., dropdown menu opening)
+ * @param {number} options.waitTimeoutMs - Timeout for waitForSelector in ms (default: 2000)
  * @returns {Promise<Object>} Result with content array
  */
 export async function executeClickAction(page, element, options = {}) {
@@ -24,7 +26,9 @@ export async function executeClickAction(page, element, options = {}) {
     identifier = 'element',
     screenshot = false,
     skipNetworkWait = false,
-    networkWaitTimeout = 3000
+    networkWaitTimeout = 3000,
+    waitForSelector = null,
+    waitTimeoutMs = 2000
   } = options;
 
   // Capture timestamp and URL BEFORE click for diagnostics
@@ -127,6 +131,25 @@ export async function executeClickAction(page, element, options = {}) {
 
   await clickWithTimeout();
 
+  // Atomic click + wait: if caller asked to wait for a selector to appear after click,
+  // do it BEFORE diagnostics. Useful for dropdowns/popups that render into a portal —
+  // without atomic wait, the next MCP call may race against the popup closing.
+  let waitResult = null;
+  if (waitForSelector) {
+    const waitStart = Date.now();
+    try {
+      await page.waitForSelector(waitForSelector, { timeout: waitTimeoutMs, visible: true });
+      waitResult = { appeared: true, selector: waitForSelector, appearedInMs: Date.now() - waitStart };
+    } catch (e) {
+      waitResult = {
+        appeared: false,
+        selector: waitForSelector,
+        timedOutAfterMs: Date.now() - waitStart,
+        timeoutMs: waitTimeoutMs
+      };
+    }
+  }
+
   // Check if element was detached from DOM during click (Angular *ngFor + Zone.js pattern)
   let elementDetached = false;
   try {
@@ -205,6 +228,15 @@ export async function executeClickAction(page, element, options = {}) {
 
   if (hints.suggestedNext.length > 0) {
     hintsText += `\nSuggested next: ${hints.suggestedNext.join('; ')}`;
+  }
+
+  // Surface waitForSelector outcome to the caller (success or timeout)
+  if (waitResult) {
+    if (waitResult.appeared) {
+      hintsText += `\nWait: "${waitResult.selector}" appeared in ${waitResult.appearedInMs}ms`;
+    } else {
+      hintsText += `\n⚠️ WAIT_TIMEOUT: "${waitResult.selector}" did not appear within ${waitResult.timeoutMs}ms after click`;
+    }
   }
 
   // 4. Add diagnostics to output

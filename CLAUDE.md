@@ -8,6 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Cross-platform MCP server (Windows/WSL, Linux, macOS) that provides Chrome browser automation capabilities.
 
+## Active Specs
+
+| Spec | Status | Progress |
+|---|---|---|
+| [SEGM-537 QA Unblockers](specs/SEGM-537-UNBLOCKERS_SPEC.md) | NEEDS APPROVAL | [progress](specs/SEGM-537-UNBLOCKERS_PROGRESS.md) |
+
 ## Key Architecture Concept
 
 **Persistent Browser Sessions**: Browser tabs remain open after command execution, allowing users to:

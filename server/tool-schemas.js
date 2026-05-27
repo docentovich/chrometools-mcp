@@ -23,6 +23,9 @@ export const ClickSchema = z.object({
   timeout: z.number().optional().describe("Maximum time to wait for operation in ms (default: 30000)"),
   skipNetworkWait: z.boolean().optional().describe("Skip waiting for network requests (default: false). Use for forms with long-polling/WebSockets to avoid timeouts."),
   networkWaitTimeout: z.number().optional().describe("Maximum time to wait for network requests in ms (default: 3000). Only used if skipNetworkWait is false."),
+  waitForSelector: z.string().optional().describe("CSS selector to wait for after click — atomic click+wait. Useful for dropdowns/popups in portals (e.g. '#menu-popup-root > div') that otherwise race against the next MCP call."),
+  waitTimeoutMs: z.number().optional().describe("Timeout for waitForSelector in ms (default: 2000)."),
+  autoAnalyzeAfter: z.boolean().optional().describe("After click, automatically diff APOM state and append a delta to the result: '+N appeared: id1:\"text\", id2:\"text\"'. New ids are re-registered so callers can use them directly in the next click/type call without an extra analyzePage. Use for dropdowns and menus that reveal new options on click."),
 }).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
   message: "Either 'id' or 'selector' must be provided, but not both"
 });
@@ -110,15 +113,15 @@ export const SetStylesSchema = z.object({
 
 // Screenshot tools
 export const ScreenshotSchema = z.object({
-  id: z.string().optional().describe("APOM element ID from analyzePage (e.g., 'div_20'). Mutually exclusive with selector."),
-  selector: z.string().optional().describe("CSS selector for element to screenshot. Mutually exclusive with id."),
-  padding: z.number().optional().describe("Padding around element in pixels (default: 0)"),
+  id: z.string().optional().describe("APOM element ID from analyzePage (e.g., 'div_20'). Mutually exclusive with selector. If neither id nor selector is provided, captures full viewport."),
+  selector: z.string().optional().describe("CSS selector for element to screenshot. Mutually exclusive with id. If neither id nor selector is provided, captures full viewport."),
+  padding: z.number().optional().describe("Padding around element in pixels (default: 0). Ignored for viewport screenshot."),
   maxWidth: z.number().nullable().optional().describe("Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)"),
   maxHeight: z.number().nullable().optional().describe("Maximum height in pixels, auto-scales if larger (default: 8000 for API limit, set to null for original size)"),
   quality: z.number().min(1).max(100).optional().describe("JPEG quality 1-100 (default: 40)"),
   format: z.enum(['png', 'jpeg', 'auto']).optional().describe("Image format (default: 'jpeg')"),
-}).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
-  message: "Either 'id' or 'selector' must be provided, but not both"
+}).refine(data => !(data.id && data.selector), {
+  message: "Provide only one of 'id' or 'selector' (or neither for a viewport screenshot)"
 });
 
 export const SaveScreenshotSchema = z.object({
@@ -289,6 +292,8 @@ export const AnalyzePageSchema = z.object({
   groupBy: z.enum(['type', 'flat']).optional().describe("Group elements by type or return flat structure (default: 'type')"),
   viewportOnly: z.boolean().optional().describe("Only analyze elements visible in current viewport (default: false). Reduces output for long pages."),
   diff: z.boolean().optional().describe("Return only changes since last analysis: {added, removed, changed} (default: false). Useful after clicks to see what changed."),
+  includePortals: z.boolean().optional().describe("Include contents of React Portal containers that live outside main React root (default: true). Covers menus, tooltips, popovers rendered via portals — without this, dropdown contents are invisible to analyzePage."),
+  portalSelectors: z.array(z.string()).optional().describe("CSS selectors of portal root containers to scan (default: ['#modal-root', '#menu-popup-root', '#tooltip-root', '#popover-root', '[data-portal]']). Provide custom list when the app uses different portal element ids."),
 });
 
 export const GetElementDetailsSchema = z.object({

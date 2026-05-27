@@ -403,8 +403,13 @@ async function executeToolInternal(name, args) {
      * Quick element registration - runs APOM analysis and registers elements
      */
     async function quickRegisterElements(page) {
-      await page.evaluate((apomTreeConverterCode, selectorResolverCode) => {
-        // Inject utilities
+      await page.evaluate((apomTreeConverterCode, selectorResolverCode, modelsCode) => {
+        // Inject utilities. Models must be loaded BEFORE buildAPOMTree because
+        // initializeModelRegistry() inside it references window.ModelRegistry. After a
+        // navigation the browser window is wiped, so we always re-eval if missing.
+        if (typeof window.ModelRegistry === 'undefined') {
+          eval(modelsCode);
+        }
         if (typeof buildAPOMTree === 'undefined') {
           eval(apomTreeConverterCode);
         }
@@ -441,7 +446,7 @@ async function executeToolInternal(name, args) {
         if (typeof registerElements !== 'undefined') {
           registerElements(elementsArray);
         }
-      }, apomTreeConverter, selectorResolver);
+      }, apomTreeConverter, selectorResolver, elementModelBase + '\n' + elementModels + '\n' + modelRegistry);
     }
 
     /**
@@ -470,13 +475,54 @@ async function executeToolInternal(name, args) {
 
       let resolved = await Promise.race([tryResolve(), timeoutPromise]);
 
-      // Auto-refresh: if looks like APOM ID but not found, re-register elements and retry
+      // Auto-refresh: if looks like APOM ID but not found, re-register elements and retry.
+      // quickRegisterElements re-injects ModelRegistry — if that itself fails (e.g. ReferenceError
+      // from a partially-loaded browser context), surface a clear "call analyzePage" message
+      // instead of leaking the raw browser error.
       if (!resolved.found && isApomIdPattern(identifier)) {
-        await quickRegisterElements(page);
+        try {
+          await quickRegisterElements(page);
+        } catch (e) {
+          if (/ModelRegistry is not defined/.test(String(e?.message || e))) {
+            throw new Error(
+              `APOM registry stale after navigation/reload. Call analyzePage() to refresh element ids before reusing "${identifier}".`
+            );
+          }
+          throw e;
+        }
         resolved = await Promise.race([tryResolve(), timeoutPromise]);
       }
 
       return resolved;
+    }
+
+    /**
+     * Snapshot of all APOM ids on the page → { id: { tag, type, text } }
+     * Used by click({ autoAnalyzeAfter: true }) to compute pre/post deltas.
+     */
+    async function getApomSnapshot(page) {
+      return await page.evaluate((apomCode, modelsCode) => {
+        if (typeof window.ModelRegistry === 'undefined') eval(modelsCode);
+        if (typeof buildAPOMTree === 'undefined') eval(apomCode);
+        const apom = buildAPOMTree(true);
+        const map = {};
+        function walk(node) {
+          if (!node || typeof node !== 'object') return;
+          if (node.id) {
+            map[node.id] = {
+              tag: node.tag,
+              type: node.type,
+              text: (node.metadata && node.metadata.text ? String(node.metadata.text).substring(0, 60) : null)
+            };
+          }
+          if (Array.isArray(node.children)) node.children.forEach(walk);
+          for (const k of Object.keys(node)) {
+            if (Array.isArray(node[k])) node[k].forEach(walk);
+          }
+        }
+        walk(apom.tree);
+        return map;
+      }, apomTreeConverter, elementModelBase + '\n' + elementModels + '\n' + modelRegistry);
     }
 
     if (name === "click") {
@@ -500,13 +546,61 @@ async function executeToolInternal(name, args) {
           throw new Error(`Element not found: ${identifier}`);
         }
 
+        // Pre-click APOM snapshot (only if delta is requested) — captures every id
+        // currently in the tree so we can diff the post-click state.
+        let preSnap = null;
+        if (validatedArgs.autoAnalyzeAfter) {
+          preSnap = await getApomSnapshot(page);
+        }
+
         // Use shared click action handler
-        return await executeClickAction(page, element, {
+        const clickResult = await executeClickAction(page, element, {
           identifier,
           screenshot: validatedArgs.screenshot,
           skipNetworkWait: validatedArgs.skipNetworkWait,
-          networkWaitTimeout: validatedArgs.networkWaitTimeout
+          networkWaitTimeout: validatedArgs.networkWaitTimeout,
+          waitForSelector: validatedArgs.waitForSelector,
+          waitTimeoutMs: validatedArgs.waitTimeoutMs
         });
+
+        // Post-click APOM delta: re-register new ids so callers can immediately
+        // use them in follow-up click/type calls without an extra analyzePage call.
+        if (validatedArgs.autoAnalyzeAfter && preSnap) {
+          try {
+            await quickRegisterElements(page);
+            const postSnap = await getApomSnapshot(page);
+            const added = Object.keys(postSnap).filter(id => !preSnap[id]);
+            const removed = Object.keys(preSnap).filter(id => !postSnap[id]);
+
+            let deltaText = '\n\n** APOM DELTA **';
+            if (added.length === 0 && removed.length === 0) {
+              deltaText += '\nNo APOM changes detected after click';
+            } else {
+              if (added.length > 0) {
+                const sample = added.slice(0, 15).map(id => {
+                  const m = postSnap[id] || {};
+                  const lab = m.text ? `"${m.text}"` : (m.type || m.tag || '?');
+                  return `${id}:${lab}`;
+                });
+                deltaText += `\n+${added.length} appeared: ${sample.join(', ')}${added.length > 15 ? `, ... (${added.length - 15} more)` : ''}`;
+              }
+              if (removed.length > 0) {
+                deltaText += `\n-${removed.length} disappeared`;
+              }
+            }
+
+            if (clickResult && Array.isArray(clickResult.content) && clickResult.content[0]) {
+              clickResult.content[0].text += deltaText;
+            }
+          } catch (e) {
+            // Delta is best-effort — never let it fail the actual click result
+            if (clickResult && Array.isArray(clickResult.content) && clickResult.content[0]) {
+              clickResult.content[0].text += `\n\n** APOM DELTA ** unavailable (${e.message})`;
+            }
+          }
+        }
+
+        return clickResult;
       };
 
       // Execute with timeout
@@ -786,6 +880,24 @@ async function executeToolInternal(name, args) {
       // Get identifier (id or selector)
       const identifier = validatedArgs.id || validatedArgs.selector;
 
+      // No identifier → full viewport screenshot. Mirrors processSceenshot pipeline used
+      // by element screenshots so the output (JPEG, scaled, base64) stays consistent.
+      if (!identifier) {
+        const buffer = await page.screenshot({ encoding: 'binary', fullPage: false });
+        const processed = await processScreenshot(buffer, {
+          maxWidth: validatedArgs.maxWidth !== undefined ? validatedArgs.maxWidth : 1024,
+          maxHeight: validatedArgs.maxHeight !== undefined ? validatedArgs.maxHeight : 8000,
+          quality: validatedArgs.quality || 40,
+          format: validatedArgs.format || 'jpeg',
+        });
+        return {
+          content: [
+            { type: 'text', text: 'Viewport screenshot' },
+            { type: 'image', data: processed.buffer.toString('base64'), mimeType: processed.mimeType }
+          ]
+        };
+      }
+
       // Resolve selector (supports both APOM ID and CSS selector)
       const resolved = await resolveSelector(page, identifier);
       if (!resolved.found) {
@@ -940,6 +1052,17 @@ async function executeToolInternal(name, args) {
       const page = await getLastOpenPage();
       const timeout = validatedArgs.timeout || 30000;
 
+      // Auto-wrap top-level `return` into an async IIFE: `eval('return X')` is an
+      // Illegal return statement in script context, so users had to wrap manually.
+      // Heuristic: rewrite only when the snippet starts with `return ...` (most common
+      // case from QA reports). Skip when the snippet declares a function — that signals
+      // an explicit user-defined scope and an implicit-return result is likely intended.
+      let scriptToRun = validatedArgs.script;
+      const trimmedHead = scriptToRun.replace(/^\s+/, '');
+      if (/^return[\s;]/.test(trimmedHead) && !/\bfunction\s*[\w*(]/.test(scriptToRun)) {
+        scriptToRun = `(async () => { ${scriptToRun} })()`;
+      }
+
       // Wrap operation in timeout
       const executeOperation = async () => {
         // Use page.evaluate with async support — if eval returns a Promise,
@@ -956,7 +1079,7 @@ async function executeToolInternal(name, args) {
           } catch (error) {
             return { success: false, error: error.message };
           }
-        }, validatedArgs.script);
+        }, scriptToRun);
 
         await new Promise(resolve => setTimeout(resolve, validatedArgs.waitAfter || 500));
 
@@ -2421,7 +2544,7 @@ Start coding now.`;
       }
 
       // APOM Tree format (default) - v2 with tree structure and positioning
-      const apomResult = await page.evaluate(async (apomTreeConverterCode, selectorResolverCode, modelsCode, shouldRegister, includeAll, viewportOnly) => {
+      const apomResult = await page.evaluate(async (apomTreeConverterCode, selectorResolverCode, modelsCode, shouldRegister, includeAll, viewportOnly, portalOpts) => {
         // Inject utilities if not already loaded
         if (typeof buildAPOMTree === 'undefined') {
           eval(apomTreeConverterCode);
@@ -2458,7 +2581,7 @@ Start coding now.`;
 
         // Build APOM tree
         // interactiveOnly = !includeAll (if includeAll is true, we want ALL elements)
-        const apomData = buildAPOMTree(!includeAll, viewportOnly);
+        const apomData = buildAPOMTree(!includeAll, viewportOnly, portalOpts);
 
         // Register elements in selector resolver if requested
         if (shouldRegister) {
@@ -2491,7 +2614,10 @@ Start coding now.`;
         }
 
         return apomData;
-      }, apomTreeConverter, selectorResolver, elementModelBase + '\n' + elementModels + '\n' + modelRegistry, validatedArgs.registerElements !== false, validatedArgs.includeAll || false, validatedArgs.viewportOnly || false);
+      }, apomTreeConverter, selectorResolver, elementModelBase + '\n' + elementModels + '\n' + modelRegistry, validatedArgs.registerElements !== false, validatedArgs.includeAll || false, validatedArgs.viewportOnly || false, {
+        include: validatedArgs.includePortals !== false,
+        selectors: validatedArgs.portalSelectors || undefined
+      });
 
       // Handle diff mode
       if (validatedArgs.diff) {

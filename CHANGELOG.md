@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.6] - 2026-05-28
+
+### Added
+- **`analyzePage({ includePortals, portalSelectors })`** — Generic React Portal scan beyond framework modals. Default selectors `['#modal-root', '#menu-popup-root', '#tooltip-root', '#popover-root', '[data-portal]']`, opt-out via `includePortals: false`. Without this, action menus / tooltips / popovers rendered outside `#root` are invisible to APOM
+- **In-tree popup detection** — `analyzePage` now also force-includes Popper/Tippy/FloatingUI-style popups: positioned (absolute/fixed) descendants inside a 0-height inline wrapper. Same opt-out flag (`includePortals`). Covers custom contextMenu implementations that don't use real React Portals
+- **`click({ waitForSelector, waitTimeoutMs })`** — Atomic click + wait. After click, waits for a CSS selector to appear (visible). On timeout the click still succeeds but the result text reports `⚠️ WAIT_TIMEOUT`. Designed for dropdowns/popups that race against the next MCP call
+- **`click({ autoAnalyzeAfter })`** — After click, diffs APOM state and appends `+N appeared: id:"text"` / `-N disappeared` delta. New element ids are pre-registered for follow-up `click`/`type` calls — opens a dropdown and clicks one of its items in two MCP calls instead of three
+- **`screenshot()` viewport mode** — Both `id` and `selector` are now optional; without either, captures the viewport (same compression pipeline as element screenshots)
+- **`executeScript` auto-IIFE** — Snippets starting with `return ...` are now auto-wrapped in `(async () => { ... })()`. Skipped when the snippet declares a `function`, to preserve implicit-return behavior
+
+### Fixed
+- **`ModelRegistry is not defined` after navigation** — Root cause: `quickRegisterElements` (called from `resolveSelector` auto-refresh) didn't inject models code, so `buildAPOMTree` inside it failed with `ReferenceError` when the browser context had been wiped. Models are now always re-injected. If the error still surfaces, it's mapped to a clear `APOM registry stale, call analyzePage()` message instead of leaking the raw ReferenceError
+
 ## [3.5.5] - 2026-03-27
 
 ### Added

@@ -37,9 +37,16 @@ function initializeModelRegistry() {
  *
  * @param {boolean} interactiveOnly - Only include interactive elements and their parents
  * @param {boolean} viewportOnly - Only include elements visible in current viewport
+ * @param {Object} portalOpts - Portal scan options: { include: boolean, selectors: string[] }
+ *                              When include=true, force-includes contents of React Portal containers
+ *                              (e.g. #menu-popup-root, #tooltip-root) that live outside main React root.
  * @returns {Object} APOM tree structure
  */
-function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
+function buildAPOMTree(interactiveOnly = true, viewportOnly = false, portalOpts = undefined) {
+  const portalInclude = portalOpts ? portalOpts.include !== false : true;
+  const portalSelectors = (portalOpts && Array.isArray(portalOpts.selectors) && portalOpts.selectors.length > 0)
+    ? portalOpts.selectors
+    : ['#modal-root', '#menu-popup-root', '#tooltip-root', '#popover-root', '[data-portal]'];
   const pageId = `page_${btoa(window.location.href).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}_${Date.now()}`;
 
   // Initialize model registry (Strategy Pattern setup)
@@ -116,6 +123,54 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false) {
         forceMarkModalTree(el);
       }
     });
+
+    // Generic portal containers (menus, tooltips, popovers) — opt-in by selector list.
+    // Unlike framework modals, these are app-defined wrappers (e.g. #menu-popup-root from
+    // client/index.html). When non-empty, force-include their subtree.
+    if (portalInclude && portalSelectors.length > 0) {
+      try {
+        document.querySelectorAll(portalSelectors.join(',')).forEach(container => {
+          if (!container.children || container.children.length === 0) return;
+          for (const child of container.children) {
+            if (!modalElements.has(child)) {
+              forceMarkModalTree(child);
+            }
+          }
+        });
+      } catch (e) {
+        // Invalid selector in portalSelectors — skip silently, do not break analyzePage
+      }
+    }
+
+    // In-tree popups (Popper/Tippy/FloatingUI/custom contextMenu pattern). Some libs
+    // render the popup inside a 0-height inline wrapper and then absolute-position it
+    // out of the wrapper's box. Default isVisible() drops the wrapper (height: 0) and
+    // every popup descendant is lost. Detect: a 0×0 wrapper whose subtree contains a
+    // positioned (absolute/fixed) child with real bounds — force-mark that child.
+    if (portalInclude) {
+      function findPositionedPopup(el, maxDepth) {
+        if (maxDepth <= 0) return null;
+        for (const child of el.children) {
+          if (modalElements.has(child)) continue;
+          const cs = window.getComputedStyle(child);
+          if ((cs.position === 'absolute' || cs.position === 'fixed') &&
+              child.offsetWidth > 0 && child.offsetHeight > 0) {
+            return child;
+          }
+          const deeper = findPositionedPopup(child, maxDepth - 1);
+          if (deeper) return deeper;
+        }
+        return null;
+      }
+
+      const allEls = document.body.querySelectorAll('*');
+      for (const el of allEls) {
+        // Only zero-sized wrappers with children are candidates — cheap filter
+        if ((el.offsetHeight !== 0 && el.offsetWidth !== 0) || el.children.length === 0) continue;
+        const popup = findPositionedPopup(el, 3);
+        if (popup) forceMarkModalTree(popup);
+      }
+    }
   }
 
   // Build tree from body
