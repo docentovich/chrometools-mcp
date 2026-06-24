@@ -30,6 +30,10 @@ export const isWindows = process.platform === 'win32' || isWSL;
  * @returns {string} - Path to Chrome executable
  */
 export function getChromePath() {
+  // Explicit override wins on every platform
+  if (process.env.CHROMETOOLS_CHROME_PATH) {
+    return process.env.CHROMETOOLS_CHROME_PATH;
+  }
   if (process.platform === 'win32') {
     // Native Windows
     return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -57,6 +61,17 @@ export function getTempDir() {
 }
 
 /**
- * Chrome remote debugging port
+ * Get the Chrome user-data-dir used when launching a new instance.
+ * Override with CHROMETOOLS_USER_DATA_DIR to point at a real/cloned profile
+ * that already holds the user's login session/cookies.
+ * @returns {string} - Path to Chrome user data directory
  */
-export const CHROME_DEBUG_PORT = 9222;
+export function getUserDataDir() {
+  return process.env.CHROMETOOLS_USER_DATA_DIR || `${getTempDir()}/chrome-mcp-profile`;
+}
+
+/**
+ * Chrome remote debugging port.
+ * Override with CHROMETOOLS_DEBUG_PORT (defaults to 9222).
+ */
+export const CHROME_DEBUG_PORT = parseInt(process.env.CHROMETOOLS_DEBUG_PORT, 10) || 9222;

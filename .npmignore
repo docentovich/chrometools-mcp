@@ -18,6 +18,11 @@ Thumbs.db
 .claude/
 CLAUDE.md
 
+# Internal planning docs, bug reports, session logs (may contain stand-specific data)
+specs/
+*BUGREPORT*.md
+*SESSION_LOG*.md
+
 # Build files
 PUBLISH.md
 

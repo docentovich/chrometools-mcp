@@ -37,7 +37,12 @@ import {
     getAllPages,
     switchToPage,
     connectToTabByUrl,
-    getNetworkCDPClient
+    getNetworkCDPClient,
+    getTargetFrame,
+    setActiveFrame,
+    clearActiveFrame,
+    getActiveFrameMatcher,
+    listFramesForPage
 } from './browser/page-manager.js';
 
 // Import image processing utilities
@@ -535,13 +540,19 @@ async function executeToolInternal(name, args) {
         // Get identifier (id or selector)
         const identifier = validatedArgs.id || validatedArgs.selector;
 
+        // Resolve/query inside the active frame (P0-1). The ElementHandle from
+        // ctx.$() runs in the frame's context, so element.click()/.evaluate()
+        // in executeClickAction operate inside the iframe. Page-level diagnostics
+        // (network/screenshot) stay on `page`.
+        const ctx = await getTargetFrame(page);
+
         // Resolve selector (supports both APOM ID and CSS selector)
-        const resolved = await resolveSelector(page, identifier);
+        const resolved = await resolveSelector(ctx, identifier);
         if (!resolved.found) {
           throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
         }
 
-        const element = await page.$(resolved.selector);
+        const element = await ctx.$(resolved.selector);
         if (!element) {
           throw new Error(`Element not found: ${identifier}`);
         }
@@ -550,7 +561,7 @@ async function executeToolInternal(name, args) {
         // currently in the tree so we can diff the post-click state.
         let preSnap = null;
         if (validatedArgs.autoAnalyzeAfter) {
-          preSnap = await getApomSnapshot(page);
+          preSnap = await getApomSnapshot(ctx);
         }
 
         // Use shared click action handler
@@ -560,15 +571,16 @@ async function executeToolInternal(name, args) {
           skipNetworkWait: validatedArgs.skipNetworkWait,
           networkWaitTimeout: validatedArgs.networkWaitTimeout,
           waitForSelector: validatedArgs.waitForSelector,
-          waitTimeoutMs: validatedArgs.waitTimeoutMs
+          waitTimeoutMs: validatedArgs.waitTimeoutMs,
+          waitForRouteChange: validatedArgs.waitForRouteChange
         });
 
         // Post-click APOM delta: re-register new ids so callers can immediately
         // use them in follow-up click/type calls without an extra analyzePage call.
         if (validatedArgs.autoAnalyzeAfter && preSnap) {
           try {
-            await quickRegisterElements(page);
-            const postSnap = await getApomSnapshot(page);
+            await quickRegisterElements(ctx);
+            const postSnap = await getApomSnapshot(ctx);
             const added = Object.keys(postSnap).filter(id => !preSnap[id]);
             const removed = Object.keys(preSnap).filter(id => !postSnap[id]);
 
@@ -621,13 +633,16 @@ async function executeToolInternal(name, args) {
         // Get identifier (id or selector)
         const identifier = validatedArgs.id || validatedArgs.selector;
 
+        // Resolve/query inside the active frame (P0-1)
+        const ctx = await getTargetFrame(page);
+
         // Resolve selector (supports both APOM ID and CSS selector)
-        const resolved = await resolveSelector(page, identifier);
+        const resolved = await resolveSelector(ctx, identifier);
         if (!resolved.found) {
           throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
         }
 
-        const element = await page.$(resolved.selector);
+        const element = await ctx.$(resolved.selector);
         if (!element) {
           throw new Error(`Element not found: ${identifier}`);
         }
@@ -984,13 +999,16 @@ async function executeToolInternal(name, args) {
       // Get identifier (id or selector)
       const identifier = validatedArgs.id || validatedArgs.selector;
 
+      // Resolve/query inside the active frame (P0-1)
+      const ctx = await getTargetFrame(page);
+
       // Resolve selector (supports both APOM ID and CSS selector)
-      const resolved = await resolveSelector(page, identifier);
+      const resolved = await resolveSelector(ctx, identifier);
       if (!resolved.found) {
         throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
       }
 
-      const element = await page.$(resolved.selector);
+      const element = await ctx.$(resolved.selector);
       if (!element) {
         throw new Error(`Element not found: ${identifier}`);
       }
@@ -1008,17 +1026,20 @@ async function executeToolInternal(name, args) {
       const timeout = validatedArgs.timeout || 5000;
       const waitForVisible = validatedArgs.visible !== false;
 
+      // Wait/query inside the active frame (P0-1)
+      const ctx = await getTargetFrame(page);
+
       try {
         if (waitForVisible) {
           // Wait for element to be visible
-          await page.waitForSelector(validatedArgs.selector, { timeout, visible: true });
+          await ctx.waitForSelector(validatedArgs.selector, { timeout, visible: true });
         } else {
           // Just wait for element to exist in DOM
-          await page.waitForSelector(validatedArgs.selector, { timeout });
+          await ctx.waitForSelector(validatedArgs.selector, { timeout });
         }
 
         // Get info about the element
-        const elementInfo = await page.evaluate((selector) => {
+        const elementInfo = await ctx.evaluate((selector) => {
           const el = document.querySelector(selector);
           if (!el) return null;
 
@@ -1052,31 +1073,38 @@ async function executeToolInternal(name, args) {
       const page = await getLastOpenPage();
       const timeout = validatedArgs.timeout || 30000;
 
-      // Auto-wrap top-level `return` into an async IIFE: `eval('return X')` is an
-      // Illegal return statement in script context, so users had to wrap manually.
-      // Heuristic: rewrite only when the snippet starts with `return ...` (most common
-      // case from QA reports). Skip when the snippet declares a function — that signals
-      // an explicit user-defined scope and an implicit-return result is likely intended.
-      let scriptToRun = validatedArgs.script;
-      const trimmedHead = scriptToRun.replace(/^\s+/, '');
-      if (/^return[\s;]/.test(trimmedHead) && !/\bfunction\s*[\w*(]/.test(scriptToRun)) {
-        scriptToRun = `(async () => { ${scriptToRun} })()`;
-      }
+      // Run in the active frame (P0-1) — defaults to main frame
+      const ctx = await getTargetFrame(page);
+      const scriptToRun = validatedArgs.script;
 
       // Wrap operation in timeout
       const executeOperation = async () => {
-        // Use page.evaluate with async support — if eval returns a Promise,
-        // await it so async IIFEs work correctly instead of returning {}
-        const result = await page.evaluate(async (code) => {
-          try {
+        // Two-pass eval (P1-4): first run the snippet as-is so bare expressions
+        // (`document.title`) keep returning their value. If that throws an
+        // "Illegal return statement" SyntaxError (top-level `return ...`), retry
+        // wrapped in an async IIFE. Robust, no fragile `^return`/`!function` heuristic.
+        const result = await ctx.evaluate(async (code) => {
+          const runEval = async (src) => {
             // eslint-disable-next-line no-eval
-            let evalResult = eval(code);
+            let evalResult = eval(src);
             // Await promises (async IIFE, fetch, etc.)
             if (evalResult && typeof evalResult === 'object' && typeof evalResult.then === 'function') {
               evalResult = await evalResult;
             }
-            return { success: true, result: evalResult };
+            return evalResult;
+          };
+          try {
+            return { success: true, result: await runEval(code) };
           } catch (error) {
+            const isIllegalReturn = error instanceof SyntaxError &&
+              /return/i.test(error.message) && /illegal|outside|unexpected/i.test(error.message);
+            if (isIllegalReturn) {
+              try {
+                return { success: true, result: await runEval(`(async () => { ${code} })()`) };
+              } catch (wrapErr) {
+                return { success: false, error: wrapErr.message };
+              }
+            }
             return { success: false, error: error.message };
           }
         }, scriptToRun);
@@ -1340,13 +1368,16 @@ async function executeToolInternal(name, args) {
       // Get identifier (id or selector)
       const identifier = validatedArgs.id || validatedArgs.selector;
 
+      // Resolve/query inside the active frame (P0-1)
+      const ctx = await getTargetFrame(page);
+
       // Resolve selector (supports both APOM ID and CSS selector)
-      const resolved = await resolveSelector(page, identifier);
+      const resolved = await resolveSelector(ctx, identifier);
       if (!resolved.found) {
         throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
       }
 
-      const element = await page.$(resolved.selector);
+      const element = await ctx.$(resolved.selector);
       if (!element) {
         throw new Error(`Element not found: ${identifier}`);
       }
@@ -1363,13 +1394,16 @@ async function executeToolInternal(name, args) {
       let element = null;
 
       if (identifier) {
+        // Resolve/query inside the active frame (P0-1)
+        const ctx = await getTargetFrame(page);
+
         // Resolve selector (supports both APOM ID and CSS selector)
-        const resolved = await resolveSelector(page, identifier);
+        const resolved = await resolveSelector(ctx, identifier);
         if (!resolved.found) {
           throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
         }
 
-        element = await page.$(resolved.selector);
+        element = await ctx.$(resolved.selector);
         if (!element) {
           throw new Error(`Element not found: ${identifier}`);
         }
@@ -1390,13 +1424,16 @@ async function executeToolInternal(name, args) {
       // Get identifier (id or selector)
       const identifier = validatedArgs.id || validatedArgs.selector;
 
+      // Resolve/query inside the active frame (P0-1)
+      const ctx = await getTargetFrame(page);
+
       // Resolve selector (supports both APOM ID and CSS selector)
-      const resolved = await resolveSelector(page, identifier);
+      const resolved = await resolveSelector(ctx, identifier);
       if (!resolved.found) {
         throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
       }
 
-      const element = await page.$(resolved.selector);
+      const element = await ctx.$(resolved.selector);
       if (!element) {
         throw new Error(`Element not found: ${identifier}`);
       }
@@ -1772,6 +1809,10 @@ async function executeToolInternal(name, args) {
         await page.goto(validatedArgs.url, { waitUntil: validatedArgs.waitUntil || 'networkidle2' });
       }
 
+      // Top-level navigation invalidates any previously-selected iframe (P0-1).
+      // Reset to main frame so subsequent tools don't target a dead frame.
+      clearActiveFrame(page);
+
       const title = await page.title();
 
       // Run post-navigation diagnostics (same as post-click)
@@ -1807,6 +1848,70 @@ async function executeToolInternal(name, args) {
         content: [{
           type: "text",
           text: `${message}\nPage title: ${title}${hintsText}${diagnosticsText}`
+        }],
+      };
+    }
+
+    if (name === "listFrames") {
+      schemas.ListFramesSchema.parse(args);
+      const page = await getLastOpenPage();
+      const frames = listFramesForPage(page);
+      const matcher = getActiveFrameMatcher(page);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            count: frames.length,
+            activeFrame: matcher || null, // null = main frame
+            frames,
+            hint: frames.length > 1
+              ? 'Use switchFrame({ frameUrl }) to target a child frame (e.g. a cross-origin iframe). switchFrame() with no args resets to main frame.'
+              : 'Only the main frame is present.'
+          }, null, 2)
+        }],
+      };
+    }
+
+    if (name === "switchFrame") {
+      const validatedArgs = schemas.SwitchFrameSchema.parse(args);
+      const page = await getLastOpenPage();
+
+      // No args → reset to main frame
+      if (!validatedArgs.frameUrl && !validatedArgs.frameSelector) {
+        clearActiveFrame(page);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ active: null, message: 'Reset to main frame.' }, null, 2)
+          }],
+        };
+      }
+
+      // Validate the matcher resolves before storing it, so switchFrame fails loudly
+      // instead of every later tool failing.
+      const matcher = validatedArgs.frameSelector
+        ? { frameSelector: validatedArgs.frameSelector }
+        : { frameUrl: validatedArgs.frameUrl };
+      setActiveFrame(page, matcher);
+
+      let frame;
+      try {
+        frame = await getTargetFrame(page);
+      } catch (e) {
+        clearActiveFrame(page); // don't leave a broken active frame set
+        throw e;
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            active: frame.url(),
+            matcher,
+            frames: listFramesForPage(page),
+            message: `Switched to frame: ${frame.url()}. Subsequent click/type/analyzePage/find/executeScript run inside it until switchFrame() resets.`
+          }, null, 2)
         }],
       };
     }
@@ -2383,10 +2488,12 @@ Start coding now.`;
     if (name === "smartFindElement") {
       const validatedArgs = schemas.SmartFindElementSchema.parse(args);
       const page = await getLastOpenPage();
+      const ctx = await getTargetFrame(page); // search inside active frame (P0-1)
       const maxResults = validatedArgs.maxResults || 5;
+      const minConfidence = validatedArgs.minConfidence != null ? validatedArgs.minConfidence : 0.6;
 
       // Execute smart search in page context
-      const results = await page.evaluate((description, maxResults, utilsCode, selectorResolverCode) => {
+      const results = await ctx.evaluate((description, maxResults, utilsCode, selectorResolverCode) => {
         // Inject utilities into page context
         eval(utilsCode);
         if (typeof registerElement === 'undefined') {
@@ -2396,24 +2503,37 @@ Start coding now.`;
         // Determine element type from description
         const elementType = determineElementType(description);
 
-        // Build candidate selectors based on element type
-        let candidates = [];
+        // Build candidate selectors based on element type.
+        // Dedup with a Set — broadened selectors overlap (a button can match
+        // several queries) and we don't want the same element scored twice.
+        const candidateSet = new Set();
+        const add = (sel) => { try { document.querySelectorAll(sel).forEach(el => candidateSet.add(el)); } catch (e) {} };
 
         if (elementType.type === 'input' || elementType.type === 'any') {
-          candidates.push(...document.querySelectorAll('input'));
-          candidates.push(...document.querySelectorAll('textarea'));
+          add('input');
+          add('textarea');
         }
 
         if (elementType.type === 'button' || elementType.type === 'any') {
-          candidates.push(...document.querySelectorAll('button'));
-          candidates.push(...document.querySelectorAll('input[type="submit"]'));
-          candidates.push(...document.querySelectorAll('input[type="button"]'));
-          candidates.push(...document.querySelectorAll('[role="button"]'));
+          add('button');
+          add('input[type="submit"]');
+          add('input[type="button"]');
+          add('[role="button"]');
+          // P1-3: broaden to non-semantic clickables that QA hit on real apps —
+          // menu items rendered as div/span[onclick], nav links, tabs.
+          add('[onclick]');
+          add('[role="menuitem"]');
+          add('[role="tab"]');
+          add('nav a');
+          add('[role="navigation"] a');
+          add('[role="menu"] [role="menuitem"]');
         }
 
         if (elementType.type === 'link' || elementType.type === 'any') {
-          candidates.push(...document.querySelectorAll('a'));
+          add('a');
         }
+
+        const candidates = Array.from(candidateSet);
 
         // Analyze each candidate
         const analyzed = candidates.map(el => {
@@ -2478,11 +2598,26 @@ Start coding now.`;
         hints
       };
 
-      // Execute action if provided
+      // Execute action if provided — but only when we're confident (P1-3).
+      // Previously results[0] was clicked unconditionally, so a high-scoring form
+      // submit could be auto-clicked when the user asked for something else.
+      // Guard on minConfidence AND a clear gap over the runner-up.
       if (validatedArgs.action && results.length > 0) {
         const bestMatch = results[0];
+        const runnerUp = results[1];
+        const gapOk = !runnerUp || (bestMatch.score - runnerUp.score) >= 10;
+        const confident = bestMatch.confidence >= minConfidence && gapOk;
+
+        if (!confident) {
+          response.actionSkipped = {
+            reason: bestMatch.confidence < minConfidence
+              ? `bestMatch confidence ${bestMatch.confidence.toFixed(2)} < minConfidence ${minConfidence}`
+              : `ambiguous: top-2 score gap (${bestMatch.score - runnerUp.score}) too small`,
+            hint: 'Refine the description, pass an explicit id/selector to click, or lower minConfidence.',
+          };
+        } else {
         try {
-          const actionResult = await executeElementAction(page, bestMatch.selector, validatedArgs.action);
+          const actionResult = await executeElementAction(page, bestMatch.selector, validatedArgs.action, ctx);
           response.actionExecuted = actionResult;
 
           // If screenshot was captured, add it to content
@@ -2496,6 +2631,7 @@ Start coding now.`;
           }
         } catch (error) {
           response.actionError = error.message;
+        }
         }
       }
 
@@ -2515,10 +2651,14 @@ Start coding now.`;
     if (name === "analyzePage") {
       const validatedArgs = schemas.AnalyzePageSchema.parse(args);
       const page = await getLastOpenPage();
-      const pageUrl = page.url();
+      // Analyze the active frame (P0-1) — defaults to main frame. `frameList` is
+      // surfaced in the output so the agent can discover/switch frames.
+      const ctx = await getTargetFrame(page);
+      const frameList = listFramesForPage(page);
+      const pageUrl = ctx.url() || page.url();
 
       // Check for non-HTML pages (JSON, plain text, XML) — return raw content instead of empty tree
-      const contentType = await page.evaluate(() => document.contentType || '');
+      const contentType = await ctx.evaluate(() => document.contentType || '');
       if (contentType && !contentType.includes('html')) {
         const rawContent = await page.evaluate(() => {
           // For JSON/text pages, browser wraps content in <pre> inside <body>
@@ -2544,7 +2684,7 @@ Start coding now.`;
       }
 
       // APOM Tree format (default) - v2 with tree structure and positioning
-      const apomResult = await page.evaluate(async (apomTreeConverterCode, selectorResolverCode, modelsCode, shouldRegister, includeAll, viewportOnly, portalOpts) => {
+      const apomResult = await ctx.evaluate(async (apomTreeConverterCode, selectorResolverCode, modelsCode, shouldRegister, includeAll, viewportOnly, portalOpts) => {
         // Inject utilities if not already loaded
         if (typeof buildAPOMTree === 'undefined') {
           eval(apomTreeConverterCode);
@@ -2619,6 +2759,13 @@ Start coding now.`;
         selectors: validatedArgs.portalSelectors || undefined
       });
 
+      // Surface frames so the agent can discover/switch into iframes (P0-1).
+      // Only when there's more than the main frame — keeps single-frame output lean.
+      if (frameList.length > 1) {
+        apomResult.frames = frameList;
+        apomResult.activeFrame = ctx === page.mainFrame() ? null : (ctx.url() || true);
+      }
+
       // Handle diff mode
       if (validatedArgs.diff) {
         const previousAnalysis = global.previousApomAnalysis.get(pageUrl);
@@ -2641,7 +2788,8 @@ Start coding now.`;
                 previousTimestamp: previousAnalysis.timestamp,
                 diff,
                 metadata: apomResult.metadata,
-                alerts: apomResult.alerts
+                alerts: apomResult.alerts,
+                frames: frameList.length > 1 ? frameList : undefined
               })
             }]
           };
@@ -2889,8 +3037,9 @@ Start coding now.`;
     if (name === "findElementsByText") {
       const validatedArgs = schemas.FindElementsByTextSchema.parse(args);
       const page = await getLastOpenPage();
+      const ctx = await getTargetFrame(page); // search inside active frame (P0-1)
 
-      const elements = await page.evaluate((text, exact, caseSensitive, utilsCode, selectorResolverCode) => {
+      const elements = await ctx.evaluate((text, exact, caseSensitive, utilsCode, selectorResolverCode) => {
         eval(utilsCode);
         if (typeof registerElement === 'undefined') {
           eval(selectorResolverCode);
@@ -2956,11 +3105,14 @@ Start coding now.`;
         truncated: elements.length > 20
       };
 
-      // Execute action if provided and elements found
+      // Execute action if provided and elements found.
+      // Pass `ctx` so the raw selector resolves inside the active frame (P0-1) —
+      // the FIND ran in the frame, so the ACTION must too, otherwise page.$
+      // looks in the main frame and "Element not found for action".
       if (validatedArgs.action && elements.length > 0) {
         const firstMatch = elements[0];
         try {
-          const actionResult = await executeElementAction(page, firstMatch.selector, validatedArgs.action);
+          const actionResult = await executeElementAction(page, firstMatch.selector, validatedArgs.action, ctx);
           response.actionExecuted = actionResult;
 
           // If screenshot was captured, add it to content

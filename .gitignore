@@ -26,3 +26,7 @@ secrets/
 
 # Spec documents
 SPEC-*.md
+
+# Bug reports & session logs — may contain stand-specific data (IPs, numbers). Keep out of the public repo.
+*BUGREPORT*.md
+*SESSION_LOG*.md

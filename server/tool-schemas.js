@@ -25,6 +25,7 @@ export const ClickSchema = z.object({
   networkWaitTimeout: z.number().optional().describe("Maximum time to wait for network requests in ms (default: 3000). Only used if skipNetworkWait is false."),
   waitForSelector: z.string().optional().describe("CSS selector to wait for after click — atomic click+wait. Useful for dropdowns/popups in portals (e.g. '#menu-popup-root > div') that otherwise race against the next MCP call."),
   waitTimeoutMs: z.number().optional().describe("Timeout for waitForSelector in ms (default: 2000)."),
+  waitForRouteChange: z.boolean().optional().describe("For SPAs (React Router etc.): after click, wait for location.pathname+search to change relative to before. Surfaces 'routeChanged:true/false' so success means the view actually navigated, not just that the click was delivered. Does not fail the click on timeout. For content that renders without a URL change, prefer waitForSelector."),
   autoAnalyzeAfter: z.boolean().optional().describe("After click, automatically diff APOM state and append a delta to the result: '+N appeared: id1:\"text\", id2:\"text\"'. New ids are re-registered so callers can use them directly in the next click/type call without an extra analyzePage. Use for dropdowns and menus that reveal new options on click."),
 }).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
   message: "Either 'id' or 'selector' must be provided, but not both"
@@ -156,6 +157,13 @@ export const NavigateToSchema = z.object({
     .describe("Wait until event (default: networkidle2)"),
 });
 
+export const ListFramesSchema = z.object({});
+
+export const SwitchFrameSchema = z.object({
+  frameUrl: z.string().optional().describe("Substring matched against each frame's URL (e.g. 'app.example.com'). Selects the first matching frame, including cross-origin iframes (resolved via CDP, so Same-Origin Policy does not block access). Mutually exclusive with frameSelector."),
+  frameSelector: z.string().optional().describe("CSS selector of the <iframe> element in the current document; its content frame becomes active. Mutually exclusive with frameUrl."),
+}).describe("Set the active frame for subsequent click/type/hover/analyzePage/find/executeScript/waitForElement. Call with NO arguments to reset back to the main frame. Active frame is also reset automatically on navigateTo. Use listFrames() to discover available frames.");
+
 export const SetViewportSchema = z.object({
   width: z.number().min(320).max(4000).describe("Viewport width in pixels (320-4000)"),
   height: z.number().min(200).max(3000).describe("Viewport height in pixels (200-3000)"),
@@ -272,6 +280,7 @@ export const ConvertFigmaToCodeSchema = z.object({
 export const SmartFindElementSchema = z.object({
   description: z.string().describe("Natural language description of element to find (e.g., 'login button', 'email field')"),
   maxResults: z.number().min(1).max(20).optional().describe("Maximum number of candidates to return (default: 5)"),
+  minConfidence: z.number().min(0).max(1).optional().describe("Confidence threshold (0-1, default: 0.6) for auto-executing `action`. If the best match scores below this, OR is too close to the runner-up, the action is SKIPPED and candidates are returned with an 'actionSkipped' reason — prevents auto-clicking the wrong control (e.g. a primary form submit when you asked for a menu item). Lower it to act on weaker matches."),
   action: z.object({
     type: z.enum(['click', 'type', 'scrollTo', 'screenshot', 'hover', 'setStyles']).describe("Action to perform on the best match"),
     text: z.string().optional().describe("Text to type (required for 'type' action)"),

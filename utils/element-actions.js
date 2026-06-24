@@ -20,13 +20,16 @@ async function takeActionScreenshot(page, clip) {
   };
 }
 
-// Helper function to execute actions on elements
-export async function executeElementAction(page, selector, action) {
+// Helper function to execute actions on elements.
+// `frame` (P0-1) is the DOM context used for element resolution/evaluation —
+// pass the active iframe's Frame to act inside it. Defaults to `page` (main frame).
+// Page-level operations (keyboard, screenshot) always use `page`.
+export async function executeElementAction(page, selector, action, frame = page) {
   if (!action || !action.type) {
     return null;
   }
 
-  const element = await page.$(selector);
+  const element = await frame.$(selector);
   if (!element) {
     throw new Error(`Element not found for action: ${selector}`);
   }
@@ -83,7 +86,7 @@ export async function executeElementAction(page, selector, action) {
     case 'scrollTo':
       await element.scrollIntoView({ behavior: 'auto' });
       await new Promise(resolve => setTimeout(resolve, action.waitAfter || 300));
-      const position = await page.evaluate(() => ({
+      const position = await frame.evaluate(() => ({
         x: window.scrollX,
         y: window.scrollY
       }));
@@ -128,7 +131,7 @@ export async function executeElementAction(page, selector, action) {
       for (const style of action.styles) {
         stylesObject[style.name] = style.value;
       }
-      await page.evaluate((sel, styles) => {
+      await frame.evaluate((sel, styles) => {
         const el = document.querySelector(sel);
         if (el) {
           Object.entries(styles).forEach(([key, value]) => {

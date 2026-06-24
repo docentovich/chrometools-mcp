@@ -13,6 +13,7 @@ Cross-platform MCP server (Windows/WSL, Linux, macOS) that provides Chrome brows
 | Spec | Status | Progress |
 |---|---|---|
 | [SEGM-537 QA Unblockers](specs/SEGM-537-UNBLOCKERS_SPEC.md) | NEEDS APPROVAL | [progress](specs/SEGM-537-UNBLOCKERS_PROGRESS.md) |
+| [Novofon Blockers (iframe/session/P1)](specs/NOVOFON-IFRAME_SPEC.md) | CODE COMPLETE — needs live e2e | [progress](specs/NOVOFON-IFRAME_PROGRESS.md) |
 
 ## Key Architecture Concept
 

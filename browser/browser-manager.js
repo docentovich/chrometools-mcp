@@ -9,7 +9,7 @@ import { spawn } from 'child_process';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getChromePath, getTempDir, isWSL, CHROME_DEBUG_PORT } from '../utils/platform-utils.js';
+import { getChromePath, getUserDataDir, isWSL, CHROME_DEBUG_PORT } from '../utils/platform-utils.js';
 import { handleNewTab, openPages, lastPage } from './page-manager.js';
 
 // Get extension path (use forward slashes for Chrome on Windows)
@@ -97,6 +97,30 @@ export async function getBrowser() {
         let browser;
         let endpoint;
 
+        // Highest priority: explicit CDP WebSocket endpoint (e.g. a real
+        // logged-in Chrome the user already launched). Skips port-discovery
+        // and spawning entirely — connect straight to the live session.
+        const wsEndpoint = process.env.CHROMETOOLS_BROWSER_WS_ENDPOINT;
+        if (wsEndpoint) {
+          browser = await puppeteer.connect({
+            browserWSEndpoint: wsEndpoint,
+            defaultViewport: null,
+          });
+          debugLog("Connected via CHROMETOOLS_BROWSER_WS_ENDPOINT:", wsEndpoint);
+          connectedToExistingChrome = true;
+          console.error("[chrometools-mcp] Connected to Chrome via CHROMETOOLS_BROWSER_WS_ENDPOINT.");
+
+          browser.on('disconnected', () => {
+            debugLog("Browser disconnected");
+            browserPromise = null;
+            connectedToExistingChrome = false;
+          });
+
+          setupNewTabTracking(browser);
+          scheduleBridgeReconnect();
+          return browser;
+        }
+
         // Try to connect to existing Chrome with remote debugging
         try {
           endpoint = await getChromeWebSocketEndpoint(CHROME_DEBUG_PORT, 2);
@@ -132,7 +156,7 @@ export async function getBrowser() {
 
         // Launch new Chrome with remote debugging enabled
         const chromePath = getChromePath();
-        const userDataDir = `${getTempDir()}/chrome-mcp-profile`;
+        const userDataDir = getUserDataDir();
 
         debugLog("Chrome path:", chromePath);
         debugLog("User data dir:", userDataDir);

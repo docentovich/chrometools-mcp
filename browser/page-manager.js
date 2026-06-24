@@ -346,6 +346,95 @@ export function setLastPage(page) {
   lastPage = page;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Active frame state (P0-1: cross-origin iframe support)
+//
+// Tools default to the main frame. switchFrame() stores a *matcher* (not a Frame
+// object — Frames get invalidated when the iframe re-navigates) keyed by Page.
+// getTargetFrame() re-resolves the matcher against page.frames() on every call,
+// so it survives iframe reloads. Cleared on top-level navigation.
+// ─────────────────────────────────────────────────────────────────────────────
+const activeFrames = new WeakMap(); // Page -> { frameUrl?, frameSelector? }
+
+/**
+ * Set (or clear) the active frame matcher for a page.
+ * @param {Page} page
+ * @param {{frameUrl?: string, frameSelector?: string}|null} matcher - null resets to main frame
+ */
+export function setActiveFrame(page, matcher) {
+  if (!matcher || (!matcher.frameUrl && !matcher.frameSelector)) {
+    activeFrames.delete(page);
+  } else {
+    activeFrames.set(page, matcher);
+  }
+}
+
+/**
+ * Clear the active frame for a page (back to main frame).
+ * @param {Page} page
+ */
+export function clearActiveFrame(page) {
+  activeFrames.delete(page);
+}
+
+/**
+ * Get the matcher currently stored for a page (or null).
+ * @param {Page} page
+ * @returns {{frameUrl?: string, frameSelector?: string}|null}
+ */
+export function getActiveFrameMatcher(page) {
+  return activeFrames.get(page) || null;
+}
+
+/**
+ * Resolve the execution context (Frame) for a page based on its active matcher.
+ * Returns the main frame when no active frame is set. A Frame exposes the same
+ * surface tools rely on (.evaluate, .$, .$$, .click, .type, .waitForSelector),
+ * so handlers can use the returned context in place of `page` for DOM work.
+ * @param {Page} page
+ * @returns {Promise<Frame>} - Target Puppeteer Frame
+ */
+export async function getTargetFrame(page) {
+  const matcher = activeFrames.get(page);
+  if (!matcher) {
+    return page.mainFrame();
+  }
+
+  if (matcher.frameSelector) {
+    const handle = await page.$(matcher.frameSelector);
+    const frame = handle ? await handle.contentFrame() : null;
+    if (!frame) {
+      throw new Error(
+        `Active frame (selector "${matcher.frameSelector}") not found. Call listFrames() and switchFrame() again, or switchFrame() with no args to reset.`
+      );
+    }
+    return frame;
+  }
+
+  // frameUrl: substring match against all frames
+  const frame = page.frames().find(f => f.url().includes(matcher.frameUrl));
+  if (!frame) {
+    throw new Error(
+      `Active frame (url contains "${matcher.frameUrl}") not found. Call listFrames() and switchFrame() again, or switchFrame() with no args to reset.`
+    );
+  }
+  return frame;
+}
+
+/**
+ * List all frames on a page with metadata (for listFrames tool / analyzePage output).
+ * @param {Page} page
+ * @returns {Array<{url: string, name: string, isMain: boolean}>}
+ */
+export function listFramesForPage(page) {
+  const main = page.mainFrame();
+  return page.frames().map(f => ({
+    url: f.url(),
+    name: f.name() || '',
+    isMain: f === main,
+  }));
+}
+
 /**
  * Setup a new page with all monitoring (console, network, recorder)
  * Used for both explicitly created pages and auto-detected new tabs

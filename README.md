@@ -219,13 +219,14 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 - [Installation](#installation)
   - [Chrome Extension Setup](#chrome-extension-setup)
 - [AI Optimization Features](#ai-optimization-features)- [Scenario Recorder](#scenario-recorder)  - Visual UI-based recording with smart optimization
-- [Available Tools](#available-tools) - **49+ Tools Total**
+- [Available Tools](#available-tools) - **51+ Tools Total**
   - [AI-Powered Tools](#ai-powered-tools)  - smartFindElement, analyzePage, getElementDetails, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
   - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, pressKey, setStyles, setViewport, getViewport, navigateTo
   - [Tab Management Tools](#5-tab-management-tools)  - listTabs, switchTab
+  - [Frame Tools](#5a-frame-tools-iframe-automation)  - listFrames, switchFrame (cross-origin iframe automation)
   - [Recorder Tools](#7-recorder-tools)  - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
   - [API / Swagger Tools](#8-api--swagger-tools) - loadSwagger, generateApiModels
 - [Typical Workflow Example](#typical-workflow-example)
@@ -357,6 +358,8 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
 - **Parameters**:
   - `description` (required): Natural language (e.g., "login button", "email field")
   - `maxResults` (optional): Max candidates to return (default: 5)
+  - `minConfidence` (optional): Confidence threshold (0–1, default **0.6**) for auto-executing `action`. If the best match scores below this — or is too close to the runner-up — the action is **skipped** and candidates are returned with an `actionSkipped` reason instead. Prevents auto-clicking the wrong control (e.g. a primary form submit when you asked for a menu item). Lower it to act on weaker matches.
+- **Candidate coverage**: besides `button`/`input`/`a`/`[role=button]`, also considers `[onclick]`, `[role=menuitem]`, `[role=tab]`, and links inside `nav`/`[role=navigation]`/`[role=menu]` — so menu items rendered as `div`/`span[onclick]` are found. Scoring penalizes candidates whose text doesn't match the description and rewards navigation/menu context.
 - **Use case**: When you don't know the exact selector
 - **Returns**: Ranked candidates with confidence scores, selectors, and reasoning
 - **Example**:
@@ -519,6 +522,7 @@ Click an element with optional result screenshot. **PREFERRED**: Use APOM ID fro
   - `networkWaitTimeout` (optional): Custom network wait timeout in ms (default: 10000). Only used if skipNetworkWait is false.
   - `waitForSelector` (optional): CSS selector to wait for **after** the click — atomic click+wait. Use for dropdowns/popups that render into a React Portal and otherwise race with the next MCP call. Example: `click({ id: 'button_47', waitForSelector: '#menu-popup-root > div' })`.
   - `waitTimeoutMs` (optional): Timeout for `waitForSelector` in ms (default: 2000). On timeout the click still succeeds but the result text reports `⚠️ WAIT_TIMEOUT`.
+  - `waitForRouteChange` (optional): For SPAs (React Router etc.). After the click, waits for `location.pathname + location.search` to change relative to before, then reports `Route changed: "/a" → "/b"` or `⚠️ ROUTE_UNCHANGED`. Because SPAs navigate via `history.pushState`, plain network diagnostics may not register the navigation — this makes "success" mean the view actually changed, not just that the click was delivered. Never fails the click on timeout. For view changes that don't alter the URL, use `waitForSelector` instead.
   - `autoAnalyzeAfter` (optional): After click, automatically diff APOM and append the delta to the result text (e.g. `+3 appeared: button_42:"Статистика", button_43:"Настройки", link_44:"Удалить"`). New element ids are pre-registered so the next `click({ id })`/`type({ id })` call works **without an extra `analyzePage`**. Designed for the dropdown/menu pattern: one MCP call instead of three.
 - **Use case**: Buttons, links, form submissions, Django admin forms
 - **Returns**: Confirmation text + optional screenshot + network diagnostics
@@ -725,7 +729,8 @@ Execute arbitrary JavaScript in page context with optional screenshot.
 - **Use case**: Complex interactions, custom manipulations
 - **Returns**: Execution result + optional screenshot
 - **Performance**: 2-10x faster without screenshot
-- **Top-level `return`**: snippets that start with `return ...` (e.g. `return document.title`) are auto-wrapped in an async IIFE — no need to manually wrap in `(() => { ... })()`. Scripts that declare a `function` are left unmodified so implicit-return patterns keep working.
+- **Top-level `return`**: any snippet using a top-level `return` (e.g. `return document.title`, `const x = 1; return x`, or code that contains a `function` in a callback) just works — it's run as-is first, and only re-wrapped in an async IIFE if the engine reports an "Illegal return statement". Bare expressions like `document.title` still return their value. No manual `(() => { ... })()` wrapping needed.
+- **Frames**: runs inside the active frame after `switchFrame` (see [Frame Tools](#5a-frame-tools-iframe-automation)); defaults to the main frame.
 
 #### getConsoleLogs
 Retrieve browser console logs (log, warn, error, etc.).
@@ -848,7 +853,8 @@ Navigate to different URL while keeping browser instance.
   - `url` (required)
   - `waitUntil` (optional): load event type
 - **Use case**: Moving between pages in workflow
-- **Returns**: New page title
+- **Returns**: New page title. The post-navigation network summary lists only **XHR/Fetch** requests (static assets — JS chunks, CSS, fonts, images — are hidden and counted) and is capped at the first 12 with a `… N more` note, so a heavy SPA load doesn't bury the signal.
+- **Note**: resets the active frame back to the main frame (see [Frame Tools](#5a-frame-tools-iframe-automation)).
 
 ### 5. Tab Management Tools 
 Tools for managing multiple browser tabs. New tabs opened via `window.open()`, `target="_blank"`, or user actions are automatically detected and tracked.
@@ -890,6 +896,45 @@ switchTab({ tab: 0 })
 // Switch by URL pattern
 switchTab({ tab: "google.com" })
 ```
+
+### 5a. Frame Tools (iframe automation)
+
+Tools for automating pages whose UI lives inside an `<iframe>` — including **cross-origin** iframes (e.g. a widget hosted on a different subdomain). Cross-origin frames can't be reached from page JavaScript (Same-Origin Policy blocks `iframe.contentDocument`), but ChromeTools resolves them over CDP, so the SOP doesn't apply.
+
+By default all tools operate on the **main frame**. After `switchFrame`, the element tools — `click`, `type`, `hover`, `selectOption`, `pressKey`, `scrollTo`, `waitForElement`, `analyzePage`, `findElementsByText`, `smartFindElement`, `executeScript` — run **inside the selected frame** until you reset. The active frame is reset automatically on `navigateTo`.
+
+#### listFrames
+List all frames on the current page so you can discover which one to switch into.
+- **Parameters**: None
+- **Returns**: `{ count, activeFrame, frames: [{ url, name, isMain }], hint }`
+- **Use case**: Find a cross-origin iframe (e.g. `app.example.com`) before switching into it
+
+#### switchFrame
+Set the active frame for subsequent element tools. Call with **no arguments** to reset back to the main frame.
+- **Parameters** (provide one, or none to reset):
+  - `frameUrl` (optional): substring matched against each frame's URL (e.g. `"app.example.com"`). Selects the first match.
+  - `frameSelector` (optional): CSS selector of the `<iframe>` element; its content frame becomes active.
+- **Returns**: `{ active: <frame url>, matcher, frames }` (or `{ active: null }` on reset)
+- **Use case**: Enter a cross-origin iframe to click/fill a form rendered there
+
+```javascript
+// Discover frames
+listFrames()
+// → { count: 2, frames: [ {url:".../app", isMain:true}, {url:"https://app.example.com/...", isMain:false} ] }
+
+// Enter the cross-origin iframe
+switchFrame({ frameUrl: "app.example.com" })
+
+// Now element tools target the iframe
+analyzePage()                       // returns the iframe's APOM tree
+findElementsByText({ text: "Save" }) // searches inside the iframe
+click({ id: "button_3" })            // clicks inside the iframe
+
+// Back to the main document
+switchFrame()
+```
+
+> `analyzePage` also includes a `frames` array in its output whenever the page has more than one frame, so the agent can discover iframes without a separate `listFrames` call.
 
 ### 6. Figma Tools 
 Design-to-code validation, file browsing, design system extraction, and comparison tools with automatic 3 MB compression.
@@ -1614,14 +1659,14 @@ Each tool definition is sent to the AI in every request, consuming context token
 | Group | Description | Tools (count) |
 |-------|-------------|---------------|
 | `core` | Basic tools | `ping`, `openBrowser` (2) |
-| `interaction` | User interaction | `click`, `type`, `scrollTo`, `waitForElement`, `hover` (5) |
+| `interaction` | User interaction & frames | `click`, `type`, `scrollTo`, `waitForElement`, `hover`, `selectOption`, `selectFromGroup`, `drag`, `scrollHorizontal`, `switchFrame`, `listFrames` (11) |
 | `inspection` | Page inspection | `getComputedCss`, `getBoxModel`, `screenshot`, `saveScreenshot` (4) |
 | `debug` | Debugging & network | `getConsoleLogs`, `listNetworkRequests`, `getNetworkRequest`, `filterNetworkRequests` (4) |
 | `advanced` | Advanced automation & AI | `executeScript`, `setStyles`, `setViewport`, `getViewport`, `navigateTo`, `smartFindElement`, `analyzePage`, `findElementsByText` (8) |
 | `recorder` | Scenario recording | `enableRecorder`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`, `appendScenarioToFile`, `generatePageObject` (9) |
 | `figma` | Figma integration | `getFigmaFrame`, `compareFigmaToElement`, `getFigmaSpecs`, `parseFigmaUrl`, `listFigmaPages`, `searchFigmaFrames`, `getFigmaComponents`, `getFigmaStyles`, `getFigmaColorPalette`, `convertFigmaToCode` (10) |
 
-**Total:** 42 tools across 7 groups
+**Total:** 48 tools across 7 groups
 
 **Configuration:**
 
@@ -1743,6 +1788,48 @@ To use Figma tools, you need to configure your Figma Personal Access Token.
 ```
 
 **Note:** Alternatively, you can pass the token directly in each Figma tool call using the `figmaToken` parameter, but using the environment variable is more convenient.
+
+---
+
+## Browser Connection (use your real, logged-in Chrome)
+
+By default ChromeTools connects to a Chrome with remote debugging on port **9222**, and if none is found it launches a fresh Chrome with a **temporary profile** (no cookies, no logins). To automate a site that needs your **authenticated session** (and to reach cross-origin iframes that depend on it), point ChromeTools at your own Chrome via environment variables — all optional:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CHROMETOOLS_BROWSER_WS_ENDPOINT` | _(unset)_ | Direct CDP WebSocket URL (e.g. `ws://127.0.0.1:9222/devtools/browser/<id>`). When set, ChromeTools connects straight to it, skipping port discovery and launch. |
+| `CHROMETOOLS_DEBUG_PORT` | `9222` | Remote-debugging port to discover/connect to (and to launch with). |
+| `CHROMETOOLS_USER_DATA_DIR` | `<temp>/chrome-mcp-profile` | Chrome profile used when launching a new instance. Point at a real (or cloned) profile to reuse its cookies/logins. |
+| `CHROMETOOLS_CHROME_PATH` | platform default | Path to the Chrome executable. |
+
+**Quick path — attach to your already-logged-in Chrome:**
+
+1. Fully close Chrome (a profile can't open a debug port while another Chrome holds it).
+2. Launch it with remote debugging on your normal profile:
+   ```bash
+   # Windows
+   chrome.exe --remote-debugging-port=9222
+   # macOS
+   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222
+   ```
+3. Log into the target site in that Chrome. ChromeTools will `connect()` to it — cross-origin iframes load authenticated, and `listTabs` sees your real tabs.
+
+```json
+{
+  "mcpServers": {
+    "chrometools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["chrometools-mcp"],
+      "env": {
+        "CHROMETOOLS_USER_DATA_DIR": "C:/Users/you/chrome-mcp-real-profile"
+      }
+    }
+  }
+}
+```
+
+Without any of these variables, behavior is unchanged.
 
 ---
 

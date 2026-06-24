@@ -298,21 +298,38 @@ export function formatDiagnosticsForAI(diagnostics) {
   const netActivity = diagnostics.networkActivity;
   const trackedRequests = netActivity.trackedRequests || [];
 
-  // Show requests detected within 200ms after action
-  if (trackedRequests.length > 0) {
-    output += `\n\n📡 Network requests (${trackedRequests.length}):`;
-    trackedRequests.forEach((req, idx) => {
+  // Show requests detected within 200ms after action.
+  // P1-6: filter to data requests (XHR/Fetch) and drop static assets — a single
+  // SPA navigation pulls dozens of JS chunks/CSS/fonts that drown the signal.
+  // Cap the printed list and summarize the rest.
+  const STATIC_TYPES = new Set(['Script', 'Stylesheet', 'Font', 'Image', 'Media', 'Manifest', 'Other']);
+  const MAX_SHOWN = 12;
+  const dataRequests = trackedRequests.filter(req => {
+    if (!req.type) return true; // no type info → keep (bridge/legacy)
+    return !STATIC_TYPES.has(req.type);
+  });
+  const staticDropped = trackedRequests.length - dataRequests.length;
+
+  if (dataRequests.length > 0) {
+    const shown = dataRequests.slice(0, MAX_SHOWN);
+    output += `\n\n📡 Network requests (XHR/Fetch: ${dataRequests.length}${staticDropped > 0 ? `, ${staticDropped} static asset(s) hidden` : ''}):`;
+    shown.forEach((req, idx) => {
       const statusIcon = req.status === 'pending' ? '⏳' :
                         (req.status === 'completed' || (typeof req.status === 'number' && req.status < 400) ? '✓' : '✗');
       const statusText = req.statusText || req.status || 'pending';
       output += `\n  ${idx + 1}. ${statusIcon} ${req.method} ${req.url}`;
       output += `\n     → Status: ${statusText}`;
     });
+    if (dataRequests.length > MAX_SHOWN) {
+      output += `\n  … ${dataRequests.length - MAX_SHOWN} more`;
+    }
 
     // Show if some requests are still pending after timeout
     if (netActivity.stillPending > 0) {
       output += `\n\n⏳ ${netActivity.stillPending} request(s) still pending after ${Math.round(netActivity.waitedMs)}ms timeout`;
     }
+  } else if (staticDropped > 0) {
+    output += `\n\n📡 No XHR/Fetch requests detected within 200ms (${staticDropped} static asset(s) hidden)`;
   } else {
     output += '\n\n📡 No network requests detected within 200ms';
   }

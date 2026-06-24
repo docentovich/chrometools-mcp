@@ -39,6 +39,7 @@ export const toolDefinitions = [
             timeout: { type: "number", description: "Max wait ms (default: 30000)" },
             waitForSelector: { type: "string", description: "CSS selector to wait for after click (atomic click+wait). Use for dropdowns/popups that render into portals." },
             waitTimeoutMs: { type: "number", description: "Timeout for waitForSelector in ms (default: 2000)." },
+            waitForRouteChange: { type: "boolean", description: "SPA route wait: after click, wait for location.pathname+search to change vs before; reports 'routeChanged:true/false'. Does not fail click on timeout. For URL-less view changes use waitForSelector." },
             autoAnalyzeAfter: { type: "boolean", description: "After click, diff APOM and append '+N appeared: id:\"text\"' delta to result. New ids are pre-registered for follow-up clicks. Use for dropdowns/menus opening with new options." },
           },
         },
@@ -368,6 +369,25 @@ Examples:
         },
       },
       {
+        name: "listFrames",
+        description: "List all frames (main + iframes) on the current page with url/name/isMain, plus the currently active frame. Use to discover cross-origin iframes (e.g. app.example.com), then switchFrame into one.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "switchFrame",
+        description: "Set the active frame so click/type/hover/analyzePage/find/executeScript/waitForElement run INSIDE it — required to automate cross-origin iframes (resolved via CDP, bypassing Same-Origin Policy). Call with no args to reset to the main frame. Auto-resets on navigateTo.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            frameUrl: { type: "string", description: "Substring matched against each frame's URL (e.g. 'app.example.com'). Mutually exclusive with frameSelector." },
+            frameSelector: { type: "string", description: "CSS selector of the <iframe> element; its content frame becomes active. Mutually exclusive with frameUrl." },
+          },
+        },
+      },
+      {
         name: "getFigmaFrame",
         description: "Export Figma frame as PNG. Requires API token and file/node IDs.",
         inputSchema: {
@@ -506,6 +526,7 @@ Examples:
           properties: {
             description: { type: "string", description: "Natural language description" },
             maxResults: { type: "number", minimum: 1, maximum: 20, description: "Max candidates (default: 5)" },
+            minConfidence: { type: "number", minimum: 0, maximum: 1, description: "Confidence threshold (default: 0.6) for auto-executing `action`. Below it (or too close to runner-up), action is skipped and candidates returned with 'actionSkipped'. Prevents auto-clicking the wrong control." },
             action: {
               type: "object",
               properties: {

@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.6.0] - 2026-06-25
+
+### Added
+- **iframe automation (`switchFrame` / `listFrames`)** — Automate pages whose UI lives in an `<iframe>`, including **cross-origin** ones (resolved over CDP, bypassing Same-Origin Policy). `switchFrame({ frameUrl | frameSelector })` sets an active frame so `click`, `type`, `hover`, `selectOption`, `pressKey`, `scrollTo`, `waitForElement`, `analyzePage`, `findElementsByText`, `smartFindElement`, `executeScript` all run inside it; call `switchFrame()` with no args to reset. `listFrames()` lists frames; `analyzePage` also reports a `frames` array when >1 frame exists. Active frame auto-resets on `navigateTo`
+- **Browser connection env vars** — `CHROMETOOLS_BROWSER_WS_ENDPOINT` (connect directly to a CDP WebSocket), `CHROMETOOLS_DEBUG_PORT` (default 9222), `CHROMETOOLS_USER_DATA_DIR` (use a real/logged-in Chrome profile instead of a blank temp one), `CHROMETOOLS_CHROME_PATH`. Lets the server attach to your authenticated Chrome session — required for sites that need real cookies/cross-subdomain session
+- **`smartFindElement({ minConfidence })`** — Confidence threshold (default 0.6) gating auto-`action`. If the best match is below it or too close to the runner-up, the action is skipped and candidates are returned with an `actionSkipped` reason. Candidate coverage broadened (`[onclick]`, `[role=menuitem]`, `[role=tab]`, nav links); scoring penalizes text that doesn't match the description and rewards nav/menu context
+- **`click({ waitForRouteChange })`** — For SPAs: after click, waits for `location.pathname+search` to change and reports `routeChanged:true/false` (never fails the click on timeout)
+
+### Changed
+- **`executeScript` top-level `return`** — Now runs the snippet as-is first and only re-wraps in an async IIFE if the engine reports an "Illegal return statement". Handles `const x=…; return x`, callbacks containing `function`, and bare expressions — replaces the fragile `^return` + no-`function` heuristic
+- **`navigateTo` network summary** — Lists only XHR/Fetch requests (static assets hidden and counted), capped at 12 with a `… N more` note, instead of dumping every chunk/CSS/font
+
+### Fixed
+- **`findElementsByText({ action })` in iframes** — The action path resolved the selector against the main frame even after `switchFrame`, causing `Element not found for action`. Now resolves inside the active frame
+
 ## [3.5.6] - 2026-05-28
 
 ### Added

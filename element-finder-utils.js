@@ -177,6 +177,12 @@ function analyzeButtonContextInPage(element) {
 
     // Primary button indicators
     isPrimary: /primary|main|btn-primary|button-primary/i.test(element.className || ''),
+
+    // Navigation/menu context (P1-3): menu items and nav links must be able to
+    // out-score a form's primary submit button when the user asked for navigation.
+    hasMenuRole: element.getAttribute('role') === 'menuitem' || element.getAttribute('role') === 'tab',
+    hasOnClick: element.hasAttribute('onclick'),
+    isNavContext: element.closest('nav, [role="navigation"], [role="menu"], [role="menubar"], [role="tablist"]') !== null,
   };
 
   // Check if it's the last button in form
@@ -217,6 +223,10 @@ function scoreSubmitButton(element, context, description) {
   if (context.hasSubmitIcon) score += 5;        // submit icon
   if (context.isPrimary) score += 15;           // primary button style
 
+  // Navigation/menu context bonus (P1-3)
+  if (context.hasMenuRole) score += 15;         // role=menuitem/tab
+  if (context.isNavContext) score += 10;        // inside nav/menu container
+
   // Visibility bonus
   if (context.isVisible) score += 10;
 
@@ -233,6 +243,22 @@ function scoreSubmitButton(element, context, description) {
   // Penalty for links without submit keywords
   if (context.isLink && !matchesSubmitKeyword(context.text, description)) {
     score -= 20;
+  }
+
+  // Text-mismatch penalty (P1-3): when the description carries actual words but
+  // the element's text neither contains nor is contained by it AND it doesn't hit
+  // a submit keyword, it's almost certainly the wrong control (e.g. asked
+  // "Настройки", element says "Пополнить"). Without this, a primary form submit
+  // wins on structural points alone and gets auto-clicked.
+  if (descLower.trim().length > 0 && text.length > 0) {
+    const textMatchesDesc = text.includes(descLower) || descLower.includes(text);
+    if (!textMatchesDesc && !matchesSubmitKeyword(context.text, description)) {
+      // Strong enough to overcome a full house of structural submit points
+      // (type=submit + in-form + last + primary + visible ≈ +115), so a button
+      // whose text is unrelated to the request can't be auto-clicked. Submit
+      // keywords (Save/Войти/…) are exempt above, so real submits aren't harmed.
+      score -= 60;
+    }
   }
 
   return score;
@@ -571,6 +597,18 @@ function explainScore(element, context, description, score) {
   }
   if (context.isLink && !matchesSubmitKeyword(context.text, description)) {
     reasons.push('link without submit keyword (-20)');
+  }
+  if (context.hasMenuRole) reasons.push('menu/tab role (+15)');
+  if (context.isNavContext) reasons.push('nav/menu context (+10)');
+  {
+    const t = (context.text || '').toLowerCase();
+    const d = description.toLowerCase();
+    if (d.trim().length > 0 && t.length > 0) {
+      const m = t.includes(d) || d.includes(t);
+      if (!m && !matchesSubmitKeyword(context.text, description)) {
+        reasons.push('text ≠ description (-60)');
+      }
+    }
   }
 
   // Common reasons

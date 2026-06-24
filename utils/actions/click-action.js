@@ -28,7 +28,8 @@ export async function executeClickAction(page, element, options = {}) {
     skipNetworkWait = false,
     networkWaitTimeout = 3000,
     waitForSelector = null,
-    waitTimeoutMs = 2000
+    waitTimeoutMs = 2000,
+    waitForRouteChange = false
   } = options;
 
   // Capture timestamp and URL BEFORE click for diagnostics
@@ -150,6 +151,33 @@ export async function executeClickAction(page, element, options = {}) {
     }
   }
 
+  // SPA route-change wait (P1-5): SPAs navigate via history.pushState, so page.url()
+  // diagnostics below may not register a "navigation". Wait for location.pathname+search
+  // to actually change relative to before. Best-effort — a timeout never fails the click.
+  let routeChangeResult = null;
+  if (waitForRouteChange) {
+    let pathBefore;
+    try {
+      pathBefore = await page.evaluate(() => location.pathname + location.search);
+    } catch (e) {
+      pathBefore = null;
+    }
+    if (pathBefore !== null) {
+      const routeStart = Date.now();
+      try {
+        await page.waitForFunction(
+          (before) => (location.pathname + location.search) !== before,
+          { timeout: waitTimeoutMs },
+          pathBefore
+        );
+        const pathAfter = await page.evaluate(() => location.pathname + location.search);
+        routeChangeResult = { routeChanged: true, from: pathBefore, to: pathAfter, changedInMs: Date.now() - routeStart };
+      } catch (e) {
+        routeChangeResult = { routeChanged: false, from: pathBefore, timeoutMs: waitTimeoutMs };
+      }
+    }
+  }
+
   // Check if element was detached from DOM during click (Angular *ngFor + Zone.js pattern)
   let elementDetached = false;
   try {
@@ -228,6 +256,15 @@ export async function executeClickAction(page, element, options = {}) {
 
   if (hints.suggestedNext.length > 0) {
     hintsText += `\nSuggested next: ${hints.suggestedNext.join('; ')}`;
+  }
+
+  // Surface SPA route-change outcome to the caller
+  if (routeChangeResult) {
+    if (routeChangeResult.routeChanged) {
+      hintsText += `\nRoute changed: "${routeChangeResult.from}" → "${routeChangeResult.to}" (${routeChangeResult.changedInMs}ms)`;
+    } else {
+      hintsText += `\n⚠️ ROUTE_UNCHANGED: location did not change within ${routeChangeResult.timeoutMs}ms after click (still "${routeChangeResult.from}"). View may render without a URL change — use waitForSelector instead.`;
+    }
   }
 
   // Surface waitForSelector outcome to the caller (success or timeout)
