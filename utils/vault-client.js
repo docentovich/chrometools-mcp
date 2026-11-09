@@ -10,43 +10,94 @@ import { getBrowser, EXTENSION_ID, ensureExtensionLoaded } from '../browser/brow
 
 const WORKER_URL_PREFIX = `chrome-extension://${EXTENSION_ID}/`;
 
-function findWorkerTarget(browser) {
-  return browser.targets().find(t =>
-    t.type() === 'service_worker' && t.url().startsWith(WORKER_URL_PREFIX)
-  );
+const STEP_TIMEOUT_MS = 5000;
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    })
+  ]).finally(() => clearTimeout(timer));
+}
+
+/** Current extension service worker target id, straight from Chrome (not Puppeteer's cache). */
+async function findWorkerTargetId(browser) {
+  const session = await browser.target().createCDPSession();
+  try {
+    const { targetInfos } = await withTimeout(session.send('Target.getTargets'), STEP_TIMEOUT_MS, 'Target.getTargets');
+    const info = targetInfos.find(t => t.type === 'service_worker' && t.url.startsWith(WORKER_URL_PREFIX));
+    return info ? info.targetId : null;
+  } finally {
+    await session.detach().catch(() => {});
+  }
 }
 
 /**
- * Get the extension service worker with self.__ctVault ready.
- * The service worker may be idle (no target) - then reload the extension to wake it.
- * Its target also appears before the module finishes executing, so wait for the API.
+ * Resolve the extension worker with self.__ctVault ready.
+ * Matches the Puppeteer target by Chrome's target id, so a stale target left
+ * after an extension reload (e.g. by another MCP process) is never used.
+ * Every step has a timeout: a dead worker fails fast instead of hanging.
+ * @param {boolean} reload - reload the extension first (wakes an idle worker)
  */
-async function getVaultWorker() {
+async function resolveWorker(reload) {
   const browser = await getBrowser();
 
-  let target = findWorkerTarget(browser);
-  if (!target) {
+  if (reload) await ensureExtensionLoaded(browser, { force: true });
+
+  let targetId = await findWorkerTargetId(browser);
+  if (!targetId && !reload) {
+    // Worker idle or extension not loaded yet: load/reload wakes it
     await ensureExtensionLoaded(browser, { force: true });
-    target = await browser.waitForTarget(
-      t => t.type() === 'service_worker' && t.url().startsWith(WORKER_URL_PREFIX),
-      { timeout: 5000 }
-    ).catch(() => null);
   }
-  if (!target) {
+  for (let i = 0; !targetId && i < 25; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    targetId = await findWorkerTargetId(browser);
+  }
+  if (!targetId) {
     throw new Error('ChromeTools extension is not loaded in this Chrome. ' +
       'If it is listed in chrome://extensions but disabled, turn on "Developer mode" (top right) there. ' +
       'If MCP attached to a Chrome started earlier without --enable-unsafe-extension-debugging, ' +
       'fully quit that Chrome so MCP launches a new one (it loads the extension automatically).');
   }
 
-  const worker = await target.worker();
+  const sameTarget = t => t._targetId === targetId;
+  const target = browser.targets().find(sameTarget) ||
+    await withTimeout(browser.waitForTarget(sameTarget, { timeout: STEP_TIMEOUT_MS }), STEP_TIMEOUT_MS + 500, 'waitForTarget');
+
+  const worker = await withTimeout(target.worker(), STEP_TIMEOUT_MS, 'attach to extension worker');
   if (!worker) throw new Error('Cannot attach to ChromeTools extension service worker');
 
-  for (let i = 0; i < 50; i++) {
-    if (await worker.evaluate(() => !!self.__ctVault).catch(() => false)) return worker;
+  // Target appears before the module finishes executing: wait for the API
+  const deadline = Date.now() + STEP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const ready = await withTimeout(worker.evaluate(() => !!self.__ctVault), 2000, 'vault API check').catch(() => false);
+    if (ready) return worker;
     await new Promise(r => setTimeout(r, 100));
   }
   throw new Error('ChromeTools extension vault API is not available (outdated extension?)');
+}
+
+/**
+ * Call self.__ctVault.<method>(arg) in the extension worker.
+ * On failure (stale/dead worker) retries once after reloading the extension.
+ */
+async function callVault(method, arg, timeoutMs = STEP_TIMEOUT_MS) {
+  let lastError;
+  for (const reload of [false, true]) {
+    try {
+      const worker = await resolveWorker(reload);
+      return await withTimeout(
+        worker.evaluate((m, a) => self.__ctVault[m](a), method, arg),
+        timeoutMs,
+        `vault.${method}`
+      );
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 // Redaction of tool responses is enabled once the vault is known to hold
@@ -59,8 +110,7 @@ export function isRedactionArmed() {
 
 /** List credentials without passwords. */
 export async function listCredentials(origin) {
-  const worker = await getVaultWorker();
-  const list = await worker.evaluate(o => self.__ctVault.list(o), origin || null);
+  const list = await callVault('list', origin || null);
   if (list.length) redactionArmed = true;
   return list;
 }
@@ -70,9 +120,9 @@ export async function listCredentials(origin) {
  * @returns {Promise<{ok: boolean, error?: string, name?: string, field?: string, origin?: string}>}
  */
 export async function fillCredential(request) {
-  const worker = await getVaultWorker();
   redactionArmed = true;
-  return worker.evaluate(r => self.__ctVault.fill(r), request);
+  // fill probes tabs/frames via chrome.scripting: allow more time
+  return callVault('fill', request, 20000);
 }
 
 /**
@@ -89,8 +139,7 @@ export async function redactToolResult(result) {
   if (!textItems.length) return result;
 
   try {
-    const worker = await getVaultWorker();
-    const { texts } = await worker.evaluate(t => self.__ctVault.redact(t), textItems.map(c => c.text));
+    const { texts } = await callVault('redact', textItems.map(c => c.text));
     let i = 0;
     return {
       ...result,

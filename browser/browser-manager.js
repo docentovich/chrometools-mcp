@@ -277,12 +277,16 @@ This requires an X server to display the browser GUI.
  * @returns {Promise<boolean>} true if the extension is loaded
  */
 export async function ensureExtensionLoaded(browser, { force = false } = {}) {
-  const isOurs = t => t.url().startsWith(`chrome-extension://${EXTENSION_ID}/`);
-  if (!force && browser.targets().some(isOurs)) return true;
-
   try {
     const session = await browser.target().createCDPSession();
     try {
+      if (!force) {
+        // Ask Chrome directly: right after connect Puppeteer's browser.targets()
+        // may not list the extension service worker yet. Reloading an already
+        // loaded extension breaks other MCP processes attached to its worker.
+        const { targetInfos } = await session.send('Target.getTargets');
+        if (targetInfos.some(t => t.url.startsWith(`chrome-extension://${EXTENSION_ID}/`))) return true;
+      }
       await session.send('Extensions.loadUnpacked', { path: path.resolve(EXTENSION_PATH) });
     } finally {
       await session.detach().catch(() => {});
