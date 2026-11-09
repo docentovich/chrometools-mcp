@@ -42,6 +42,21 @@ export const TypeSchema = z.object({
   message: "Either 'id' or 'selector' must be provided, but not both"
 });
 
+export const TypeCredentialSchema = z.object({
+  name: z.string().describe("Credential name from listCredentials (e.g. 'site.ru'). The password is stored in the ChromeTools extension and never returned to you."),
+  field: z.enum(["password", "username"]).optional().describe("Which part to type: 'password' (default) or 'username' (login)."),
+  id: z.string().optional().describe("APOM element ID from analyzePage. Mutually exclusive with selector."),
+  selector: z.string().optional().describe("CSS selector of the input. Mutually exclusive with id."),
+  allowNonPasswordField: z.boolean().optional().describe("Allow typing the password into a field that is not input[type=password] (custom widgets). Default: false."),
+  timeout: z.number().optional().describe("Maximum time for the operation in ms (default: 30000)"),
+}).refine(data => (data.id && !data.selector) || (!data.id && data.selector), {
+  message: "Either 'id' or 'selector' must be provided, but not both"
+});
+
+export const ListCredentialsSchema = z.object({
+  currentPageOnly: z.boolean().optional().describe("Only credentials allowed on the current page origin (default: false)."),
+});
+
 export const HoverSchema = z.object({
   id: z.string().optional().describe("APOM element ID from analyzePage. Mutually exclusive with selector."),
   selector: z.string().optional().describe("CSS selector for element to hover. Mutually exclusive with id."),

@@ -16,6 +16,9 @@ import { handleNewTab, openPages, lastPage } from './page-manager.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION_PATH = path.join(__dirname, '..', 'extension').replace(/\\/g, '/');
 
+// Fixed extension ID, derived from "key" in extension/manifest.json
+export const EXTENSION_ID = 'dmehkibmncgphijnigkahhlekgajhpbl';
+
 // Global browser instance (persists between requests)
 let browserPromise = null;
 let chromeProcess = null;
@@ -117,6 +120,7 @@ export async function getBrowser() {
           });
 
           setupNewTabTracking(browser);
+          await ensureExtensionLoaded(browser);
           scheduleBridgeReconnect();
           return browser;
         }
@@ -145,6 +149,8 @@ export async function getBrowser() {
           // Set up new tab tracking
           setupNewTabTracking(browser);
 
+          await ensureExtensionLoaded(browser);
+
           // Existing Chrome may already have bridge running — try to connect
           scheduleBridgeReconnect();
 
@@ -167,8 +173,10 @@ export async function getBrowser() {
           '--no-first-run',
           '--no-default-browser-check',
           `--user-data-dir=${userDataDir}`,
-          // Auto-load ChromeTools extension
+          // Auto-load ChromeTools extension (ignored by Chrome 137+)
           `--load-extension=${EXTENSION_PATH}`,
+          // Chrome 137+: allows CDP Extensions.loadUnpacked (see ensureExtensionLoaded)
+          '--enable-unsafe-extension-debugging',
         ];
 
         debugLog("Extension path:", EXTENSION_PATH);
@@ -202,6 +210,8 @@ export async function getBrowser() {
 
         // Set up new tab tracking
         setupNewTabTracking(browser);
+
+        await ensureExtensionLoaded(browser);
 
         // Extension needs time to load and start the bridge service.
         // Schedule bridge reconnection after Chrome is ready.
@@ -253,6 +263,37 @@ This requires an X server to display the browser GUI.
   }
 
   return await browserPromise;
+}
+
+/**
+ * Make sure the ChromeTools extension is loaded.
+ * Chrome 137+ ignores --load-extension, so load it via CDP Extensions.loadUnpacked.
+ * That requires Chrome started with --enable-unsafe-extension-debugging; for an
+ * existing Chrome without the flag this fails and we only log it.
+ * Extension data (chrome.storage, IndexedDB) persists in the profile across restarts.
+ * @param {Browser} browser
+ * @param {Object} [options]
+ * @param {boolean} [options.force] - reload even if extension targets exist (wakes an idle service worker)
+ * @returns {Promise<boolean>} true if the extension is loaded
+ */
+export async function ensureExtensionLoaded(browser, { force = false } = {}) {
+  const isOurs = t => t.url().startsWith(`chrome-extension://${EXTENSION_ID}/`);
+  if (!force && browser.targets().some(isOurs)) return true;
+
+  try {
+    const session = await browser.target().createCDPSession();
+    try {
+      await session.send('Extensions.loadUnpacked', { path: path.resolve(EXTENSION_PATH) });
+    } finally {
+      await session.detach().catch(() => {});
+    }
+    debugLog('Extension loaded via CDP Extensions.loadUnpacked');
+    return true;
+  } catch (error) {
+    console.error(`[chrometools-mcp] ChromeTools extension not loaded: ${error.message}. ` +
+      `Start Chrome with --enable-unsafe-extension-debugging or install the extension manually.`);
+    return false;
+  }
 }
 
 /**

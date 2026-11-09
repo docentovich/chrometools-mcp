@@ -12,6 +12,8 @@ import {homedir} from 'os';
 
 // Import browser and platform utilities
 import {closeBrowser, isConnectedToExistingChrome} from './browser/browser-manager.js';
+import * as vaultClient from './utils/vault-client.js';
+import {randomUUID} from 'crypto';
 import {isWSL} from './utils/platform-utils.js';
 
 // Import Bridge client for Chrome Extension communication (via Bridge Service)
@@ -118,7 +120,14 @@ const DEBUG_MODE = process.env.CHROMETOOLS_DEBUG === 'true';
 const debugLog = DEBUG_MODE ? console.error : () => {};
 
 // Figma token from environment variable (can be set in MCP config)
-const FIGMA_TOKEN = process.env.FIGMA_TOKEN || null;
+const readFigmaTokenFile = (file) => {
+  if (!file || !existsSync(file)) {
+    return null;
+  }
+  const match = readFileSync(file, 'utf8').match(/^\s*FIGMA_TOKEN\s*=\s*(\S+)\s*$/m);
+  return match ? match[1] : null;
+};
+const FIGMA_TOKEN = process.env.FIGMA_TOKEN || readFigmaTokenFile(process.env.FIGMA_TOKEN_FILE) || null;
 
 // Tool filtering - read ENABLED_TOOLS environment variable
 // If set, only enable specified tool groups (comma-separated list)
@@ -306,11 +315,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // Execute with timeout wrapper (2 minutes default, 5 minutes for scenario execution)
     const toolTimeout = name === 'executeScenario' ? 360000 : 120000; // 6 min for scenarios, 2 min for others
 
-    return await executeToolWithTimeout(name, async () => {
+    const result = await executeToolWithTimeout(name, async () => {
       return await executeToolInternal(name, args);
     }, toolTimeout);
+    // Credential vault: strip saved passwords from any output
+    return await vaultClient.redactToolResult(result);
   } catch (error) {
-    return {
+    return await vaultClient.redactToolResult({
       content: [{
         type: 'text',
         text: JSON.stringify({
@@ -320,7 +331,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }, null, 2)
       }],
       isError: true,
-    };
+    });
   }
 });
 
@@ -345,6 +356,7 @@ async function executeToolInternal(name, args) {
 
     if (name === "openBrowser") {
       const validatedArgs = schemas.OpenBrowserSchema.parse(args);
+      vaultClient.assertNotExtensionUrl(validatedArgs.url);
 
       // Capture timestamp BEFORE opening for diagnostics
       const beforeOpenTimestamp = Date.now();
@@ -661,6 +673,105 @@ async function executeToolInternal(name, args) {
       );
 
       return Promise.race([typeOperation(), timeoutPromise]);
+    }
+
+    if (name === "typeCredential") {
+      const validatedArgs = schemas.TypeCredentialSchema.parse(args);
+      const page = await getLastOpenPage();
+      const timeout = validatedArgs.timeout || 30000;
+      const field = validatedArgs.field || 'password';
+
+      const typeCredentialOperation = async () => {
+        const identifier = validatedArgs.id || validatedArgs.selector;
+        const ctx = await getTargetFrame(page);
+
+        const resolved = await resolveSelector(ctx, identifier);
+        if (!resolved.found) {
+          throw new Error(`Element not found: ${identifier}${resolved.isPageObjectId ? ' (APOM ID)' : ' (CSS selector)'}`);
+        }
+        const element = await ctx.$(resolved.selector);
+        if (!element) {
+          throw new Error(`Element not found: ${identifier}`);
+        }
+
+        // One-time marker: the extension finds the field by it in any tab/frame
+        const nonce = randomUUID();
+        await element.evaluate((el, n) => {
+          el.scrollIntoView({ behavior: 'instant', block: 'center' });
+          el.setAttribute('data-ct-fill', n);
+        }, nonce);
+
+        let result;
+        try {
+          result = await vaultClient.fillCredential({
+            name: validatedArgs.name,
+            field,
+            nonce,
+            pageUrl: page.url(),
+            allowNonPasswordField: !!validatedArgs.allowNonPasswordField
+          });
+        } finally {
+          // Extension removes the marker on success; clean up on any failure
+          await element.evaluate(el => el.removeAttribute('data-ct-fill')).catch(() => {});
+        }
+        if (!result?.ok) {
+          throw new Error(result?.error || 'Extension failed to type the credential');
+        }
+
+        const afterTypeTimestamp = Date.now();
+        const diagnostics = await runPostClickDiagnostics(page, afterTypeTimestamp, { networkWaitTimeout: 3000 });
+        return {
+          content: [{
+            type: "text",
+            text: `Typed ${field} of "${result.name}" into ${identifier} (${result.origin})${formatDiagnosticsForAI(diagnostics)}`
+          }]
+        };
+      };
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`typeCredential timed out after ${timeout}ms`)), timeout)
+      );
+      return Promise.race([typeCredentialOperation(), timeoutPromise]);
+    }
+
+    if (name === "listCredentials") {
+      const validatedArgs = schemas.ListCredentialsSchema.parse(args);
+      let currentOrigin = null;
+      try {
+        const page = await getLastOpenPage();
+        const ctx = await getTargetFrame(page);
+        const o = new URL(ctx.url()).origin;
+        currentOrigin = o === 'null' ? null : o;
+      } catch {
+        // No page open - list everything
+      }
+      if (validatedArgs.currentPageOnly && !currentOrigin) {
+        throw new Error('No current page to filter by');
+      }
+
+      const all = await vaultClient.listCredentials(validatedArgs.currentPageOnly ? currentOrigin : null);
+      const matching = currentOrigin
+        ? new Set((await vaultClient.listCredentials(currentOrigin)).map(c => c.name))
+        : new Set();
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            count: all.length,
+            currentOrigin,
+            credentials: all.map(c => ({
+              name: c.name,
+              username: c.username || null,
+              origins: c.origins,
+              matchesCurrentPage: matching.has(c.name)
+            })),
+            hint: all.length
+              ? 'Use typeCredential({ name, id, field }) for login and password fields.'
+              : 'No saved credentials. Ask the user to add one in the ChromeTools extension popup (Passwords tab).'
+          }, null, 2)
+        }]
+      };
     }
 
     if (name === "executeModelAction") {
@@ -1075,6 +1186,7 @@ async function executeToolInternal(name, args) {
 
       // Run in the active frame (P0-1) — defaults to main frame
       const ctx = await getTargetFrame(page);
+      vaultClient.assertNotExtensionUrl(ctx.url());
       const scriptToRun = validatedArgs.script;
 
       // Wrap operation in timeout
@@ -1789,6 +1901,7 @@ async function executeToolInternal(name, args) {
 
     if (name === "navigateTo") {
       const validatedArgs = schemas.NavigateToSchema.parse(args);
+      vaultClient.assertNotExtensionUrl(validatedArgs.url);
 
       // Auto-open browser if no page is open (instead of throwing error)
       let page;
@@ -2946,7 +3059,7 @@ Start coding now.`;
           position: resolved.metadata.position || null,
           visible: element.offsetWidth > 0 && element.offsetHeight > 0,
           text: element.textContent?.trim() || '',
-          value: element.value || null,
+          value: element.type === 'password' && element.value ? '***' : (element.value || null),
           attributes: {
             id: element.id || null,
             class: element.className || null,

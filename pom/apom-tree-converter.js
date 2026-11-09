@@ -989,7 +989,8 @@ function buildAPOMTree(interactiveOnly = true, viewportOnly = false, portalOpts 
           placeholder: element.placeholder || null,
           required: element.required || false,
           disabled: element.disabled || false,
-          value: element.value || '',
+          // Never expose password field contents
+          value: inputType === 'password' && element.value ? '***' : (element.value || ''),
           checked: element.checked || undefined,
           label: labelText,
           min: element.min || undefined,

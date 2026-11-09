@@ -14,6 +14,8 @@
  * 4. Extension doesn't care how many clients are connected
  */
 
+import * as vault from './vault.js';
+
 const HOST_NAME = 'com.chrometools.bridge';
 
 // State
@@ -637,8 +639,56 @@ function recordAction(action) {
 // Message Handling from Content Scripts & Popup
 // ============================================
 
+// ============================================
+// Credential Vault
+// ============================================
+
+/**
+ * Vault messages are accepted only from the extension's own action popup.
+ * A popup opened as a regular tab has sender.tab and is rejected.
+ */
+function isTrustedPopup(sender) {
+  return sender.id === chrome.runtime.id &&
+    !sender.tab &&
+    typeof sender.url === 'string' &&
+    sender.url.startsWith(chrome.runtime.getURL('popup/popup.html'));
+}
+
+const VAULT_HANDLERS = {
+  VAULT_LIST: () => vault.listEntries(),
+  VAULT_SAVE: (m) => vault.saveEntry(m.entry || {}),
+  VAULT_DELETE: (m) => vault.deleteEntry(m.name),
+  VAULT_REVEAL: async (m) => ({ password: (await vault.getSecretEntry(m.name)).password })
+};
+
+function handleVaultMessage(message, sender, sendResponse) {
+  if (!isTrustedPopup(sender)) {
+    sendResponse({ success: false, error: 'Vault is accessible only from the extension popup' });
+    return;
+  }
+  VAULT_HANDLERS[message.type](message)
+    .then(result => sendResponse({ success: true, result }))
+    .catch(err => sendResponse({ success: false, error: err.message }));
+}
+
+// API for MCP server (called via CDP on this service worker).
+// Never returns passwords.
+self.__ctVault = {
+  list: (origin) => vault.listEntries(origin),
+  status: () => vault.status(),
+  // Returns { ok, error } only. Errors are returned, not thrown, so CDP does not
+  // wrap them into a stack trace.
+  fill: (req) => vault.fillCredential(req).catch(err => ({ ok: false, error: err.message })),
+  redact: (texts) => vault.redactTexts(texts)
+};
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('[ChromeTools] Message from', sender.tab ? `tab ${sender.tab.id}` : 'popup', ':', message.type);
+
+  if (VAULT_HANDLERS[message.type]) {
+    handleVaultMessage(message, sender, sendResponse);
+    return true;
+  }
 
   switch (message.type) {
     // From content script

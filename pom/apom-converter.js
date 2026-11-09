@@ -88,7 +88,7 @@ function convertToAPOM(analysis, options = {}) {
             placeholder: field.placeholder,
             required: field.required || false,
             label: field.label,
-            value: field.value || '',
+            value: field.type === 'password' && field.value ? '***' : (field.value || ''),
             disabled: field.disabled || false
           };
 

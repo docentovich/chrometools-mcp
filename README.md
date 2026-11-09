@@ -161,6 +161,8 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 
 **Important:** ChromeTools opens Chrome with a separate user profile, so you must install the extension **after** ChromeTools starts Chrome for the first time.
 
+> **Auto-loading:** when ChromeTools launches Chrome itself, it loads the extension automatically (via CDP `Extensions.loadUnpacked`, since Chrome 137+ ignores `--load-extension`). Manual installation below is only needed when ChromeTools attaches to a Chrome you started yourself without `--enable-unsafe-extension-debugging`.
+
 **Step 1:** Start ChromeTools MCP server first
 - Make sure ChromeTools is running through your MCP client (Claude Desktop, Cursor, etc.)
 - Or run it manually: `npx chrometools-mcp`
@@ -227,6 +229,7 @@ The Chrome Extension is **required** for scenario recording and other advanced f
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, pressKey, setStyles, setViewport, getViewport, navigateTo
   - [Tab Management Tools](#5-tab-management-tools)  - listTabs, switchTab
   - [Frame Tools](#5a-frame-tools-iframe-automation)  - listFrames, switchFrame (cross-origin iframe automation)
+  - [Credential Vault](#5b-credential-vault-saved-passwords)  - typeCredential, listCredentials (log in without passing passwords through the AI)
   - [Recorder Tools](#7-recorder-tools)  - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
   - [API / Swagger Tools](#8-api--swagger-tools) - loadSwagger, generateApiModels
 - [Typical Workflow Example](#typical-workflow-example)
@@ -935,6 +938,53 @@ switchFrame()
 ```
 
 > `analyzePage` also includes a `frames` array in its output whenever the page has more than one frame, so the agent can discover iframes without a separate `listFrames` call.
+
+### 5b. Credential Vault (saved passwords)
+
+Log in to sites without passing passwords through the AI. You save logins and passwords in the ChromeTools extension; the AI only refers to them by name, and the extension types the value into the page itself. The password never appears in MCP requests or responses.
+
+**Saving a password (user):** click the ChromeTools icon in the Chrome toolbar → **Passwords** tab → fill in **URL**, **Login**, **Password** (and an optional **Name**, default: the site host) → **Save**. The URL is pre-filled with the current tab's site. Entries can be viewed, edited and deleted in the same tab.
+
+- Passwords are stored in `chrome.storage.local`, encrypted with AES-GCM. The key is a non-extractable WebCrypto key kept in the extension's IndexedDB (no master password).
+- Data lives in the Chrome profile ChromeTools uses (`CHROMETOOLS_USER_DATA_DIR`, default `<temp>/chrome-mcp-profile`) and survives Chrome restarts.
+
+**If the vault tools report "extension is not loaded":**
+- The extension is listed in `chrome://extensions` but switched off with "enable developer mode" warning: turn on **Developer mode** (top right). Needed once per profile, typically in profiles where the extension was installed manually before.
+- ChromeTools attached to a Chrome that was started earlier without `--enable-unsafe-extension-debugging` (e.g. by an older ChromeTools version): fully quit that Chrome (closing windows may leave a background process holding port 9222) and call any tool, ChromeTools launches a new Chrome and loads the extension.
+- After loading, the CT icon is in the extensions (puzzle) menu; pin it to keep it on the toolbar.
+
+#### listCredentials
+List saved credentials without passwords.
+- **Parameters**: `currentPageOnly` (optional) - only entries allowed on the current page
+- **Returns**: `{ count, currentOrigin, credentials: [{ name, username, origins, matchesCurrentPage }] }`
+
+#### typeCredential
+Type a saved login or password into an input. The extension types the value; MCP gets only success or an error.
+- **Parameters**:
+  - `name` (required): credential name from `listCredentials`
+  - `field` (optional): `"password"` (default) or `"username"`
+  - `id` or `selector` (required): APOM ID or CSS selector of the input
+  - `allowNonPasswordField` (optional): allow the password into a field that is not `input[type=password]` (custom widgets)
+- **Works with** the active frame (`switchFrame`), including cross-origin iframes, and with React/Vue/Angular inputs.
+
+```javascript
+listCredentials({ currentPageOnly: true })
+// → { credentials: [{ name: "my.novofon.ru", username: "admin", matchesCurrentPage: true, ... }] }
+
+typeCredential({ name: "my.novofon.ru", field: "username", id: "input_3" })
+typeCredential({ name: "my.novofon.ru", id: "input_4" })
+click({ id: "button_5" })
+```
+
+**Protection:**
+- **Site binding:** a credential is typed only into a frame whose origin matches the saved URL (`https://*.site.ru` wildcards are supported). A prompt-injected page on another site cannot get it.
+- **Password fields only:** the password goes only into `input[type=password]` unless `allowNonPasswordField` is set.
+- **Output redaction:** after the vault is used, every tool response is checked by the extension, and saved passwords (raw, URL/form-encoded, JSON-escaped, base64, HTTP Basic) are replaced with `[REDACTED:<name>]`. This covers `getNetworkRequest` bodies, `executeScript` results, console logs, etc. If the check cannot run, the response is withheld.
+- `analyzePage` / `getElementDetails` never return the contents of password fields (`***`).
+- `navigateTo` / `openBrowser` / `executeScript` refuse `chrome-extension://` pages.
+- **Recorder:** a credential typed during recording is saved as a `typeCredential` step with the name only; `executeScenario` replays it through the vault.
+
+> **Limitation:** `executeScript` runs arbitrary JavaScript on the page, so a deliberately obfuscated read of a filled field (e.g. reversed string) is not caught by redaction. For full isolation disable `executeScript` via `ENABLED_TOOLS`.
 
 ### 6. Figma Tools 
 Design-to-code validation, file browsing, design system extraction, and comparison tools with automatic 3 MB compression.
@@ -1659,14 +1709,14 @@ Each tool definition is sent to the AI in every request, consuming context token
 | Group | Description | Tools (count) |
 |-------|-------------|---------------|
 | `core` | Basic tools | `ping`, `openBrowser` (2) |
-| `interaction` | User interaction & frames | `click`, `type`, `scrollTo`, `waitForElement`, `hover`, `selectOption`, `selectFromGroup`, `drag`, `scrollHorizontal`, `switchFrame`, `listFrames` (11) |
+| `interaction` | User interaction, frames & credentials | `click`, `type`, `scrollTo`, `waitForElement`, `hover`, `selectOption`, `selectFromGroup`, `drag`, `scrollHorizontal`, `switchFrame`, `listFrames`, `typeCredential`, `listCredentials` (13) |
 | `inspection` | Page inspection | `getComputedCss`, `getBoxModel`, `screenshot`, `saveScreenshot` (4) |
 | `debug` | Debugging & network | `getConsoleLogs`, `listNetworkRequests`, `getNetworkRequest`, `filterNetworkRequests` (4) |
 | `advanced` | Advanced automation & AI | `executeScript`, `setStyles`, `setViewport`, `getViewport`, `navigateTo`, `smartFindElement`, `analyzePage`, `findElementsByText` (8) |
 | `recorder` | Scenario recording | `enableRecorder`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`, `appendScenarioToFile`, `generatePageObject` (9) |
 | `figma` | Figma integration | `getFigmaFrame`, `compareFigmaToElement`, `getFigmaSpecs`, `parseFigmaUrl`, `listFigmaPages`, `searchFigmaFrames`, `getFigmaComponents`, `getFigmaStyles`, `getFigmaColorPalette`, `convertFigmaToCode` (10) |
 
-**Total:** 48 tools across 7 groups
+**Total:** 50 tools across 7 groups
 
 **Configuration:**
 

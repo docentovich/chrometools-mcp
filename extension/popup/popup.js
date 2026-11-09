@@ -70,6 +70,10 @@ elements.tabButtons.forEach(button => {
     if (tabName === 'tabs') {
       loadTabsList();
     }
+
+    if (tabName === 'passwords') {
+      openPasswordsTab();
+    }
   });
 });
 
@@ -413,3 +417,176 @@ loadState();
 
 // Refresh state periodically
 setInterval(loadState, 2000);
+
+// ============================================
+// Passwords (Credential Vault)
+// ============================================
+
+const vaultEls = {
+  form: document.getElementById('vault-form'),
+  url: document.getElementById('vault-url'),
+  username: document.getElementById('vault-username'),
+  password: document.getElementById('vault-password'),
+  name: document.getElementById('vault-name'),
+  togglePassword: document.getElementById('vault-toggle-password'),
+  error: document.getElementById('vault-error'),
+  save: document.getElementById('vault-save'),
+  cancel: document.getElementById('vault-cancel'),
+  list: document.getElementById('vault-list')
+};
+
+// Name of the entry being edited, null when adding a new one
+let vaultEditing = null;
+
+async function vaultRequest(type, payload = {}) {
+  const response = await chrome.runtime.sendMessage({ type, ...payload });
+  if (!response?.success) {
+    throw new Error(response?.error || 'Vault request failed');
+  }
+  return response.result;
+}
+
+function showVaultError(message) {
+  vaultEls.error.textContent = message || '';
+  vaultEls.error.classList.toggle('hidden', !message);
+}
+
+async function openPasswordsTab() {
+  if (!vaultEditing && !vaultEls.url.value) {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const url = tab?.url ? new URL(tab.url) : null;
+      if (url && (url.protocol === 'https:' || url.protocol === 'http:')) {
+        vaultEls.url.value = url.origin;
+      }
+    } catch {
+      // No active tab URL - leave field empty
+    }
+  }
+  await loadVaultList();
+}
+
+async function loadVaultList() {
+  try {
+    const entries = await vaultRequest('VAULT_LIST');
+    renderVaultList(entries);
+  } catch (err) {
+    showVaultError(err.message);
+  }
+}
+
+function renderVaultList(entries) {
+  if (!entries.length) {
+    vaultEls.list.innerHTML = '<li class="vault-empty">No saved passwords</li>';
+    return;
+  }
+
+  vaultEls.list.innerHTML = entries.map(entry => `
+    <li class="vault-item" data-name="${escapeHtml(entry.name)}">
+      <div class="vault-item-info">
+        <div class="vault-item-name">${escapeHtml(entry.name)}</div>
+        <div class="vault-item-meta">${escapeHtml(entry.username || '(no login)')} &middot; ${escapeHtml(entry.origins.join(', '))}</div>
+        <div class="vault-item-secret hidden"></div>
+      </div>
+      <div class="vault-item-actions">
+        <button class="btn btn-ghost btn-small" data-action="reveal" title="Show password">&#128065;</button>
+        <button class="btn btn-ghost btn-small" data-action="edit" title="Edit">&#9998;</button>
+        <button class="btn btn-ghost btn-small" data-action="delete" title="Delete">&#10006;</button>
+      </div>
+    </li>
+  `).join('');
+
+  // Keep entries for edit prefill
+  vaultEls.list._entries = entries;
+}
+
+function resetVaultForm() {
+  vaultEditing = null;
+  vaultEls.form.reset();
+  vaultEls.password.type = 'password';
+  vaultEls.password.placeholder = '';
+  vaultEls.save.textContent = 'Save';
+  vaultEls.cancel.classList.add('hidden');
+  showVaultError('');
+}
+
+vaultEls.togglePassword.addEventListener('click', () => {
+  vaultEls.password.type = vaultEls.password.type === 'password' ? 'text' : 'password';
+});
+
+vaultEls.cancel.addEventListener('click', () => {
+  resetVaultForm();
+  openPasswordsTab();
+});
+
+vaultEls.form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  showVaultError('');
+  vaultEls.save.disabled = true;
+  try {
+    await vaultRequest('VAULT_SAVE', {
+      entry: {
+        url: vaultEls.url.value,
+        username: vaultEls.username.value,
+        password: vaultEls.password.value,
+        name: vaultEls.name.value,
+        originalName: vaultEditing
+      }
+    });
+    resetVaultForm();
+    await openPasswordsTab();
+  } catch (err) {
+    showVaultError(err.message);
+  } finally {
+    vaultEls.save.disabled = false;
+  }
+});
+
+vaultEls.list.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  const item = button.closest('.vault-item');
+  const name = item.dataset.name;
+  showVaultError('');
+
+  try {
+    switch (button.dataset.action) {
+      case 'reveal': {
+        const secretEl = item.querySelector('.vault-item-secret');
+        if (!secretEl.classList.contains('hidden')) {
+          secretEl.textContent = '';
+          secretEl.classList.add('hidden');
+          break;
+        }
+        const { password } = await vaultRequest('VAULT_REVEAL', { name });
+        secretEl.textContent = password;
+        secretEl.classList.remove('hidden');
+        break;
+      }
+
+      case 'edit': {
+        const entry = (vaultEls.list._entries || []).find(e => e.name === name);
+        if (!entry) break;
+        vaultEditing = name;
+        vaultEls.url.value = entry.origins[0] || '';
+        vaultEls.username.value = entry.username || '';
+        vaultEls.password.value = '';
+        vaultEls.password.placeholder = 'Leave empty to keep current';
+        vaultEls.name.value = entry.name;
+        vaultEls.save.textContent = 'Update';
+        vaultEls.cancel.classList.remove('hidden');
+        vaultEls.url.focus();
+        break;
+      }
+
+      case 'delete':
+        if (!confirm(`Delete "${name}"?`)) break;
+        await vaultRequest('VAULT_DELETE', { name });
+        if (vaultEditing === name) resetVaultForm();
+        await loadVaultList();
+        break;
+    }
+  } catch (err) {
+    showVaultError(err.message);
+  }
+});

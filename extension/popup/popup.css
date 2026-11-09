@@ -435,3 +435,86 @@ body {
 .hidden {
   display: none !important;
 }
+
+/* Passwords (Credential Vault) */
+.vault-password-row {
+  display: flex;
+  gap: 6px;
+}
+
+.vault-password-row input {
+  flex: 1;
+}
+
+.btn-small {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.vault-error {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #dc2626;
+  font-size: 12px;
+}
+
+.vault-list {
+  list-style: none;
+  margin-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.vault-empty {
+  padding: 16px 0;
+  color: #9ca3af;
+  text-align: center;
+}
+
+.vault-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.vault-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.vault-item-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-item-meta {
+  font-size: 11px;
+  color: #6b7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-item-secret {
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: #374151;
+  word-break: break-all;
+}
+
+.vault-item-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.vault-hint {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #9ca3af;
+}

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.7.0] - 2026-11-10
+
+### Added
+- **Credential Vault (`typeCredential` / `listCredentials`)** - Log in without passing passwords through the AI. The user saves URL / login / password in the ChromeTools extension (new Passwords tab in the popup); passwords are encrypted with AES-GCM using a non-extractable key in the extension's IndexedDB. `typeCredential({ name, id|selector, field })` asks the extension to type the login or password into the field; MCP gets only success or an error. `listCredentials` returns names, logins and allowed sites without passwords
+- **Vault protections** - Site binding (credential is typed only into a frame whose origin matches the saved URL, `*.domain` wildcards supported), password only into `input[type=password]` (unless `allowNonPasswordField`), works in cross-origin iframes via `switchFrame`. MCP refuses `chrome-extension://` pages in `navigateTo` / `openBrowser` / `executeScript`
+- **Output redaction** - After the vault is used, every tool response is passed through the extension and saved passwords (raw, URL/form-encoded, JSON-escaped, base64, HTTP Basic) are replaced with `[REDACTED:<name>]`. Covers `getNetworkRequest` bodies, `executeScript` results, console logs, diagnostics. If the check cannot run, the response is withheld
+- **Recorder `typeCredential` step** - A credential typed during recording is saved as a `typeCredential` step with the credential name only; `executeScenario` replays it through the vault
+
+### Changed
+- **`analyzePage` / `getElementDetails`** - Contents of password fields are returned as `***`
+
+### Fixed
+- **Extension not loading on Chrome 137+** - Chrome ignores `--load-extension` since 137, so the ChromeTools extension (recorder, tab tracking) was silently missing. ChromeTools now launches Chrome with `--enable-unsafe-extension-debugging` and loads the extension via CDP `Extensions.loadUnpacked`. Extension data persists in the profile across restarts
+
 ## [3.6.0] - 2026-06-25
 
 ### Added

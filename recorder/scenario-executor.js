@@ -11,6 +11,8 @@
 
 import { resolveDependencies, checkDependencyCondition } from './dependency-resolver.js';
 import { loadScenario, loadSecrets, loadIndex } from './scenario-storage.js';
+import { fillCredential } from '../utils/vault-client.js';
+import { randomUUID } from 'crypto';
 
 // Debug mode - avoid polluting STDIO with logs (breaks MCP JSON-RPC)
 const DEBUG_MODE = process.env.CHROMETOOLS_DEBUG === 'true';
@@ -520,6 +522,10 @@ async function executeAction(action, page, timeout) {
       await executeType(action, page, timeout);
       break;
 
+    case 'typeCredential':
+      await executeTypeCredential(action, page, timeout);
+      break;
+
     case 'select':
       await executeSelect(action, page, timeout);
       break;
@@ -787,6 +793,28 @@ async function checkPageActivity(page) {
     // If check fails, assume there's activity to be safe
     debugLog('[Smart Wait] Activity check failed, assuming activity exists:', error.message);
     return true;
+  }
+}
+
+/**
+ * Type a credential from the ChromeTools extension vault (value never leaves the extension)
+ */
+async function executeTypeCredential(action, page, timeout) {
+  const selector = action.selector.value || action.selector.primary || action.selector;
+  const { name, field = 'password' } = action.data || {};
+
+  await page.waitForSelector(selector, { timeout, visible: true });
+  const element = await page.$(selector);
+  const nonce = randomUUID();
+  await element.evaluate((el, n) => el.setAttribute('data-ct-fill', n), nonce);
+  let result;
+  try {
+    result = await fillCredential({ name, field, nonce, pageUrl: page.url(), allowNonPasswordField: false });
+  } finally {
+    await element.evaluate(el => el.removeAttribute('data-ct-fill')).catch(() => {});
+  }
+  if (!result?.ok) {
+    throw new Error(`Failed to type credential "${name}" into "${selector}": ${result?.error || 'unknown error'}`);
   }
 }
 

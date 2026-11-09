@@ -173,7 +173,7 @@ function analyzeButtonContextInPage(element) {
     offsetHeight: element.offsetHeight,
 
     // Text content
-    text: element.textContent || element.value || element.getAttribute('aria-label') || '',
+    text: element.textContent || (element.type === 'password' ? '' : element.value) || element.getAttribute('aria-label') || '',
 
     // Primary button indicators
     isPrimary: /primary|main|btn-primary|button-primary/i.test(element.className || ''),

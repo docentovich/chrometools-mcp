@@ -60,6 +60,31 @@ export const toolDefinitions = [
         },
       },
       {
+        name: "typeCredential",
+        description: "Type a saved login or password into an input. Credentials are stored by the user in the ChromeTools extension (Passwords tab); you pass only the credential name, the value is never returned. Works only on the site the credential is saved for; password goes only into input[type=password]. Use listCredentials to get names.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Credential name from listCredentials" },
+            field: { type: "string", enum: ["password", "username"], description: "'password' (default) or 'username'" },
+            id: { type: "string", description: "APOM element ID from analyzePage. Either id or selector required." },
+            selector: { type: "string", description: "CSS selector. Either id or selector required." },
+            allowNonPasswordField: { type: "boolean", description: "Allow password into non-password input (custom widgets). Default: false" },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "listCredentials",
+        description: "List credentials saved by the user in the ChromeTools extension: name, login, allowed sites. Passwords are not included. If nothing fits, ask the user to add one in the extension popup (Passwords tab).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            currentPageOnly: { type: "boolean", description: "Only credentials allowed on the current page (default: false)" },
+          },
+        },
+      },
+      {
         name: "getComputedCss",
         description: "Get computed CSS styles for element. For layout debugging and responsive design.",
         inputSchema: {

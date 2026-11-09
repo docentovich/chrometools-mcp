@@ -388,6 +388,23 @@
     }
 
     const selector = generateSelector(element);
+
+    // Value typed by the credential vault: record the credential name, never the value
+    if (element.__ctCredential) {
+      const { name, field } = element.__ctCredential;
+      delete element.__ctCredential;
+      sendAction({
+        type: 'typeCredential',
+        selector,
+        timestamp: Date.now(),
+        data: { name, field }
+      });
+      lastInputValues.set(element, finalValue);
+      inputStartValues.delete(element);
+      highlightElement(element);
+      return;
+    }
+
     const secretInfo = isSecretField(element);
 
     let recordedValue = finalValue;
