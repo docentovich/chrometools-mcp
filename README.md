@@ -956,7 +956,9 @@ Log in to sites without passing passwords through the AI. You save logins and pa
 #### listCredentials
 List saved credentials without passwords.
 - **Parameters**: `currentPageOnly` (optional) - only entries allowed on the current page
-- **Returns**: `{ count, currentOrigin, credentials: [{ name, username, origins, matchesCurrentPage }] }`
+- **Returns**: `{ count, currentUrl, currentOrigin, credentials: [{ name, username, origins, matchesCurrentPage }], otherOpenTabs? }`
+  - `currentUrl` is the tab MCP works with (last opened / switched), which may differ from the tab visible in Chrome
+  - `otherOpenTabs`: other open tabs whose site has a saved credential, `[{ url, credentials }]` (URL without query string)
 
 #### typeCredential
 Type a saved login or password into an input. The extension types the value; MCP gets only success or an error.
@@ -966,6 +968,7 @@ Type a saved login or password into an input. The extension types the value; MCP
   - `id` or `selector` (required): APOM ID or CSS selector of the input
   - `allowNonPasswordField` (optional): allow the password into a field that is not `input[type=password]` (custom widgets)
 - **Works with** the active frame (`switchFrame`), including cross-origin iframes, and with React/Vue/Angular inputs.
+- The field is cleared first (the value replaces, never appends), `keydown` / `input` / `keyup` / `change` are dispatched, then the extension re-reads the field. If the page reset or changed the value, the tool returns `Value did not stick` instead of success.
 
 ```javascript
 listCredentials({ currentPageOnly: true })
@@ -1104,9 +1107,11 @@ The GOLD STANDARD for design-to-code validation. Compares Figma design pixel-per
   - `selector` (required): CSS selector for page element to compare
   - `figmaScale` (optional): Figma export scale (default: 2)
   - `threshold` (optional): Difference threshold 0-1 (default: 0.05)
+  - `outputDir` (optional): save `figma.png`, `page.png`, `diff.png`, `overlay.png` to this directory; paths are returned in `files`
 - **Use case**: Validating implementation matches design specifications
-- **Returns**: Comparison analysis with SSIM score, difference percentage, and three images (Figma, Page, Diff map)
-- **Automatic compression**: All three images are automatically compressed if they exceed 3 MB
+- **Returns**: Comparison analysis with SSIM score, difference percentage, and images: Figma, Page, Overlay (page with 50% Figma on top), Diff map (when there are differences)
+- **No scaling**: images of different sizes are aligned top-left on a common canvas; area covered by only one image counts as difference, `dimensions.sameSize` is `false`. Set `figmaScale` to the page `devicePixelRatio`
+- **Automatic compression**: All images are automatically compressed if they exceed 3 MB
 
 #### getFigmaSpecs
 Extract detailed design specifications from Figma including text content, colors, fonts, dimensions, and spacing.
@@ -1838,6 +1843,8 @@ To use Figma tools, you need to configure your Figma Personal Access Token.
 ```
 
 **Note:** Alternatively, you can pass the token directly in each Figma tool call using the `figmaToken` parameter, but using the environment variable is more convenient.
+
+**Proxy and timeouts:** Figma requests (API and image downloads from Figma's S3) honour `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` from the MCP server env. Each request times out after 30 s (`CHROMETOOLS_FIGMA_TIMEOUT_MS`), the error names the host. If `getFigmaFrame` / `compareFigmaToElement` time out while the API works, image hosts are probably reachable only through a proxy: add `HTTPS_PROXY` to the `env` block.
 
 ---
 

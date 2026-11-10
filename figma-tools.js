@@ -1,6 +1,63 @@
 // Figma API integration tools
 // Provides utilities for working with Figma API: file browsing, design system extraction, and more
 
+import http from 'node:http';
+import https from 'node:https';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import { getProxyForUrl } from 'proxy-from-env';
+
+const FIGMA_TIMEOUT_MS = Number(process.env.CHROMETOOLS_FIGMA_TIMEOUT_MS) || 30000;
+
+/**
+ * GET a URL with a hard timeout. Honours HTTPS_PROXY / HTTP_PROXY / NO_PROXY
+ * (Node's built-in fetch ignores them, so Figma's S3 image links could hang
+ * forever where they are reachable only through a proxy).
+ * @returns {Promise<{ok: boolean, status: number, buffer: Buffer, text(): string, json(): any}>}
+ */
+export function figmaFetch(url, { headers = {}, timeoutMs = FIGMA_TIMEOUT_MS, redirects = 3 } = {}) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const proxy = getProxyForUrl(url);
+    const lib = target.protocol === 'http:' ? http : https;
+    const agent = proxy ? new HttpsProxyAgent(proxy) : undefined;
+    const host = target.host;
+
+    const fail = (msg) => reject(new Error(
+      `${msg} (${host}${proxy ? ` via proxy ${new URL(proxy).host}` : ', no proxy'}). ` +
+      (proxy ? 'Check the proxy.' : 'If this host is reachable only through a proxy, set HTTPS_PROXY in the MCP server env.')
+    ));
+
+    const req = lib.get(target, { headers, agent }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects > 0) {
+        res.resume();
+        clearTimeout(timer);
+        const next = new URL(res.headers.location, target).toString();
+        figmaFetch(next, { headers, timeoutMs, redirects: redirects - 1 }).then(resolve, reject);
+        return;
+      }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        clearTimeout(timer);
+        const buffer = Buffer.concat(chunks);
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          buffer,
+          text: () => buffer.toString('utf8'),
+          json: () => JSON.parse(buffer.toString('utf8'))
+        });
+      });
+      res.on('error', e => { clearTimeout(timer); fail(`Download failed: ${e.message}`); });
+    });
+    const timer = setTimeout(() => {
+      req.destroy();
+      fail(`Request timed out after ${timeoutMs}ms`);
+    }, timeoutMs);
+    req.on('error', e => { clearTimeout(timer); fail(`Request failed: ${e.message}`); });
+  });
+}
+
 /**
  * Parse Figma URL to extract fileKey and nodeId
  * Supports various Figma URL formats:
@@ -62,15 +119,12 @@ export async function fetchFigmaAPI(endpoint, figmaToken) {
     throw new Error('Figma token is required. Get it from https://www.figma.com/developers/api#access-tokens');
   }
 
-  const response = await fetch(`https://api.figma.com/v1/${endpoint}`, {
-    headers: {
-      'X-Figma-Token': figmaToken
-    }
+  const response = await figmaFetch(`https://api.figma.com/v1/${endpoint}`, {
+    headers: { 'X-Figma-Token': figmaToken }
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Figma API error: ${response.status} - ${error}`);
+    throw new Error(`Figma API error: ${response.status} - ${response.text()}`);
   }
 
   return response.json();

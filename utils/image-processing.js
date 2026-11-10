@@ -5,6 +5,7 @@
  */
 
 import Jimp from 'jimp';
+import pixelmatch from 'pixelmatch';
 
 /**
  * Process screenshot with compression and scaling
@@ -233,4 +234,44 @@ export function calculateSSIM(img1Data, img2Data, width, height) {
   }
 
   return validWindows > 0 ? ssimSum / validWindows : 0;
+}
+
+/**
+ * Compare two images without stretching: both are placed top-left on a common
+ * transparent canvas (max width x max height). Area covered by only one image
+ * counts as difference.
+ * @returns {Promise<{width, height, diffPixels, ssim, diff: Jimp, overlay: Jimp}>}
+ */
+export async function compareImages(figmaBuffer, pageBuffer, { pixelThreshold = 0.1 } = {}) {
+  const [figma, page] = await Promise.all([Jimp.read(figmaBuffer), Jimp.read(pageBuffer)]);
+  const width = Math.max(figma.bitmap.width, page.bitmap.width);
+  const height = Math.max(figma.bitmap.height, page.bitmap.height);
+  const onCanvas = img => new Jimp(width, height, 0x00000000).composite(img, 0, 0);
+  const figmaCanvas = onCanvas(figma);
+  const pageCanvas = onCanvas(page);
+
+  const diff = new Jimp(width, height, 0x00000000);
+  const diffPixels = pixelmatch(figmaCanvas.bitmap.data, pageCanvas.bitmap.data, diff.bitmap.data, width, height, {
+    threshold: pixelThreshold,
+    includeAA: false
+  });
+  const ssim = calculateSSIM(figmaCanvas.bitmap.data, pageCanvas.bitmap.data, width, height);
+
+  // Page with the design at 50% on top: misaligned edges show as doubled lines
+  const overlay = pageCanvas.clone().composite(figma, 0, 0, {
+    mode: Jimp.BLEND_SOURCE_OVER,
+    opacitySource: 0.5,
+    opacityDest: 1
+  });
+
+  return {
+    width,
+    height,
+    diffPixels,
+    ssim,
+    figmaSize: { width: figma.bitmap.width, height: figma.bitmap.height },
+    pageSize: { width: page.bitmap.width, height: page.bitmap.height },
+    diff,
+    overlay
+  };
 }

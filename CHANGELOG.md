@@ -12,9 +12,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - **`analyzePage` / `getElementDetails`** - Contents of password fields are returned as `***`
+- **`typeCredential` verifies the value** - Field is cleared first (value replaces, never appends), `keydown` / `input` / `keyup` / `change` are dispatched, then the extension re-reads the field and returns `Value did not stick` if the page reset it
+- **`listCredentials`** - Returns `currentUrl` (tab MCP works with) and `otherOpenTabs` (other open tabs whose site has a saved credential)
+- **`compareFigmaToElement`** - Images are aligned top-left on a common canvas instead of being stretched to the same size; adds an overlay image (page + 50% Figma), optional `outputDir` to save figma/page/diff/overlay PNGs, per-step timing in debug log
 
 ### Fixed
 - **Extension not loading on Chrome 137+** - Chrome ignores `--load-extension` since 137, so the ChromeTools extension (recorder, tab tracking) was silently missing. ChromeTools now launches Chrome with `--enable-unsafe-extension-debugging` and loads the extension via CDP `Extensions.loadUnpacked`. Extension data persists in the profile across restarts
+- **Figma requests hanging** - Figma API and image downloads (Figma S3) had no timeout and ignored `HTTPS_PROXY`, so `compareFigmaToElement` / `getFigmaFrame` could hang where S3 is reachable only via proxy. Now 30 s timeout per request (`CHROMETOOLS_FIGMA_TIMEOUT_MS`) and `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` support
+- **Vault calls hanging with several MCP processes** - Connecting a second MCP process no longer reloads the extension; worker calls have per-step timeouts and one retry
 
 ## [3.6.0] - 2026-06-25
 

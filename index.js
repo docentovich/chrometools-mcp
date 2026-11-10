@@ -4,14 +4,13 @@ import {Server} from "@modelcontextprotocol/sdk/server/index.js";
 import {StdioServerTransport} from "@modelcontextprotocol/sdk/server/stdio.js";
 import {CallToolRequestSchema, ListToolsRequestSchema,} from "@modelcontextprotocol/sdk/types.js";
 import Jimp from "jimp";
-import pixelmatch from "pixelmatch";
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
 import path, {dirname} from 'path';
 import {fileURLToPath} from 'url';
 import {homedir} from 'os';
 
 // Import browser and platform utilities
-import {closeBrowser, isConnectedToExistingChrome} from './browser/browser-manager.js';
+import {closeBrowser, getBrowser, isConnectedToExistingChrome} from './browser/browser-manager.js';
 import * as vaultClient from './utils/vault-client.js';
 import {randomUUID} from 'crypto';
 import {isWSL} from './utils/platform-utils.js';
@@ -48,7 +47,7 @@ import {
 } from './browser/page-manager.js';
 
 // Import image processing utilities
-import {calculateSSIM, processScreenshot} from './utils/image-processing.js';
+import {compareImages, processScreenshot} from './utils/image-processing.js';
 
 // Import CSS utilities
 import {filterCssStyles} from './utils/css-utils.js';
@@ -104,6 +103,7 @@ import {
     collectAllText,
     extractTextFromNode,
     fetchFigmaAPI,
+    figmaFetch,
     getFigmaColorPalette,
     getFigmaComponents,
     getFigmaStyles,
@@ -737,11 +737,15 @@ async function executeToolInternal(name, args) {
     if (name === "listCredentials") {
       const validatedArgs = schemas.ListCredentialsSchema.parse(args);
       let currentOrigin = null;
+      let currentUrl = null;
+      // Path only: query strings may carry tokens
+      const shortUrl = u => { const x = new URL(u); return x.origin + x.pathname; };
       try {
         const page = await getLastOpenPage();
         const ctx = await getTargetFrame(page);
         const o = new URL(ctx.url()).origin;
         currentOrigin = o === 'null' ? null : o;
+        if (currentOrigin) currentUrl = shortUrl(ctx.url());
       } catch {
         // No page open - list everything
       }
@@ -754,11 +758,40 @@ async function executeToolInternal(name, args) {
         ? new Set((await vaultClient.listCredentials(currentOrigin)).map(c => c.name))
         : new Set();
 
+      // Other open tabs with a saved credential: the visible tab may differ from
+      // the one MCP works with (e.g. the user opened the login page by hand)
+      const otherOpenTabs = [];
+      if (!validatedArgs.currentPageOnly && all.length) {
+        try {
+          const seen = new Set([currentOrigin]);
+          for (const p of await (await getBrowser()).pages()) {
+            const u = p.url();
+            if (!/^https?:/.test(u)) continue;
+            const o = new URL(u).origin;
+            if (seen.has(o) || seen.size > 12) continue;
+            seen.add(o);
+            const names = (await vaultClient.listCredentials(o)).map(c => c.name);
+            if (names.length) otherOpenTabs.push({ url: shortUrl(u), credentials: names });
+          }
+        } catch (e) {
+          debugLog('[listCredentials] open tabs scan failed:', e.message);
+        }
+      }
+
+      let hint = all.length
+        ? 'Use typeCredential({ name, id, field }) for login and password fields.'
+        : 'No saved credentials. Ask the user to add one in the ChromeTools extension popup (Passwords tab).';
+      if (!matching.size && otherOpenTabs.length) {
+        hint += ' The current tab (currentUrl) has no matching credential, but otherOpenTabs do: ' +
+          'switch to that tab (switchTab) or navigateTo its URL before typing.';
+      }
+
       return {
         content: [{
           type: "text",
           text: JSON.stringify({
             count: all.length,
+            currentUrl,
             currentOrigin,
             credentials: all.map(c => ({
               name: c.name,
@@ -766,9 +799,8 @@ async function executeToolInternal(name, args) {
               origins: c.origins,
               matchesCurrentPage: matching.has(c.name)
             })),
-            hint: all.length
-              ? 'Use typeCredential({ name, id, field }) for login and password fields.'
-              : 'No saved credentials. Ask the user to add one in the ChromeTools extension popup (Passwords tab).'
+            otherOpenTabs: otherOpenTabs.length ? otherOpenTabs : undefined,
+            hint
           }, null, 2)
         }]
       };
@@ -2056,12 +2088,12 @@ async function executeToolInternal(name, args) {
       const imageUrl = exportData.images[nodeId];
 
       // Download image
-      const imageResponse = await fetch(imageUrl);
+      const imageResponse = await figmaFetch(imageUrl);
       if (!imageResponse.ok) {
         throw new Error(`Failed to download image: ${imageResponse.status}`);
       }
 
-      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+      const imageBuffer = imageResponse.buffer;
 
       // Get frame info
       const nodesData = await fetchFigmaAPI(`files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(nodeId)}`, token);
@@ -2115,6 +2147,8 @@ async function executeToolInternal(name, args) {
         throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
       }
 
+      const t0 = Date.now();
+      const step = label => debugLog(`[compareFigmaToElement] +${Date.now() - t0}ms ${label}`);
       const page = await getLastOpenPage();
       const figmaScale = validatedArgs.figmaScale || 2;
       const threshold = validatedArgs.threshold || 0.05;
@@ -2133,8 +2167,13 @@ async function executeToolInternal(name, args) {
       }
 
       const figmaImageUrl = exportData.images[nodeId];
-      const figmaResponse = await fetch(figmaImageUrl);
-      const figmaBuffer = Buffer.from(await figmaResponse.arrayBuffer());
+      step('figma export url');
+      const figmaResponse = await figmaFetch(figmaImageUrl);
+      if (!figmaResponse.ok) {
+        throw new Error(`Failed to download Figma image: ${figmaResponse.status}`);
+      }
+      const figmaBuffer = figmaResponse.buffer;
+      step(`figma image downloaded (${figmaBuffer.length} bytes)`);
 
       // Get page element screenshot
       const element = await page.$(validatedArgs.selector);
@@ -2143,33 +2182,14 @@ async function executeToolInternal(name, args) {
       }
 
       const pageBuffer = await element.screenshot();
+      step('element screenshot');
 
-      // Load images for comparison
-      const [figmaImg, pageImg] = await Promise.all([
-        Jimp.read(figmaBuffer),
-        Jimp.read(pageBuffer)
-      ]);
-
-      // Resize to same dimensions (use larger dimensions)
-      const targetWidth = Math.max(figmaImg.bitmap.width, pageImg.bitmap.width);
-      const targetHeight = Math.max(figmaImg.bitmap.height, pageImg.bitmap.height);
-
-      figmaImg.resize(targetWidth, targetHeight);
-      pageImg.resize(targetWidth, targetHeight);
-
-      // Compare images
-      const figmaData = new Uint8ClampedArray(figmaImg.bitmap.data);
-      const pageData = new Uint8ClampedArray(pageImg.bitmap.data);
-      const diffData = new Uint8ClampedArray(targetWidth * targetHeight * 4);
-
-      const diffPixels = pixelmatch(figmaData, pageData, diffData, targetWidth, targetHeight, {
-        threshold: 0.1,
-        includeAA: false
-      });
-
-      const ssimValue = calculateSSIM(figmaData, pageData, targetWidth, targetHeight);
+      const cmp = await compareImages(figmaBuffer, pageBuffer);
+      step(`compared ${cmp.width}x${cmp.height}`);
+      const { width: targetWidth, height: targetHeight, diffPixels } = cmp;
       const totalPixels = targetWidth * targetHeight;
       const differencePercent = (diffPixels / totalPixels) * 100;
+      const sameSize = cmp.figmaSize.width === cmp.pageSize.width && cmp.figmaSize.height === cmp.pageSize.height;
 
       // Analysis
       const analysis = {
@@ -2178,63 +2198,75 @@ async function executeToolInternal(name, args) {
           withinThreshold: differencePercent <= (threshold * 100),
           pixelDifferences: diffPixels,
           differencePercent: Math.round(differencePercent * 100) / 100,
-          ssim: Math.round(ssimValue * 10000) / 10000,
+          ssim: Math.round(cmp.ssim * 10000) / 10000,
           recommendation: differencePercent < 1 ? 'Pixel-perfect match' :
             differencePercent < 3 ? 'Very close to design' :
               differencePercent < 10 ? 'Minor differences detected' :
                 'Significant differences from design'
         },
         dimensions: {
-          figma: { width: figmaImg.bitmap.width, height: figmaImg.bitmap.height },
-          page: { width: pageImg.bitmap.width, height: pageImg.bitmap.height },
-          comparison: { width: targetWidth, height: targetHeight }
+          figma: cmp.figmaSize,
+          page: cmp.pageSize,
+          comparison: { width: targetWidth, height: targetHeight },
+          sameSize,
+          note: sameSize ? undefined :
+            'Sizes differ: both images are aligned top-left without scaling, area covered by only one image counts as difference. ' +
+            'Check figmaScale against the page devicePixelRatio.'
         }
       };
 
+      const [diffBuffer, overlayBuffer] = await Promise.all([
+        cmp.diff.getBufferAsync(Jimp.MIME_PNG),
+        cmp.overlay.getBufferAsync(Jimp.MIME_PNG)
+      ]);
+
+      if (validatedArgs.outputDir) {
+        const dir = path.resolve(validatedArgs.outputDir);
+        mkdirSync(dir, { recursive: true });
+        const files = {
+          figma: path.join(dir, 'figma.png'),
+          page: path.join(dir, 'page.png'),
+          diff: path.join(dir, 'diff.png'),
+          overlay: path.join(dir, 'overlay.png')
+        };
+        writeFileSync(files.figma, figmaBuffer);
+        writeFileSync(files.page, pageBuffer);
+        writeFileSync(files.diff, diffBuffer);
+        writeFileSync(files.overlay, overlayBuffer);
+        analysis.files = files;
+        step('files saved');
+      }
+
+      const shrink = buf => processScreenshot(buf, {
+        maxWidth: null,
+        maxHeight: null,
+        quality: 85,
+        format: 'auto',
+        maxFileSize: 3 * 1024 * 1024
+      });
+
       // Process images to ensure they don't exceed 3 MB
-      const [processedFigma, processedPage] = await Promise.all([
-        processScreenshot(figmaBuffer, {
-          maxWidth: null,
-          maxHeight: null,
-          quality: 85,
-          format: 'auto',
-          maxFileSize: 3 * 1024 * 1024
-        }),
-        processScreenshot(pageBuffer, {
-          maxWidth: null,
-          maxHeight: null,
-          quality: 85,
-          format: 'auto',
-          maxFileSize: 3 * 1024 * 1024
-        })
+      const [processedFigma, processedPage, processedOverlay] = await Promise.all([
+        shrink(figmaBuffer), shrink(pageBuffer), shrink(overlayBuffer)
       ]);
 
       const content = [
-        { type: 'text', text: JSON.stringify(analysis, null, 2) },
+        { type: 'text', text: JSON.stringify(analysis, null, 2) + '\nImages: figma, page, overlay (page + 50% figma)' + (diffPixels > 0 ? ', diff map' : '') },
         { type: 'image', data: processedFigma.buffer.toString('base64'), mimeType: processedFigma.mimeType },
-        { type: 'image', data: processedPage.buffer.toString('base64'), mimeType: processedPage.mimeType }
+        { type: 'image', data: processedPage.buffer.toString('base64'), mimeType: processedPage.mimeType },
+        { type: 'image', data: processedOverlay.buffer.toString('base64'), mimeType: processedOverlay.mimeType }
       ];
 
       // Add difference map if there are differences
       if (diffPixels > 0) {
-        const diffImg = new Jimp({ data: Buffer.from(diffData), width: targetWidth, height: targetHeight });
-        const diffBuffer = await diffImg.getBufferAsync(Jimp.MIME_PNG);
-
-        // Process diff image as well
-        const processedDiff = await processScreenshot(diffBuffer, {
-          maxWidth: null,
-          maxHeight: null,
-          quality: 85,
-          format: 'auto',
-          maxFileSize: 3 * 1024 * 1024
-        });
-
+        const processedDiff = await shrink(diffBuffer);
         content.push({
           type: 'image',
           data: processedDiff.buffer.toString('base64'),
           mimeType: processedDiff.mimeType
         });
       }
+      step('done');
 
       return { content };
     }

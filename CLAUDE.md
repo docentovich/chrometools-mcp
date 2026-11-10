@@ -15,6 +15,7 @@ Cross-platform MCP server (Windows/WSL, Linux, macOS) that provides Chrome brows
 | [SEGM-537 QA Unblockers](specs/SEGM-537-UNBLOCKERS_SPEC.md) | NEEDS APPROVAL | [progress](specs/SEGM-537-UNBLOCKERS_PROGRESS.md) |
 | [Novofon Blockers (iframe/session/P1)](specs/NOVOFON-IFRAME_SPEC.md) | CODE COMPLETE — needs live e2e | [progress](specs/NOVOFON-IFRAME_PROGRESS.md) |
 | [Credential Vault](specs/CREDENTIAL-VAULT_SPEC.md) | DONE (v3.7.0) - verified on standhub | [progress](specs/CREDENTIAL-VAULT_PROGRESS.md) |
+| [Figma hang + vault fill verify](specs/FIGMA-VAULT-FIXES_SPEC.md) | CODE COMPLETE - needs live check | [progress](specs/FIGMA-VAULT-FIXES_PROGRESS.md) |
 
 ## Key Architecture Concept
 

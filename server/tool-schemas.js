@@ -244,7 +244,8 @@ export const CompareFigmaToElementSchema = z.object({
   nodeId: z.string().describe("Figma frame/component ID"),
   selector: z.string().describe("CSS selector for page element"),
   threshold: z.number().min(0).max(1).optional().describe("Difference threshold (0-1, default: 0.05)"),
-  figmaScale: z.number().min(0.1).max(4).optional().describe("Figma export scale (default: 2)")
+  figmaScale: z.number().min(0.1).max(4).optional().describe("Figma export scale (default: 2)"),
+  outputDir: z.string().optional().describe("Save figma.png, page.png, diff.png, overlay.png to this directory")
 });
 
 export const GetFigmaSpecsSchema = z.object({

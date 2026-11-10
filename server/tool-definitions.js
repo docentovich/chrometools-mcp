@@ -429,7 +429,7 @@ Examples:
       },
       {
         name: "compareFigmaToElement",
-        description: "Compare Figma design with browser element. Pixel-perfect validation.",
+        description: "Compare Figma design with browser element. Pixel-perfect validation. Images are aligned top-left without scaling (size mismatch counts as difference); returns figma, page, overlay and diff images.",
         inputSchema: {
           type: "object",
           properties: {
@@ -438,7 +438,8 @@ Examples:
             nodeId: { type: "string", description: "Frame/component ID" },
             selector: { type: "string", description: "CSS selector" },
             threshold: { type: "number", minimum: 0, maximum: 1, description: "Diff threshold (default: 0.05)" },
-            figmaScale: { type: "number", minimum: 0.1, maximum: 4, description: "Scale (default: 2)" },
+            figmaScale: { type: "number", minimum: 0.1, maximum: 4, description: "Scale (default: 2). Match page devicePixelRatio" },
+            outputDir: { type: "string", description: "Save figma.png, page.png, diff.png, overlay.png here (absolute path)" },
           },
           required: ["fileKey", "nodeId", "selector"],
         },

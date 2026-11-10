@@ -298,8 +298,11 @@ function probeMarkedElement(attr, nonce) {
   };
 }
 
-/** Runs in the verified frame only: set value so that React/Vue/Angular notice it. */
-function setMarkedValue(attr, nonce, expectedOrigin, value, credential) {
+/**
+ * Runs in the verified frame only: set value so that React/Vue/Angular notice it,
+ * then re-read the field to make sure the page did not reset it.
+ */
+async function setMarkedValue(attr, nonce, expectedOrigin, value, credential) {
   if (location.origin !== expectedOrigin) return { ok: false, error: 'Frame navigated away' };
   const el = document.querySelector(`[${attr}="${CSS.escape(nonce)}"]`);
   if (!el) return { ok: false, error: 'Marked element disappeared' };
@@ -308,16 +311,41 @@ function setMarkedValue(attr, nonce, expectedOrigin, value, credential) {
   // a typeCredential step instead of the typed value.
   el.__ctCredential = credential;
 
+  const read = () => el.isContentEditable ? el.textContent : el.value;
+  const write = v => {
+    if (el.isContentEditable) {
+      el.textContent = v;
+    } else {
+      // Native setter: bypasses framework value trackers patched on the instance
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v);
+    }
+  };
+  const key = type => el.dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, key: 'Unidentified' }));
+
   el.focus();
-  if (el.isContentEditable) {
-    el.textContent = value;
-  } else {
-    // Native setter: bypasses framework value trackers patched on the instance
-    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
+  // Replace, never append to what is already in the field
+  if (read() !== '') {
+    write('');
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
   }
+  key('keydown');
+  write(value);
   el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+  key('keyup');
   el.dispatchEvent(new Event('change', { bubbles: true }));
+
+  // Frameworks re-render on input; a controlled field that rejected the value resets here
+  await new Promise(r => setTimeout(r, 50));
+  const current = read();
+  if (current !== value) {
+    return {
+      ok: false,
+      error: current === ''
+        ? 'Value did not stick: the field is empty after typing (the page reset it).'
+        : 'Value did not stick: the field contains a different value after typing (the page changed or masked it).'
+    };
+  }
   return { ok: true };
 }
 
