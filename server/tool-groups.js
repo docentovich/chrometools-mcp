@@ -5,11 +5,11 @@
  */
 
 export const toolGroups = {
-  core: ['ping', 'openBrowser', 'executeScript', 'navigateTo'],
+  core: ['ping', 'openBrowser', 'executeScript', 'navigateTo', 'resetBrowser', 'listTabs', 'switchTab'],
 
   interaction: ['click', 'type', 'scrollTo', 'waitForElement', 'hover', 'selectOption', 'selectFromGroup', 'drag', 'scrollHorizontal', 'switchFrame', 'listFrames', 'typeCredential', 'listCredentials'],
 
-  inspection: ['getElement', 'getComputedCss', 'getBoxModel', 'screenshot', 'saveScreenshot'],
+  inspection: ['getElement', 'getComputedCss', 'getBoxModel', 'screenshot', 'saveScreenshot', 'getFontReport'],
 
   debug: [
     'getConsoleLogs',
@@ -49,7 +49,14 @@ export const toolGroups = {
     'getFigmaComponents',
     'getFigmaStyles',
     'getFigmaColorPalette',
-    'convertFigmaToCode'
+    'convertFigmaToCode',
+    'getFigmaNodeTree',
+    'compareFigmaSpecs',
+    'prefetchFigma',
+    'importFigmaCache',
+    'importFigmaRender',
+    'figmaCacheStatus',
+    'figmaCacheClear'
   ]
 };
 

@@ -90,6 +90,9 @@ export const toolDefinitions = [
         inputSchema: {
           type: "object",
           properties: {
+            outputFile: { type: "string", description: "Write result to this file (absolute path), response has only path and size" },
+            selectors: { type: "array", items: { type: "string" }, description: "Batch: many selectors, table output" },
+            all: { type: "boolean", description: "Batch: all matches of each selector (max 100)" },
             selector: { type: "string", description: "CSS selector (default: body)" },
             category: {
               type: "string",
@@ -125,6 +128,7 @@ export const toolDefinitions = [
         inputSchema: {
           type: "object",
           properties: {
+            outputFile: { type: "string", description: "Write result to this file (absolute path), response has only path and size" },
             id: { type: "string", description: "APOM element ID. Mutually exclusive with selector. Omit both for viewport screenshot." },
             selector: { type: "string", description: "CSS selector. Mutually exclusive with id. Omit both for viewport screenshot." },
             padding: { type: "number", description: "Padding px (default: 0). Ignored for viewport." },
@@ -137,11 +141,16 @@ export const toolDefinitions = [
       },
       {
         name: "saveScreenshot",
-        description: "Save screenshot to file without returning in context. Auto-scales and compresses. Use maxWidth: null and format: 'png' for original quality.",
+        description: "Save screenshot of an element or the viewport to file without returning in context. Auto-scales and compresses. For pixel checks use maxWidth: null, maxHeight: null, format: 'png'.",
         inputSchema: {
           type: "object",
           properties: {
-            selector: { type: "string", description: "CSS selector" },
+            clip: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } }, description: "Area in CSS px relative to the viewport" },
+            hideSelectors: { type: "array", items: { type: "string" }, description: "Hide elements for the shot (chat widget etc.)" },
+            selector: { type: "string", description: "CSS selector (or viewport: true)" },
+            viewport: { type: "boolean", description: "Capture exactly innerWidth x innerHeight" },
+            excludeScrollbar: { type: "boolean", description: "With viewport: capture without scrollbars (clientWidth x clientHeight)" },
+            scale: { type: "string", enum: ["device", "css"], description: "device (default): px x DPR; css: 1 px = 1 CSS px" },
             filePath: { type: "string", description: "Save path (extension auto-adjusted)" },
             padding: { type: "number", description: "Padding px (default: 0)" },
             maxWidth: { type: "number", description: "Max width px (default: 1024, null=original)" },
@@ -149,7 +158,7 @@ export const toolDefinitions = [
             quality: { type: "number", minimum: 1, maximum: 100, description: "JPEG quality (default: 80)" },
             format: { type: "string", enum: ["png", "jpeg", "auto"], description: "Format (default: auto)" },
           },
-          required: ["selector", "filePath"],
+          required: ["filePath"],
         },
       },
       {
@@ -183,6 +192,7 @@ export const toolDefinitions = [
         inputSchema: {
           type: "object",
           properties: {
+            outputFile: { type: "string", description: "Write result to this file (absolute path), response has only path and size" },
             script: { type: "string", description: "JavaScript code" },
             waitAfter: { type: "number", description: "Wait ms (default: 500)" },
             screenshot: { type: "boolean", description: "Screenshot (default: false)" },
@@ -366,11 +376,12 @@ Examples:
         inputSchema: {
           type: "object",
           properties: {
+            matchFigmaFrame: { type: "object", properties: { fileKey: { type: "string" }, nodeId: { type: "string" }, figmaSpecPath: { type: "string" } }, description: "Use the size of this Figma frame as width/height" },
             width: { type: "number", minimum: 320, maximum: 4000, description: "Width px" },
             height: { type: "number", minimum: 200, maximum: 3000, description: "Height px" },
             deviceScaleFactor: { type: "number", minimum: 0.5, maximum: 3, description: "Pixel ratio (default: 1)" },
           },
-          required: ["width", "height"],
+          required: [],
         },
       },
       {
@@ -414,47 +425,196 @@ Examples:
       },
       {
         name: "getFigmaFrame",
-        description: "Export Figma frame as PNG. Requires API token and file/node IDs.",
+        description: "Export Figma frame as PNG. Cached on disk: repeated calls make no API request.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
             fileKey: { type: "string", description: "File key" },
             nodeId: { type: "string", description: "Frame/component ID" },
+            nodeIds: { type: "array", items: { type: "string" }, description: "Several nodes, one /images request (instead of nodeId)" },
+            outputDir: { type: "string", description: "Save renders as files here instead of inline images" },
             scale: { type: "number", minimum: 0.1, maximum: 4, description: "Scale (default: 2)" },
             format: { type: "string", enum: ["png", "jpg", "svg"], description: "Format (default: png)" },
           },
-          required: ["fileKey", "nodeId"],
+          required: ["fileKey"],
         },
       },
       {
         name: "compareFigmaToElement",
-        description: "Compare Figma design with browser element. Pixel-perfect validation. Images are aligned top-left without scaling (size mismatch counts as difference); returns figma, page, overlay and diff images.",
+        description: "Compare Figma design with browser element. Pixel-perfect validation. Images are aligned top-left without scaling (size mismatch counts as difference); returns figma, page, overlay and diff images. Figma render is cached; figmaImagePath works without the API.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
+            hideSelectors: { type: "array", items: { type: "string" }, description: "Hide page elements for the shot (chat widget etc.)" },
+            cropToBounds: { type: "boolean", description: "Cut render to frame box (stroke/shadow); default on with cached tree, true fetches tree, false off" },
+            figmaImagePath: { type: "string", description: "Local PNG instead of Figma API (fileKey/nodeId not needed)" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
             fileKey: { type: "string", description: "File key" },
             nodeId: { type: "string", description: "Frame/component ID" },
             selector: { type: "string", description: "CSS selector" },
             threshold: { type: "number", minimum: 0, maximum: 1, description: "Diff threshold (default: 0.05)" },
-            figmaScale: { type: "number", minimum: 0.1, maximum: 4, description: "Scale (default: 2). Match page devicePixelRatio" },
+            figmaScale: { type: "number", minimum: 0.1, maximum: 4, description: "Scale (default: page devicePixelRatio)" },
             outputDir: { type: "string", description: "Save figma.png, page.png, diff.png, overlay.png here (absolute path)" },
+            nodeIds: { type: "array", items: { type: "string" }, description: "Batch: node IDs paired with selectors" },
+            selectors: { type: "array", items: { type: "string" }, description: "Batch: selectors paired with nodeIds" },
+            figmaChildNodeId: { type: "string", description: "Crop the render of nodeId to this child (keeps parent background)" },
+            figmaCrop: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } }, description: "Crop render to rect (Figma px relative to node)" },
+            anchor: { type: "object", properties: { figmaNodeId: { type: "string" }, selector: { type: "string" } }, description: "Align so this Figma node and page element coincide; only overlap compared" },
+            ignore: { type: "array", items: { type: "object", properties: { selector: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } } }, description: "Masked areas: selectors or rects (CSS px relative to element)" },
+            scaleToFit: { type: "boolean", description: "Resize Figma image to element width" },
+            figmaSpecPath: { type: "string", description: "Saved node JSON: /nodes response {nodes:{id:{document}}}, {document} or a node; nodeId may be inside" },
           },
-          required: ["fileKey", "nodeId", "selector"],
+          required: [],
         },
       },
       {
         name: "getFigmaSpecs",
-        description: "Extract design specs from Figma: colors, fonts, dimensions, spacing.",
+        description: "Extract design specs from Figma: colors, fonts, dimensions, spacing. Cached; child nodes are read from a cached parent tree; figmaSpecPath works without the API.",
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
+            figmaSpecPath: { type: "string", description: "Saved node JSON: /nodes response {nodes:{id:{document}}}, {document} or a node; nodeId may be inside" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
             fileKey: { type: "string", description: "File key" },
             nodeId: { type: "string", description: "Frame/component ID" },
           },
-          required: ["fileKey", "nodeId"],
+          required: [],
+        },
+      },
+      {
+        name: "compareFigmaSpecs",
+        description: "Compare specs, not pixels: matches Figma text nodes (by text) and blocks (by position or explicit pairs) with page elements and lists differences: font-family (with rendered font / fallback), font-size, font-weight, line-height, letter-spacing, color, height, width, padding, gap, border-radius, background, border. Figma px = CSS px.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            outputFile: { type: "string", description: "Write result to this file (absolute path), response has only path and size" },
+            ignoreTexts: { type: "array", items: { type: "string" }, description: "Regexps of texts not compared (table data)" },
+            ignoreSelectors: { type: "array", items: { type: "string" }, description: "Page subtrees not compared" },
+            ignoreFigmaNodes: { type: "array", items: { type: "string" }, description: "Figma subtrees not compared" },
+            maxPairDistancePx: { type: "number", description: "Max distance for repeated texts / prefix / role matches (default: 150)" },
+            anchor: { type: "object", properties: { figmaNodeId: { type: "string" }, selector: { type: "string" } }, description: "Common anchor: positions compared as offsets from it" },
+            tolerancePositionPx: { type: "number", description: "Position tolerance with anchor (default: 2)" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
+            fileKey: { type: "string", description: "File key" },
+            nodeId: { type: "string", description: "Figma node (frame/section)" },
+            figmaSpecPath: { type: "string", description: "Saved node JSON: /nodes response {nodes:{id:{document}}}, {document} or a node; nodeId may be inside" },
+            selector: { type: "string", description: "Page element implementing the node" },
+            match: { type: "string", enum: ["auto", "text", "order", "static"], description: "auto (text + nearest), static (skip numbers/dates), order" },
+            pairs: { type: "array", items: { type: "object", properties: { figmaNodeId: { type: "string" }, selector: { type: "string" } } }, description: "Explicit block pairs" },
+            properties: { type: "array", items: { type: "string" }, description: "Properties to compare (default: all; text-transform and position included, position needs anchor)" },
+            tolerancePx: { type: "number", description: "Size tolerance px (default: 0.5)" },
+            colorTolerance: { type: "number", description: "Color tolerance per channel (default: 2)" },
+            maxRows: { type: "number", description: "Max rows (default: 80)" },
+            onlyDiffs: { type: "boolean", description: "Only rows with differences (default: true)" },
+          },
+          required: ["selector"],
+        },
+      },
+      {
+        name: "getFontReport",
+        description: "Which fonts are actually rendered: per declared font-family/weight the font Chrome used (web font, system font, or FALLBACK when the web font did not load / lacks the weight), plus document.fonts load status.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            outputFile: { type: "string", description: "Write result to this file (absolute path), response has only path and size" },
+            selector: { type: "string", description: "Root element (default: body)" },
+            maxElements: { type: "number", description: "Max text elements (default: 300)" },
+          },
+        },
+      },
+      {
+        name: "getFigmaNodeTree",
+        description: "Figma node tree with styles, compact: boxes relative to the node, auto-layout padding/gap, radius, fill, stroke, effects, text font/size/weight/line-height/color. Cached; several nodes in one request.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            outputFile: { type: "string", description: "Write result to this file (absolute path), response has only path and size" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
+            fileKey: { type: "string", description: "File key" },
+            nodeId: { type: "string", description: "Node ID" },
+            nodeIds: { type: "array", items: { type: "string" }, description: "Several nodes" },
+            figmaSpecPath: { type: "string", description: "Saved node JSON: /nodes response {nodes:{id:{document}}}, {document} or a node; nodeId may be inside" },
+            depth: { type: "number", description: "Depth (default: 6)" },
+            includeHidden: { type: "boolean", description: "Include hidden nodes" },
+            textOnly: { type: "boolean", description: "Only TEXT nodes, flat" },
+          },
+        },
+      },
+      {
+        name: "prefetchFigma",
+        description: "Cache Figma node trees and renders in one go: one /nodes and one /images request for all nodes. After it compareFigmaToElement, getFigmaFrame, getFigmaSpecs work offline. Use before checking many states (rate limit of View/Collab seats is very low).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached" },
+            fileKey: { type: "string", description: "File key or Figma URL" },
+            nodeIds: { type: "array", items: { type: "string" }, description: "Node IDs" },
+            scales: { type: "array", items: { type: "number" }, description: "Render scales (default: [2])" },
+            format: { type: "string", enum: ["png", "jpg", "svg"], description: "Format (default: png)" },
+            tree: { type: "boolean", description: "Also cache node trees (default: true)" },
+          },
+          required: ["fileKey", "nodeIds"],
+        },
+      },
+      {
+        name: "importFigmaCache",
+        description: "Put a Figma tree downloaded earlier into the cache (when the API is rate-limited): /nodes response, file response or node JSON. Nested nodes are then available by nodeId with offline: true.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            fileKey: { type: "string", description: "File key or URL" },
+            path: { type: "string", description: "JSON file path" },
+          },
+          required: ["fileKey", "path"],
+        },
+      },
+      {
+        name: "importFigmaRender",
+        description: "Put a saved Figma render (PNG/JPG/SVG) into the cache for nodeId + scale, so compareFigmaToElement / getFigmaFrame work offline.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            fileKey: { type: "string", description: "File key or URL" },
+            nodeId: { type: "string", description: "Node ID" },
+            path: { type: "string", description: "Image file path" },
+            scale: { type: "number", description: "Image scale (default: 1)" },
+            format: { type: "string", enum: ["png", "jpg", "svg"], description: "Default: from extension" },
+          },
+          required: ["fileKey", "nodeId", "path"],
+        },
+      },
+      {
+        name: "figmaCacheStatus",
+        description: "Show the Figma disk cache: files, versions, cached trees and renders, size, active rate-limit block.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            fileKey: { type: "string", description: "Only this file" },
+          },
+        },
+      },
+      {
+        name: "figmaCacheClear",
+        description: "Clear the Figma disk cache: all, one file, some nodes or one kind of entry.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            fileKey: { type: "string", description: "Only this file" },
+            nodeIds: { type: "array", items: { type: "string" }, description: "Only these nodes" },
+            kind: { type: "string", enum: ["images", "nodes", "file", "rate-limit"], description: "Only this kind; rate-limit forgets a stored 429 block" },
+          },
         },
       },
       {
@@ -474,7 +634,9 @@ Examples:
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
             fileKey: { type: "string", description: "File key or URL" },
           },
           required: ["fileKey"],
@@ -486,7 +648,9 @@ Examples:
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
             fileKey: { type: "string", description: "File key or URL" },
             searchQuery: { type: "string", description: "Search query" },
           },
@@ -499,7 +663,9 @@ Examples:
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
             fileKey: { type: "string", description: "File key or URL" },
           },
           required: ["fileKey"],
@@ -511,7 +677,9 @@ Examples:
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
             fileKey: { type: "string", description: "File key or URL" },
           },
           required: ["fileKey"],
@@ -523,7 +691,9 @@ Examples:
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
             fileKey: { type: "string", description: "File key or URL" },
           },
           required: ["fileKey"],
@@ -535,7 +705,9 @@ Examples:
         inputSchema: {
           type: "object",
           properties: {
-            figmaToken: { type: "string", description: "API token (optional)" },
+            figmaToken: { type: "string", description: "Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override" },
+            refresh: { type: "boolean", description: "Fetch again even if cached (cache lives until refresh/clear)" },
+            offline: { type: "boolean", description: "Use only the cache, never call the API" },
             fileKey: { type: "string", description: "File key" },
             nodeId: { type: "string", description: "Frame/component ID (formats: '123:456' or '123-456')" },
             framework: { type: "string", enum: ["react", "react-typescript", "html"], description: "Target framework (default: react)" },
@@ -575,6 +747,7 @@ Examples:
         inputSchema: {
           type: "object",
           properties: {
+            outputFile: { type: "string", description: "Write result to this file (absolute path), response has only path and size" },
             refresh: { type: "boolean", description: "Refresh cache (default: false)" },
             includeAll: { type: "boolean", description: "Include all elements with selectors - full debug format (default: false for compact format)" },
             useLegacyFormat: { type: "boolean", description: "Return legacy format instead of APOM (default: false - APOM is now default)" },
@@ -911,11 +1084,23 @@ Examples:
         },
       },
       {
+        name: "resetBrowser",
+        description: "Recover from a lost tab / detached frame without restarting the MCP server: forget tracked pages and the CDP connection (Chrome and its tabs stay open). Optional url opens a page right away.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "Open this URL after the reset" },
+          },
+        },
+      },
+      {
         name: "listTabs",
         description: "List all open browser tabs with their URLs, titles, and active status. Use this to see all tabs opened manually or via window.open/target='_blank'. Returns tab index for use with switchTab.",
         inputSchema: {
           type: "object",
-          properties: {},
+          properties: {
+            all: { type: "boolean", description: "Also list the user's own tabs (without titles). Default: only chrometools tabs" },
+          },
         },
       },
       {

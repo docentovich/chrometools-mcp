@@ -231,7 +231,6 @@ function handleBridgeMessage(message) {
         bridgeState.tabs.set(tab.tabId, tab);
       });
       notifyEventCallbacks('tabs_sync', message.payload);
-      syncActiveTab(message.payload.tabs);
       break;
 
     case 'tab_created':
@@ -244,13 +243,18 @@ function handleBridgeMessage(message) {
       notifyEventCallbacks('tab_closed', message.payload);
       break;
 
-    case 'tab_activated':
+    case 'tab_activated': {
+      const activated = bridgeState.tabs.get(message.payload.tabId);
       for (const [id, tab] of bridgeState.tabs) {
-        tab.active = (id === message.payload.tabId);
+        // active is per window
+        if (!activated || tab.windowId === activated.windowId) {
+          tab.active = (id === message.payload.tabId);
+        }
       }
       notifyEventCallbacks('tab_activated', message.payload);
       syncActiveTabById(message.payload.tabId);
       break;
+    }
 
     case 'tab_updated':
       if (message.payload.tab) {
@@ -303,25 +307,14 @@ function updateFullState(state) {
 
   debugLog(`State updated: ${bridgeState.tabs.size} tabs, ${bridgeState.recordings.length} recordings`);
   notifyEventCallbacks('state_updated', state);
-
-  // Sync active tab
-  syncActiveTab(state.tabs);
+  // No lastPage sync here: a bulk state has one active tab per window, picking
+  // the first one moved MCP to an unrelated tab. Only tab_activated (the user
+  // switched tabs) changes lastPage.
 }
 
 /**
- * Sync Puppeteer's lastPage to active tab
+ * Sync Puppeteer's lastPage to a tab the user activated
  */
-function syncActiveTab(tabs) {
-  if (!activeTabSyncHandler || !tabs) return;
-
-  const activeTab = tabs.find(t => t.active);
-  if (activeTab?.url) {
-    activeTabSyncHandler(activeTab.url).catch(err => {
-      debugLog(`Failed to sync lastPage: ${err.message}`);
-    });
-  }
-}
-
 function syncActiveTabById(tabId) {
   if (!activeTabSyncHandler) return;
 

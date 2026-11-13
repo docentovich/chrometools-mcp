@@ -16,6 +16,8 @@ Cross-platform MCP server (Windows/WSL, Linux, macOS) that provides Chrome brows
 | [Novofon Blockers (iframe/session/P1)](specs/NOVOFON-IFRAME_SPEC.md) | CODE COMPLETE — needs live e2e | [progress](specs/NOVOFON-IFRAME_PROGRESS.md) |
 | [Credential Vault](specs/CREDENTIAL-VAULT_SPEC.md) | DONE (v3.7.0) - verified on standhub | [progress](specs/CREDENTIAL-VAULT_PROGRESS.md) |
 | [Figma hang + vault fill verify](specs/FIGMA-VAULT-FIXES_SPEC.md) | CODE COMPLETE - needs live check | [progress](specs/FIGMA-VAULT-FIXES_PROGRESS.md) |
+| [Chrome attach + capture hangs](specs/CONNECT-CAPTURE_SPEC.md) | CODE COMPLETE - needs live check | [progress](specs/CONNECT-CAPTURE_PROGRESS.md) |
+| [Figma layout check: bugs + pixel perfect](specs/FIGMA-PIXEL-PERFECT_SPEC.md) | CODE COMPLETE (phases 1-6) - needs live check | [progress](specs/FIGMA-PIXEL-PERFECT_PROGRESS.md) |
 
 ## Key Architecture Concept
 

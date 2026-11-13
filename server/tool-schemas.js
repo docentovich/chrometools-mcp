@@ -109,7 +109,10 @@ export const ScrollHorizontalSchema = z.object({
 
 // CSS tools
 export const GetComputedCssSchema = z.object({
+  outputFile: z.string().optional().describe("Write the result to this file (absolute path) instead of the response; the response has only the path and size"),
   selector: z.string().optional().describe("CSS selector (optional, defaults to body)"),
+  selectors: z.array(z.string()).max(50).optional().describe("Batch: list of selectors, returns a table (props x elements) in one call"),
+  all: z.boolean().optional().describe("Batch: every match of each selector, not only the first (max 100 elements)"),
   category: z.enum(['all', 'layout', 'typography', 'colors', 'visual']).optional().describe("Filter by CSS category: 'layout' (sizing, positioning), 'typography' (fonts, text), 'colors' (color schemes), 'visual' (effects, transforms), 'all' (default)"),
   properties: z.array(z.string()).optional().describe("Specific CSS properties to return (e.g., ['color', 'font-size']). Overrides category filter."),
   includeDefaults: z.boolean().optional().describe("Include properties with default values (default: false)"),
@@ -129,6 +132,7 @@ export const SetStylesSchema = z.object({
 
 // Screenshot tools
 export const ScreenshotSchema = z.object({
+  outputFile: z.string().optional().describe("Write the result to this file (absolute path) instead of the response; the response has only the path and size"),
   id: z.string().optional().describe("APOM element ID from analyzePage (e.g., 'div_20'). Mutually exclusive with selector. If neither id nor selector is provided, captures full viewport."),
   selector: z.string().optional().describe("CSS selector for element to screenshot. Mutually exclusive with id. If neither id nor selector is provided, captures full viewport."),
   padding: z.number().optional().describe("Padding around element in pixels (default: 0). Ignored for viewport screenshot."),
@@ -141,7 +145,13 @@ export const ScreenshotSchema = z.object({
 });
 
 export const SaveScreenshotSchema = z.object({
-  selector: z.string().describe("CSS selector for element to screenshot"),
+  selector: z.string().optional().describe("CSS selector for element to screenshot (or use viewport: true)"),
+  viewport: z.boolean().optional().describe("Capture exactly the visible viewport (innerWidth x innerHeight) instead of an element"),
+  excludeScrollbar: z.boolean().optional().describe("With viewport: true, capture documentElement.clientWidth x clientHeight (without scrollbars)"),
+  hideSelectors: z.array(z.string()).optional().describe("Hide these elements (visibility: hidden) for the screenshot, e.g. chat widget"),
+  clip: z.object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive() }).optional()
+    .describe("Capture this area, CSS px relative to the viewport (as getBoundingClientRect)"),
+  scale: z.enum(['device', 'css']).optional().describe("'device' (default): image px = CSS px x devicePixelRatio. 'css': 1 image px = 1 CSS px"),
   filePath: z.string().describe("Absolute path where to save file"),
   padding: z.number().optional().describe("Padding around element in pixels (default: 0)"),
   maxWidth: z.number().nullable().optional().describe("Maximum width in pixels, auto-scales if larger (default: 1024, set to null for original size)"),
@@ -180,8 +190,14 @@ export const SwitchFrameSchema = z.object({
 }).describe("Set the active frame for subsequent click/type/hover/analyzePage/find/executeScript/waitForElement. Call with NO arguments to reset back to the main frame. Active frame is also reset automatically on navigateTo. Use listFrames() to discover available frames.");
 
 export const SetViewportSchema = z.object({
-  width: z.number().min(320).max(4000).describe("Viewport width in pixels (320-4000)"),
-  height: z.number().min(200).max(3000).describe("Viewport height in pixels (200-3000)"),
+  width: z.number().min(320).max(4000).optional().describe("Viewport width in pixels (320-4000)"),
+  height: z.number().min(200).max(3000).optional().describe("Viewport height in pixels (200-3000)"),
+  matchFigmaFrame: z.object({
+    fileKey: z.string().optional(),
+    nodeId: z.string().optional(),
+    figmaSpecPath: z.string().optional(),
+    figmaToken: z.string().optional()
+  }).optional().describe("Set width/height to the size of this Figma frame"),
   deviceScaleFactor: z.number().min(0.5).max(3).optional().describe("Device pixel ratio (0.5-3, default: 1)"),
 });
 
@@ -189,6 +205,7 @@ export const GetViewportSchema = z.object({});
 
 // Script execution
 export const ExecuteScriptSchema = z.object({
+  outputFile: z.string().optional().describe("Write the result to this file (absolute path) instead of the response; the response has only the path and size"),
   script: z.string().describe("JavaScript code to execute in page context"),
   waitAfter: z.number().optional().describe("Milliseconds to wait after execution (default: 500)"),
   screenshot: z.boolean().optional().describe("Capture screenshot after execution (default: false for performance)"),
@@ -231,27 +248,132 @@ export const FilterNetworkRequestsSchema = z.object({
 
 // Figma tools
 export const GetFigmaFrameSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
   fileKey: z.string().describe("Figma file key (from URL: figma.com/file/FILE_KEY/...)"),
-  nodeId: z.string().describe("Figma node ID (frame/component ID)"),
+  nodeId: z.string().optional().describe("Figma node ID (frame/component ID)"),
+  nodeIds: z.array(z.string()).max(50).optional().describe("Several node IDs: one /images request for all (instead of nodeId)"),
   scale: z.number().min(0.1).max(4).optional().describe("Export scale (0.1-4, default: 2)"),
-  format: z.enum(['png', 'jpg', 'svg']).optional().describe("Export format (default: png)")
+  format: z.enum(['png', 'jpg', 'svg']).optional().describe("Export format (default: png)"),
+  outputDir: z.string().optional().describe("Save renders as <nodeId>@<scale>x.<format> files here instead of inline images (exact bytes)")
 });
 
 export const CompareFigmaToElementSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
-  fileKey: z.string().describe("Figma file key"),
-  nodeId: z.string().describe("Figma frame/component ID"),
-  selector: z.string().describe("CSS selector for page element"),
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
+  fileKey: z.string().optional().describe("Figma file key (not needed with figmaImagePath)"),
+  nodeId: z.string().optional().describe("Figma frame/component ID (not needed with figmaImagePath)"),
+  figmaImagePath: z.string().optional().describe("Compare with a local PNG instead of the Figma API (manual export or a file from the cache)"),
+  selector: z.string().optional().describe("CSS selector for page element"),
+  nodeIds: z.array(z.string()).max(30).optional().describe("Batch: Figma node IDs, pair i is compared with selectors[i]; one /images request"),
+  selectors: z.array(z.string()).max(30).optional().describe("Batch: CSS selectors paired with nodeIds"),
+  figmaChildNodeId: z.string().optional().describe("Crop the Figma render of nodeId to this child node (keeps the parent background)"),
+  figmaCrop: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).optional()
+    .describe("Crop the Figma render to this rectangle (Figma px relative to the node)"),
+  anchor: z.object({ figmaNodeId: z.string(), selector: z.string() }).optional()
+    .describe("Align images so this Figma node and this page element coincide (e.g. content card); only the overlap is compared"),
+  ignore: z.array(z.object({
+    selector: z.string().optional(), x: z.number().optional(), y: z.number().optional(),
+    width: z.number().optional(), height: z.number().optional()
+  })).optional().describe("Areas excluded from the diff: page selectors, or rectangles in CSS px relative to the element"),
+  scaleToFit: z.boolean().optional().describe("Resize the Figma image to the element width (default: false)"),
+  hideSelectors: z.array(z.string()).optional().describe("Hide these page elements (visibility: hidden) for the screenshot, e.g. chat widget"),
+  cropToBounds: z.boolean().optional().describe("Cut the Figma render to the frame box when strokes/shadows make it larger (default: on with a cached tree; true also fetches the tree; false disables)"),
+  figmaSpecPath: z.string().optional().describe('Saved node JSON instead of the API: a /v1/files/:key/nodes response {"nodes": {"id": {"document": ...}}}, an object with "document", or a bare node. nodeId may point to any node inside it'),
   threshold: z.number().min(0).max(1).optional().describe("Difference threshold (0-1, default: 0.05)"),
-  figmaScale: z.number().min(0.1).max(4).optional().describe("Figma export scale (default: 2)"),
+  figmaScale: z.number().min(0.1).max(4).optional().describe("Figma export scale (default: page devicePixelRatio)"),
   outputDir: z.string().optional().describe("Save figma.png, page.png, diff.png, overlay.png to this directory")
 });
 
 export const GetFigmaSpecsSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
-  fileKey: z.string().describe("Figma file key"),
-  nodeId: z.string().describe("Figma frame/component ID")
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
+  fileKey: z.string().optional().describe("Figma file key (not needed with figmaSpecPath)"),
+  nodeId: z.string().optional().describe("Figma frame/component ID (with figmaSpecPath: node inside the file, default: root)"),
+  figmaSpecPath: z.string().optional().describe('Saved node JSON instead of the API: a /v1/files/:key/nodes response {"nodes": {"id": {"document": ...}}}, an object with "document", or a bare node. nodeId may point to any node inside it')
+});
+
+export const GetFontReportSchema = z.object({
+  outputFile: z.string().optional().describe("Write the result to this file (absolute path) instead of the response; the response has only the path and size"),
+  selector: z.string().optional().describe("Root element (default: body)"),
+  maxElements: z.number().min(1).max(2000).optional().describe("Max text elements to check (default: 300)")
+});
+
+export const CompareFigmaSpecsSchema = z.object({
+  outputFile: z.string().optional().describe("Write the result to this file (absolute path) instead of the response"),
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
+  fileKey: z.string().optional().describe("Figma file key"),
+  nodeId: z.string().optional().describe("Figma node (frame/section) to compare"),
+  figmaSpecPath: z.string().optional().describe('Saved node JSON instead of the API: a /v1/files/:key/nodes response {"nodes": {"id": {"document": ...}}}, an object with "document", or a bare node. nodeId may point to any node inside it'),
+  selector: z.string().describe("Page element that implements the node"),
+  match: z.enum(['auto', 'text', 'order', 'static']).optional().describe("Text matching: by text and nearest position (auto/text, default), 'static' = same but skip numbers/dates (table data), 'order' = by order"),
+  ignoreTexts: z.array(z.string()).optional().describe("Regexps: texts matching them are not compared (data that differs from the design)"),
+  ignoreSelectors: z.array(z.string()).optional().describe("Page subtrees not compared (e.g. table body)"),
+  ignoreFigmaNodes: z.array(z.string()).optional().describe("Figma subtrees not compared"),
+  maxPairDistancePx: z.number().min(0).optional().describe("Max distance for repeated texts / prefix / role matches, px from the anchor (default: 150)"),
+  pairs: z.array(z.object({ figmaNodeId: z.string(), selector: z.string() })).optional()
+    .describe("Explicit block pairs (Figma node <-> page element) compared before automatic matching"),
+  properties: z.array(z.string()).optional()
+    .describe("Properties to compare (default: font-family, font-size, font-weight, line-height, letter-spacing, color, height, width, padding, gap, border-radius, background, border)"),
+  tolerancePx: z.number().min(0).optional().describe("Size tolerance in px (default: 0.5)"),
+  anchor: z.object({ figmaNodeId: z.string(), selector: z.string() }).optional()
+    .describe("Common anchor (e.g. block title): matched as a fixed pair, positions are compared as offsets from it"),
+  tolerancePositionPx: z.number().min(0).optional().describe("Position tolerance with anchor, px (default: 2)"),
+  colorTolerance: z.number().min(0).max(255).optional().describe("Color tolerance per channel 0-255 (default: 2)"),
+  maxRows: z.number().min(1).max(500).optional().describe("Max rows in the output (default: 80)"),
+  onlyDiffs: z.boolean().optional().describe("Only rows with differences (default: true)")
+});
+
+export const GetFigmaNodeTreeSchema = z.object({
+  outputFile: z.string().optional().describe("Write the result to this file (absolute path) instead of the response; the response has only the path and size"),
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
+  fileKey: z.string().optional().describe("Figma file key"),
+  nodeId: z.string().optional().describe("Node ID"),
+  nodeIds: z.array(z.string()).max(20).optional().describe("Several nodes in one /nodes request"),
+  figmaSpecPath: z.string().optional().describe('Saved node JSON instead of the API: a /v1/files/:key/nodes response {"nodes": {"id": {"document": ...}}}, an object with "document", or a bare node. nodeId may point to any node inside it'),
+  depth: z.number().min(0).max(30).optional().describe("Tree depth (default: 6)"),
+  includeHidden: z.boolean().optional().describe("Include hidden nodes (default: false)"),
+  textOnly: z.boolean().optional().describe("Only TEXT nodes with styles (flat list)")
+});
+
+export const PrefetchFigmaSchema = z.object({
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch again even if cached"),
+  fileKey: z.string().describe("Figma file key or full Figma URL"),
+  nodeIds: z.array(z.string()).min(1).max(200).describe("Node IDs to cache (trees and renders)"),
+  scales: z.array(z.number().min(0.1).max(4)).optional().describe("Render scales (default: [2])"),
+  format: z.enum(['png', 'jpg', 'svg']).optional().describe("Render format (default: png)"),
+  tree: z.boolean().optional().describe("Also cache node trees with styles (default: true)")
+});
+
+export const ImportFigmaCacheSchema = z.object({
+  fileKey: z.string().describe("Figma file key or URL the data belongs to"),
+  path: z.string().describe("Saved JSON: /v1/files/:key/nodes response, /v1/files/:key response, or a node")
+});
+
+export const ImportFigmaRenderSchema = z.object({
+  fileKey: z.string().describe("Figma file key or URL"),
+  nodeId: z.string().describe("Node the image renders"),
+  path: z.string().describe("PNG / JPG / SVG file"),
+  scale: z.number().min(0.1).max(4).optional().describe("Scale of the image (default: 1)"),
+  format: z.enum(['png', 'jpg', 'svg']).optional().describe("Default: from the file extension")
+});
+
+export const FigmaCacheStatusSchema = z.object({
+  fileKey: z.string().optional().describe("Only this file (default: all cached files)")
+});
+
+export const FigmaCacheClearSchema = z.object({
+  fileKey: z.string().optional().describe("Only this file"),
+  nodeIds: z.array(z.string()).optional().describe("Only these nodes"),
+  kind: z.enum(['images', 'nodes', 'file', 'rate-limit']).optional().describe("Only this kind of entry; 'rate-limit' forgets a stored 429 block")
 });
 
 export const ParseFigmaUrlSchema = z.object({
@@ -259,33 +381,45 @@ export const ParseFigmaUrlSchema = z.object({
 });
 
 export const ListFigmaPagesSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
   fileKey: z.string().describe("Figma file key or full Figma URL")
 });
 
 export const SearchFigmaFramesSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
   fileKey: z.string().describe("Figma file key or full Figma URL"),
   searchQuery: z.string().describe("Search query")
 });
 
 export const GetFigmaComponentsSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
   fileKey: z.string().describe("Figma file key or full Figma URL")
 });
 
 export const GetFigmaStylesSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
   fileKey: z.string().describe("Figma file key or full Figma URL")
 });
 
 export const GetFigmaColorPaletteSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
   fileKey: z.string().describe("Figma file key or full Figma URL")
 });
 
 export const ConvertFigmaToCodeSchema = z.object({
-  figmaToken: z.string().optional().describe("Figma API token (optional if FIGMA_TOKEN env var is set)"),
+  figmaToken: z.string().optional().describe("Omit: server reads FIGMA_TOKEN / FIGMA_TOKEN_FILE. Pass only to override"),
+  refresh: z.boolean().optional().describe("Fetch from Figma again even if cached (default: false, cache lives until refresh/clear)"),
+  offline: z.boolean().optional().describe("Never call the Figma API, use only the cache (default: false)"),
   fileKey: z.string().describe("Figma file key (from URL: figma.com/file/FILE_KEY/...)"),
   nodeId: z.string().describe("Figma node ID (frame/component ID, formats: '123:456' or '123-456')"),
   framework: z.enum(['react', 'react-typescript', 'html']).optional().describe("Target framework (default: react)"),
@@ -310,6 +444,7 @@ export const SmartFindElementSchema = z.object({
 });
 
 export const AnalyzePageSchema = z.object({
+  outputFile: z.string().optional().describe("Write the result to this file (absolute path) instead of the response; the response has only the path and size"),
   refresh: z.boolean().optional().describe("Force refresh of cached analysis (default: false)"),
   includeAll: z.boolean().optional().describe("Include all elements on page, not just interactive ones (default: false). When false (default), returns compact format: containers as \"tag_id\":[children], interactive elements without selectors. When true, returns full format with selectors for debugging."),
   useLegacyFormat: z.boolean().optional().describe("Return legacy format instead of APOM (default: false - APOM is now the default format)"),
@@ -414,7 +549,13 @@ export const GeneratePageObjectSchema = z.object({
 });
 
 // Tab management tools
-export const ListTabsSchema = z.object({});
+export const ListTabsSchema = z.object({
+  all: z.boolean().optional().describe("Also list the user's own tabs (without titles). Default: only tabs chrometools works with"),
+});
+
+export const ResetBrowserSchema = z.object({
+  url: z.string().optional().describe("Open this URL after the reset (optional)"),
+});
 
 export const SwitchTabSchema = z.object({
   tab: z.union([

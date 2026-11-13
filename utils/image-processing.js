@@ -237,40 +237,107 @@ export function calculateSSIM(img1Data, img2Data, width, height) {
 }
 
 /**
- * Compare two images without stretching: both are placed top-left on a common
- * transparent canvas (max width x max height). Area covered by only one image
- * counts as difference.
- * @returns {Promise<{width, height, diffPixels, ssim, diff: Jimp, overlay: Jimp}>}
+ * Compare two images without stretching.
+ *
+ * Default: both are placed top-left on a common transparent canvas (max width x
+ * max height); area covered by only one image counts as difference.
+ *
+ * With `offset` ({x, y} in px, position of the Figma image relative to the page
+ * image, e.g. from anchor alignment): the canvas is the page image, only the
+ * overlap of both images is compared, the rest is reported as `outsidePixels`.
+ *
+ * `masks` ([{x, y, width, height}] in page image px): excluded from the diff,
+ * drawn hatched on diff and overlay.
+ * @returns {Promise<{width, height, diffPixels, comparedPixels, outsidePixels, maskedPixels, ssim, diff: Jimp, overlay: Jimp}>}
  */
-export async function compareImages(figmaBuffer, pageBuffer, { pixelThreshold = 0.1 } = {}) {
+export async function compareImages(figmaBuffer, pageBuffer, { pixelThreshold = 0.1, offset = null, masks = [] } = {}) {
   const [figma, page] = await Promise.all([Jimp.read(figmaBuffer), Jimp.read(pageBuffer)]);
-  const width = Math.max(figma.bitmap.width, page.bitmap.width);
-  const height = Math.max(figma.bitmap.height, page.bitmap.height);
-  const onCanvas = img => new Jimp(width, height, 0x00000000).composite(img, 0, 0);
-  const figmaCanvas = onCanvas(figma);
-  const pageCanvas = onCanvas(page);
+  const fw = figma.bitmap.width, fh = figma.bitmap.height;
+  const pw = page.bitmap.width, ph = page.bitmap.height;
 
-  const diff = new Jimp(width, height, 0x00000000);
-  const diffPixels = pixelmatch(figmaCanvas.bitmap.data, pageCanvas.bitmap.data, diff.bitmap.data, width, height, {
+  let width, height, fx = 0, fy = 0, region;
+  if (offset) {
+    width = pw; height = ph;
+    fx = Math.round(offset.x); fy = Math.round(offset.y);
+    // Overlap of the shifted Figma image with the page image
+    const x0 = Math.max(0, fx), y0 = Math.max(0, fy);
+    const x1 = Math.min(pw, fx + fw), y1 = Math.min(ph, fy + fh);
+    region = { x: x0, y: y0, width: Math.max(0, x1 - x0), height: Math.max(0, y1 - y0) };
+  } else {
+    width = Math.max(fw, pw); height = Math.max(fh, ph);
+    region = { x: 0, y: 0, width, height };
+  }
+  if (region.width === 0 || region.height === 0) {
+    throw new Error('Figma image and page element do not overlap after alignment');
+  }
+
+  const figmaCanvas = new Jimp(width, height, 0x00000000).composite(figma, fx, fy);
+  const pageCanvas = new Jimp(width, height, 0x00000000).composite(page, 0, 0);
+
+  // Masked areas: same opaque color in both images, so they never differ
+  const clipRect = m => {
+    const x0 = Math.max(region.x, Math.round(m.x)), y0 = Math.max(region.y, Math.round(m.y));
+    const x1 = Math.min(region.x + region.width, Math.round(m.x + m.width));
+    const y1 = Math.min(region.y + region.height, Math.round(m.y + m.height));
+    return x1 > x0 && y1 > y0 ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } : null;
+  };
+  const maskRects = masks.map(clipRect).filter(Boolean);
+  const maskSet = new Uint8Array(width * height);
+  for (const m of maskRects) {
+    for (let y = m.y; y < m.y + m.height; y++) for (let x = m.x; x < m.x + m.width; x++) maskSet[y * width + x] = 1;
+  }
+  let maskedPixels = 0;
+  for (let i = 0; i < maskSet.length; i++) {
+    if (!maskSet[i]) continue;
+    maskedPixels++;
+    for (const c of [figmaCanvas, pageCanvas]) {
+      const d = c.bitmap.data;
+      d[i * 4] = 255; d[i * 4 + 1] = 0; d[i * 4 + 2] = 255; d[i * 4 + 3] = 255;
+    }
+  }
+
+  // Compare only the region (crop both canvases to it)
+  const fr = figmaCanvas.clone().crop(region.x, region.y, region.width, region.height);
+  const pr = pageCanvas.clone().crop(region.x, region.y, region.width, region.height);
+  const diffRegion = new Jimp(region.width, region.height, 0x00000000);
+  const diffPixels = pixelmatch(fr.bitmap.data, pr.bitmap.data, diffRegion.bitmap.data, region.width, region.height, {
     threshold: pixelThreshold,
     includeAA: false
   });
-  const ssim = calculateSSIM(figmaCanvas.bitmap.data, pageCanvas.bitmap.data, width, height);
+  const ssim = calculateSSIM(fr.bitmap.data, pr.bitmap.data, region.width, region.height);
+  const diff = new Jimp(width, height, 0x00000000).composite(diffRegion, region.x, region.y);
 
   // Page with the design at 50% on top: misaligned edges show as doubled lines
-  const overlay = pageCanvas.clone().composite(figma, 0, 0, {
+  const overlay = new Jimp(width, height, 0x00000000).composite(page, 0, 0).composite(figma, fx, fy, {
     mode: Jimp.BLEND_SOURCE_OVER,
     opacitySource: 0.5,
     opacityDest: 1
   });
 
+  // Hatch masked areas on diff and overlay
+  for (const img of maskedPixels ? [diff, overlay] : []) {
+    const d = img.bitmap.data;
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (maskSet[i] && (x + y) % 8 < 2) { d[i * 4] = 128; d[i * 4 + 1] = 128; d[i * 4 + 2] = 128; d[i * 4 + 3] = 255; }
+    }
+  }
+
+  const comparedPixels = region.width * region.height - maskedPixels;
+  const unionArea = offset
+    ? (pw * ph + fw * fh - region.width * region.height)
+    : width * height;
   return {
     width,
     height,
+    region,
     diffPixels,
+    comparedPixels,
+    outsidePixels: offset ? unionArea - region.width * region.height : 0,
+    maskedPixels,
     ssim,
-    figmaSize: { width: figma.bitmap.width, height: figma.bitmap.height },
-    pageSize: { width: page.bitmap.width, height: page.bitmap.height },
+    figmaSize: { width: fw, height: fh },
+    pageSize: { width: pw, height: ph },
     diff,
     overlay
   };

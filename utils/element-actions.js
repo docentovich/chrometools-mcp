@@ -1,13 +1,14 @@
 import { processScreenshot } from './screenshot-processor.js';
+import { capture } from './capture.js';
 
 // Lightweight action screenshot: small JPEG for confirming actions worked
 // These are "report" screenshots, not for detailed analysis
 async function takeActionScreenshot(page, clip) {
-  const screenshotBuffer = await page.screenshot({
+  const screenshotBuffer = await capture(page, () => page.screenshot({
     encoding: 'binary',
     fullPage: false,
     ...(clip ? { clip } : {})
-  });
+  }));
   const processed = await processScreenshot(screenshotBuffer, {
     maxWidth: 800,
     maxHeight: 4000,

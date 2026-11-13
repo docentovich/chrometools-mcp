@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.0] - 2026-11-14
+
+### Added
+- **Figma disk cache** - Figma API responses and renders are cached on disk (`CHROMETOOLS_FIGMA_CACHE_DIR`, `=off` to disable), the token is never stored. All Figma tools use the cache, support `refresh` / `offline` and report the source. 429 rate limits are tracked: no calls while blocked, stale cache returned with a note and the local retry time
+- **New Figma tools** - `prefetchFigma`, `figmaCacheStatus`, `figmaCacheClear`, `importFigmaCache`, `importFigmaRender`, `getFigmaNodeTree` (boxes, auto layout, radius, fills, strokes, effects, text styles, 60 KB guard, `textOnly`)
+- **`compareFigmaSpecs`** - Compares Figma node specs with the rendered page: text and block matching, diff table for size, position, color, radius and font (actually rendered font), unmatched lists, `outputFile`
+- **`getFontReport`** - Shows which font each element is really rendered with (web font / system / fallback), `document.fonts` status, failed `@font-face`
+- **`resetBrowser`** - Drops the current connection and tab state
+- **`setViewport({ matchFigmaFrame })`** - Sets viewport to a Figma frame size
+- **`getComputedCss` batch mode** - `selectors` / `all`, table output
+- **`outputFile`** on 6 tools, `hideSelectors` in `compareFigmaToElement` and `saveScreenshot`
+- **`CHROMETOOLS_FORCE_DEVICE_SCALE_FACTOR`** - OS display scaling is detected and can be overridden
+
+### Changed
+- **`compareFigmaToElement`** - Default `figmaScale` = page DPR, `nodeIds` + `selectors` pairs, `figmaChildNodeId` / `figmaCrop`, ignore masks, anchor alignment, `scaleToFit`, `cropToBounds`, `figmaImagePath`
+- **`getFigmaFrame`** - `nodeIds` (one request) and `outputDir`
+- **`saveScreenshot`** - `viewport`, `excludeScrollbar`, `scale`, `clip`, size and DPR in output
+- **`navigateTo` / `openBrowser`** - Wait for SPA to settle, detect dev error overlays (webpack, vite, next, CRA, parcel)
+- **`click`** - Reports the covering element, behind-modal and dev-overlay warnings, `NO_CHANGE` check
+- **`executeScript`** - Top-level `await`
+- **Console capture** - One listener per page, `message` field, stack, uncaught exceptions
+- **Tabs** - Tabs opened by the user no longer take over the session, `listTabs` hides them unless `all`
+
+### Fixed
+- **Viewport reset** - Viewport is kept and re-applied on navigation and new tabs
+- **Session jumping to another tab** - Extension tab sync no longer switches the working tab, URL matching is exact
+- **Detached tab** - Liveness check, re-attach by URL, one retry on dead-page errors; `switchTab` fails with a clear error
+- **Screenshot clip on scrolled pages** and ignored `maxWidth: null`
+- **Figma token** read at call time, not only at startup
+- **All tools hanging after attaching to a running Chrome** - `puppeteer.connect` waited forever for a hidden tab with an empty URL that never answered, and every later call waited for that connection, even after Chrome was closed (only an MCP restart helped). Such tabs are skipped on connect, attach has a 15 s timeout (`CHROMETOOLS_CONNECT_TIMEOUT_MS`) and the next call retries. A hung Chrome on the port gives a clear error instead of an attempt to launch a second Chrome on the busy port
+- **Screenshots hanging when the Chrome window is minimized or the tab is in background** - Chrome renders no frames there. `screenshot`, `saveScreenshot`, `compareFigmaToElement`, `executeScript({ screenshot })` and action screenshots now restore the window / bring the tab to front first and time out after 15 s (`CHROMETOOLS_CAPTURE_TIMEOUT_MS`). Chrome launched by ChromeTools keeps rendering when covered by other windows
+
 ## [3.7.0] - 2026-11-10
 
 ### Added

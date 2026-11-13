@@ -12,7 +12,7 @@ const FIGMA_TIMEOUT_MS = Number(process.env.CHROMETOOLS_FIGMA_TIMEOUT_MS) || 300
  * GET a URL with a hard timeout. Honours HTTPS_PROXY / HTTP_PROXY / NO_PROXY
  * (Node's built-in fetch ignores them, so Figma's S3 image links could hang
  * forever where they are reachable only through a proxy).
- * @returns {Promise<{ok: boolean, status: number, buffer: Buffer, text(): string, json(): any}>}
+ * @returns {Promise<{ok: boolean, status: number, headers: object, buffer: Buffer, text(): string, json(): any}>}
  */
 export function figmaFetch(url, { headers = {}, timeoutMs = FIGMA_TIMEOUT_MS, redirects = 3 } = {}) {
   return new Promise((resolve, reject) => {
@@ -43,6 +43,7 @@ export function figmaFetch(url, { headers = {}, timeoutMs = FIGMA_TIMEOUT_MS, re
         resolve({
           ok: res.statusCode >= 200 && res.statusCode < 300,
           status: res.statusCode,
+          headers: res.headers,
           buffer,
           text: () => buffer.toString('utf8'),
           json: () => JSON.parse(buffer.toString('utf8'))
@@ -139,11 +140,10 @@ export async function getFigmaFile(fileKey, figmaToken) {
 }
 
 /**
- * Get all pages and frames from Figma file
+ * Get all pages and frames from Figma file data (/v1/files/:key)
  * Returns hierarchical structure: pages -> frames
  */
-export async function listFigmaPages(fileKey, figmaToken) {
-  const fileData = await getFigmaFile(fileKey, figmaToken);
+export function listFigmaPages(fileData) {
 
   const pages = fileData.document.children.map(page => {
     // Extract frames/top-level nodes from each page
@@ -179,8 +179,7 @@ export async function listFigmaPages(fileKey, figmaToken) {
 /**
  * Search for frames/components by name
  */
-export async function searchFigmaFrames(fileKey, figmaToken, searchQuery) {
-  const fileData = await getFigmaFile(fileKey, figmaToken);
+export function searchFigmaFrames(fileData, searchQuery) {
   const results = [];
 
   function searchNode(node, pageName = 'Unknown Page', depth = 0) {
@@ -220,8 +219,7 @@ export async function searchFigmaFrames(fileKey, figmaToken, searchQuery) {
 /**
  * Get all components from Figma file (Design System)
  */
-export async function getFigmaComponents(fileKey, figmaToken) {
-  const fileData = await getFigmaFile(fileKey, figmaToken);
+export function getFigmaComponents(fileData) {
   const components = [];
 
   function extractComponents(node) {
@@ -255,8 +253,7 @@ export async function getFigmaComponents(fileKey, figmaToken) {
 /**
  * Get all styles from Figma file (colors, text styles, effects)
  */
-export async function getFigmaStyles(fileKey, figmaToken) {
-  const fileData = await getFigmaFile(fileKey, figmaToken);
+export function getFigmaStyles(fileData) {
 
   const styles = {
     fileName: fileData.name,
@@ -307,8 +304,7 @@ export async function getFigmaStyles(fileKey, figmaToken) {
 /**
  * Extract color palette from Figma file
  */
-export async function getFigmaColorPalette(fileKey, figmaToken) {
-  const fileData = await getFigmaFile(fileKey, figmaToken);
+export function getFigmaColorPalette(fileData) {
   const colors = new Map(); // Use Map to avoid duplicates
 
   function rgbaToHex(r, g, b, a) {

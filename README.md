@@ -534,6 +534,8 @@ Click an element with optional result screenshot. **PREFERRED**: Use APOM ID fro
   1. Puppeteer native click (trusted CDP events)
   2. CDP coordinate click at element center (trusted, bypasses interception check)
   3. JavaScript `element.click()` (untrusted, last resort)
+- **Covered elements**: when another element is on top of the target at its center, the result says what covers it: `[dom-sequence-intercepted: element covered by div#cover ...]`. Extra warnings when the cover is a dev-server error overlay or when the target is behind an open modal (usually a duplicate element under the dialog was matched).
+- **No-effect check**: `⚠️ NO_CHANGE` when the click caused no DOM change outside the element, no state attribute change (`aria-*`, `checked`, `value`), no URL change and no data request.
 - **Example**:
   ```javascript
   // PREFERRED: Using APOM ID
@@ -681,6 +683,15 @@ Get computed CSS styles for an element with intelligent filtering to reduce toke
   - Layout only: `{ selector: ".header", category: "layout" }`
   - Specific properties: `{ selector: ".title", properties: ["color", "font-size", "font-weight"] }`
   - Typography without defaults: `{ selector: "h1", category: "typography", includeDefaults: false }`
+- **Batch mode**: `selectors` (array, up to 50) + `properties` (or `category`; default: font-family, font-size, font-weight, line-height, letter-spacing, color, background-color, width, height, padding, gap, border-radius, border). `all: true` takes every match of each selector (max 100 elements). One call returns a table: `{ props, rows: [{ sel, i, box: [x, y, w, h], values }], notFound }`
+  - Example: `{ selectors: ["td", "th", "a.link", ".pagination"], all: true, properties: ["font-size", "line-height", "color"] }`
+
+#### getFontReport
+Which fonts are actually rendered. Computed style shows only the declared `font-family`; this tool asks Chrome which font it used (CDP `CSS.getPlatformFontsForNode`).
+- **Parameters**: `selector` (default `body`), `maxElements` (default 300)
+- **Returns**: per declared family + weight: the rendered font and its status: `web font`, `system font`, or `FALLBACK` (the web font did not load or lacks the weight); element count, sizes, examples. Plus `document.fonts` with load status and the list of failed `@font-face`
+- **Example output**: `declared "MTS Compact" 400 -> rendered "Arial" (FALLBACK): 120 element(s), sizes 14px, e.g. td.cell`
+- **Note**: main frame only
 
 #### getBoxModel
 Get precise dimensions, positioning, margins, padding, and borders.
@@ -706,9 +717,14 @@ Capture optimized screenshot of a specific element, or the full viewport when no
 - **For original quality**: Set `maxWidth: null`, `maxHeight: null` and `format: 'png'` (still enforces 3 MB limit)
 
 #### saveScreenshot
-Save optimized screenshot to filesystem without returning in context, with automatic 3 MB limit.
+Save optimized screenshot of an element or of the viewport to filesystem without returning in context, with automatic 3 MB limit.
 - **Parameters**:
-  - `selector` (required)
+  - `selector` (optional): CSS selector of the element. Required unless `viewport: true`
+  - `viewport` (optional): capture exactly the visible viewport (`innerWidth x innerHeight`, scrollbars included)
+  - `excludeScrollbar` (optional): with `viewport: true`, capture `documentElement.clientWidth x clientHeight` (no scrollbars)
+  - `hideSelectors` (optional): elements hidden for the shot (chat widget, cookie banner)
+  - `clip` (optional): `{ x, y, width, height }` area in CSS px relative to the viewport
+  - `scale` (optional): `'device'` (default, image px = CSS px x devicePixelRatio) or `'css'` (1 image px = 1 CSS px at any DPR)
   - `filePath` (required): Absolute path to save file
   - `padding` (optional): Padding in pixels (default: 0)
   - `maxWidth` (optional): Max width for auto-scaling (default: 1024, null for original)
@@ -716,7 +732,8 @@ Save optimized screenshot to filesystem without returning in context, with autom
   - `quality` (optional): JPEG quality 1-100 (default: 80)
   - `format` (optional): 'png', 'jpeg', or 'auto' (default: 'auto')
 - **Use case**: Baseline screenshots, file storage (higher quality defaults than `screenshot` tool)
-- **Returns**: File path and metadata (not image data)
+- **Pixel checks**: `saveScreenshot({ viewport: true, maxWidth: null, maxHeight: null, format: 'png' })` gives an image of exactly the viewport size. The requested viewport (`setViewport`) is re-applied before the capture.
+- **Returns**: File path, final size, captured area in CSS px and DPR. Warns when the image was scaled by `maxWidth`/`maxHeight`
 - **Default behavior**: Auto-scales and compresses to save disk space
 - **Automatic compression**: If image exceeds 3 MB, automatically reduces quality or scales down to fit within limit
 
@@ -733,7 +750,9 @@ Execute arbitrary JavaScript in page context with optional screenshot.
 - **Returns**: Execution result + optional screenshot
 - **Performance**: 2-10x faster without screenshot
 - **Top-level `return`**: any snippet using a top-level `return` (e.g. `return document.title`, `const x = 1; return x`, or code that contains a `function` in a callback) just works — it's run as-is first, and only re-wrapped in an async IIFE if the engine reports an "Illegal return statement". Bare expressions like `document.title` still return their value. No manual `(() => { ... })()` wrapping needed.
+- **Top-level `await`**: `await fetch('/api').then(r => r.json())` returns its value; multi-statement code with `await` runs inside an async function (use `return` to get a value, the result hints about it).
 - **Frames**: runs inside the active frame after `switchFrame` (see [Frame Tools](#5a-frame-tools-iframe-automation)); defaults to the main frame.
+- **outputFile** (optional, absolute path): write the result to a file instead of the response (the response has only the path and size). For executeScript the result value is stored as JSON. Also available on `analyzePage`, `getComputedCss`, `screenshot` (image bytes), `getFontReport`, `getFigmaNodeTree`. Written after password redaction
 
 #### getConsoleLogs
 Retrieve browser console logs (log, warn, error, etc.).
@@ -842,7 +861,10 @@ Change viewport dimensions for responsive testing.
   - `height` (required): 200-3000px
   - `deviceScaleFactor` (optional): 0.5-3 (default: 1)
 - **Use case**: Testing mobile, tablet, desktop layouts
-- **Returns**: Actual viewport dimensions
+- **matchFigmaFrame** (optional): `{ fileKey, nodeId }` or `{ figmaSpecPath }`: width/height = size of the Figma frame (tree from the cache, else one request). `deviceScaleFactor` still applies
+- **OS scaling**: with Windows display scaling (e.g. 110%) emulation does not give exact px: a 1px border renders as 0.909px, sizes may be 1px off (904 -> 905). The result says so (measured with a 1px probe). For exact px: Windows scaling 100%, or Chrome started with `--force-device-scale-factor=1` (Chrome launched by chrometools: `CHROMETOOLS_FORCE_DEVICE_SCALE_FACTOR=1` in the MCP env)
+- **Persistence**: the requested size is kept for the session. It is re-applied after `navigateTo`/`openBrowser`, on new tabs and before screenshots; tool output says when it had to be re-applied.
+- **Returns**: Actual viewport dimensions, warning when they differ from the requested ones (e.g. browser zoom not 100%)
 
 #### getViewport
 Get current viewport size and device pixel ratio.
@@ -856,17 +878,27 @@ Navigate to different URL while keeping browser instance.
   - `url` (required)
   - `waitUntil` (optional): load event type
 - **Use case**: Moving between pages in workflow
+- **SPA routes**: after `goto` it waits until `document.title` and the DOM are stable (max 2 s, `CHROMETOOLS_SPA_SETTLE_MS`), so hash routes report the new title; `(unchanged after navigation)` marks a title equal to the previous one.
+- **Diagnostics**: console errors with text and stack (uncaught errors included), dev-server error overlays (webpack, Vite, Next.js, CRA, Parcel) reported as `🔴 Dev error overlay covers the page`.
 - **Returns**: New page title. The post-navigation network summary lists only **XHR/Fetch** requests (static assets — JS chunks, CSS, fonts, images — are hidden and counted) and is capped at the first 12 with a `… N more` note, so a heavy SPA load doesn't bury the signal.
 - **Note**: resets the active frame back to the main frame (see [Frame Tools](#5a-frame-tools-iframe-automation)).
 
-### 5. Tab Management Tools 
+### 5. Tab Management Tools
+
+**Which tab tools use**: the active chrometools tab. Tabs the user opens or clicks in the same Chrome do not take over; only popups / `target=_blank` tabs opened from a chrometools page, and explicit `switchTab`. When the active tab changes, the next tool result ends with `[Active tab: <url>]`. `switchTab` returns `success: false` when it could not attach to the tab (instead of `puppeteerConnected: false`). 
 Tools for managing multiple browser tabs. New tabs opened via `window.open()`, `target="_blank"`, or user actions are automatically detected and tracked.
 
+#### resetBrowser
+Recover without restarting the MCP server when the tab is lost ("Attempted to use detached Frame"): forgets tracked pages and the CDP connection. Chrome and its tabs stay open.
+- **Parameters**: `url` (optional): open this page right after the reset
+- **Usually not needed**: before every tool the active tab is checked. A dead tab (closed, discarded, reconnected) is re-attached to an open tab with the same URL (`[Previous tab connection was lost; re-attached ...]` in the output); without such a tab the error says to call `navigateTo` / `openBrowser`, which open a new tab. A call that hits a tab dying at that moment is retried once
+
 #### listTabs
-List all open browser tabs with their URLs, titles, and active status.
-- **Parameters**: None
+List browser tabs. With the extension connected the browser may be the user's own Chrome, so by default only tabs chrometools works with are listed.
+- **Parameters**: `all` (optional): also list the user's other tabs (URL only, no titles)
 - **Returns**:
-  - `tabs`: Array of `{ index, url, title, isActive }`
+  - `tabs`: Array of `{ index, url, title, isActive, chrometools }` (`index` is what `switchTab` takes)
+  - `hiddenTabs`: number of the user's tabs not listed
   - `totalCount`: Number of open tabs
   - `newTabsDetected` (optional): Array of tabs opened since last check
 - **Use case**: See all open tabs, check for newly opened tabs
@@ -989,8 +1021,37 @@ click({ id: "button_5" })
 
 > **Limitation:** `executeScript` runs arbitrary JavaScript on the page, so a deliberately obfuscated read of a filled field (e.g. reversed string) is not caught by redaction. For full isolation disable `executeScript` via `ENABLED_TOOLS`.
 
-### 6. Figma Tools 
+### 6. Figma Tools
 Design-to-code validation, file browsing, design system extraction, and comparison tools with automatic 3 MB compression.
+
+#### Figma disk cache
+Figma rate limits are low for View/Collab seats (`x-figma-rate-limit-type: low`, after a 429 `Retry-After` can be ~19 hours). All Figma tools read through a disk cache, so a node is requested once:
+- **Location**: `~/.chrometools/figma-cache/<fileKey>/` (`CHROMETOOLS_FIGMA_CACHE_DIR` to move, `CHROMETOOLS_FIGMA_CACHE=off` to disable). Survives MCP restarts. The token is never written.
+- **What**: node renders (bytes, not the temporary export links) by node/scale/format; node trees with full styles; file structure (`listFigmaPages`, `searchFigmaFrames`, components, styles, palette). Version and `lastModified` of the file are stored with the data.
+- **Lifetime**: until `refresh: true` or `figmaCacheClear`. No TTL, no version check request.
+- **Child nodes**: a tree is found inside a cached parent tree or the file structure; a render is cropped from a cached ancestor render (same scale). Both cost 0 requests.
+- **Parameters on every Figma tool**: `refresh: true` fetches again; `offline: true` never calls the API.
+- **429**: short `Retry-After` (up to 30 s) is waited once. Longer: the block is stored and the API is not called until it ends; cached data (any version) is returned with a note like `refresh failed: Figma rate limit (429), limit type low: retry after 11.11.2026, 02:06 GMT+3 (in 19 h 0 min)`. Without cached data the error says the same. An explicit `figmaToken` (other seat) tries despite a stored block.
+- **Source line**: every response ends with `Figma: API, N requests` / `Figma: node X from cache (version V, fetched ...)`.
+
+#### prefetchFigma
+Cache trees and renders of many nodes in one go: one `/nodes` request and one `/images` request per scale (missing nodes only). After it the check works offline.
+- **Parameters**: `fileKey` (key or URL), `nodeIds` (array), `scales` (default `[2]`), `format` (default `png`), `tree` (default `true`), `refresh`
+- **Returns**: per node: name, tree cached, render sizes per scale
+
+#### importFigmaCache
+Put a tree downloaded earlier into the cache (the API is in 429, the data is on disk): `fileKey`, `path` to a `/nodes` response, a `/files` response or a node JSON. Nested nodes are then found by id: `getFigmaSpecs` / `compareFigmaSpecs` / `getFigmaNodeTree` / `compareFigmaToElement` with `fileKey` + `nodeId` and `offline: true`.
+
+#### importFigmaRender
+Put a saved render into the cache: `fileKey`, `nodeId`, `path` (PNG / JPG / SVG), `scale` (default 1), `format` (default from the extension).
+
+#### figmaCacheStatus
+Show cached files: version, lastModified, cached trees, renders by scale, file structure, size, fetch time range, active rate-limit block.
+- **Parameters**: `fileKey` (optional)
+
+#### figmaCacheClear
+Clear the cache. No arguments: everything.
+- **Parameters**: `fileKey`, `nodeIds`, `kind` (`images` | `nodes` | `file` | `rate-limit`; `rate-limit` forgets a stored 429 block), all optional
 
 #### parseFigmaUrl Parse Figma URL to extract fileKey and nodeId automatically.
 - **Parameters**:
@@ -1094,7 +1155,11 @@ Export and download a Figma frame as PNG/JPG image with automatic compression.
   - `nodeId` (required): Figma frame/component ID
   - `scale` (optional): Export scale 0.1-4 (default: 2)
   - `format` (optional): 'png', 'jpg', 'svg' (default: 'png')
+  - `nodeIds` (optional): several nodes instead of `nodeId`, one `/images` request for all missing ones
+  - `outputDir` (optional): save renders as `<nodeId>@<scale>x.<format>` (exact bytes) instead of inline images; required for more than 5 nodes
+  - `refresh`, `offline` (optional): see [Figma disk cache](#figma-disk-cache)
 - **Use case**: Getting design references from Figma for comparison
+- **Requests**: 0 when cached, else 1 (`/images`). Frame dimensions come from a cached tree only
 - **Returns**: Figma frame metadata and compressed image
 - **Automatic compression**: Images exceeding 3 MB are automatically compressed by reducing quality or scaling down
 
@@ -1102,23 +1167,70 @@ Export and download a Figma frame as PNG/JPG image with automatic compression.
 The GOLD STANDARD for design-to-code validation. Compares Figma design pixel-perfect with browser implementation.
 - **Parameters**:
   - `figmaToken` (optional): Figma API token (can use FIGMA_TOKEN env var)
-  - `fileKey` (required): Figma file key
-  - `nodeId` (required): Figma frame ID
-  - `selector` (required): CSS selector for page element to compare
-  - `figmaScale` (optional): Figma export scale (default: 2)
+  - `fileKey`, `nodeId`: Figma file key and frame ID (not needed with `figmaImagePath`)
+  - `figmaImagePath` (optional): compare with a local PNG (manual export or a file from the cache), no API and no token needed
+  - `selector`: CSS selector for page element to compare
+  - `nodeIds` + `selectors` (optional): batch of pairs, pair i compares `nodeIds[i]` with `selectors[i]`; one `/images` request; summary table, images per pair in `outputDir`
+  - `figmaChildNodeId` (optional): crop the render of `nodeId` to this child (keeps the parent background, unlike a render of the child alone)
+  - `figmaCrop` (optional): `{ x, y, width, height }` in Figma px relative to the node
+  - `anchor` (optional): `{ figmaNodeId, selector }`: shift the Figma image so this node and this page element coincide (e.g. left edge of the content card when the app sidebar is wider than in the design). Only the overlap is compared, the rest is reported as not compared
+  - `ignore` (optional): areas excluded from the diff: `[{ selector }]` or `[{ x, y, width, height }]` (CSS px relative to the element); hatched on diff/overlay
+  - `scaleToFit` (optional): resize the Figma image to the element width
+  - `hideSelectors` (optional): page elements hidden (`visibility: hidden`) for the shot, e.g. a chat widget over the form. Unlike `ignore`, the content under the widget is compared
+  - `cropToBounds` (optional): a render with an outside stroke or shadow is larger than the frame (1448x912 for 1440x904); it is cut to the frame box. Default: on when the node tree is cached (e.g. after `prefetchFigma`), `true` also fetches the tree (1 request), `false` disables
+  - `figmaSpecPath` (optional): node JSON for `figmaChildNodeId` / `anchor` without the API
+  - `refresh`, `offline` (optional): see [Figma disk cache](#figma-disk-cache)
+  - `figmaScale` (optional): Figma export scale (default: page `devicePixelRatio`)
   - `threshold` (optional): Difference threshold 0-1 (default: 0.05)
   - `outputDir` (optional): save `figma.png`, `page.png`, `diff.png`, `overlay.png` to this directory; paths are returned in `files`
 - **Use case**: Validating implementation matches design specifications
 - **Returns**: Comparison analysis with SSIM score, difference percentage, and images: Figma, Page, Overlay (page with 50% Figma on top), Diff map (when there are differences)
-- **No scaling**: images of different sizes are aligned top-left on a common canvas; area covered by only one image counts as difference, `dimensions.sameSize` is `false`. Set `figmaScale` to the page `devicePixelRatio`
+- **No scaling by default**: images of different sizes are aligned top-left on a common canvas; area covered by only one image counts as difference, `dimensions.sameSize` is `false`. Use `anchor`, `figmaChildNodeId` / `figmaCrop` or `scaleToFit` for whole screens
+- **Example** (whole screen, wider sidebar, live counter ignored): `{ fileKey, nodeId: "12:1", selector: "#root", anchor: { figmaNodeId: "12:40", selector: ".content-card" }, ignore: [{ selector: ".clock" }] }`
 - **Automatic compression**: All images are automatically compressed if they exceed 3 MB
+
+#### compareFigmaSpecs
+Compare specs instead of pixels: the Figma node and the page element are walked, texts and blocks are matched, differences are listed per property.
+- **Parameters**:
+  - `fileKey` + `nodeId`, or `figmaSpecPath`: the Figma node (frame, section, table)
+  - `selector` (required): the page element that implements it
+  - `match` (optional): `auto` / `text` (default), `static` (same, but numbers and dates are skipped: table data), or `order`
+  - `pairs` (optional): explicit block pairs `[{ figmaNodeId, selector }]`
+  - `ignoreTexts` (regexps), `ignoreSelectors` (page subtrees), `ignoreFigmaNodes` (Figma subtrees): not compared
+  - `maxPairDistancePx` (default 150): max distance from the anchor for repeated texts, prefix and role matches
+- **Matching**:
+  - texts: the anchor is a fixed pair; equal normalized text (case, dashes, trailing "...", counters in a child element ignored) with the smallest offset from the anchor, repeated texts ("0" in a table) only when close; prefix only for truncated or similar-length texts; field values and placeholders count as texts
+  - blocks: explicit pairs, then the same inner label ("Save" button), then the same role (Figma instance name Field / Button / Checkbox / Chip / Tab / Icon vs `input` wrapper, `button`, `[role=checkbox]`, MUI classes), then overlap; pairs with sizes more than 2x apart are rejected
+  - text position uses the glyph box (Range), by alignment: left edge, center or right edge; vertical by the line center. Text height is not compared by default
+  - page selectors are unique inside the root and prefer stable attributes (`col-id`, `data-testid`, `name`, `aria-label`, non-generated `id`)
+  - `properties` (optional): subset of `font-family`, `font-size`, `font-weight`, `line-height`, `letter-spacing`, `color`, `height`, `width`, `padding`, `gap`, `border-radius`, `background`, `border`
+  - `anchor` (optional): `{ figmaNodeId, selector }`, a common anchor (e.g. block title): positions are compared as offsets from it (`position: figma 0, 28 | page 0, 34 (dx 0, dy 6)`), so a shifted layout does not mark everything; `tolerancePositionPx` (default 2)
+  - `tolerancePx` (default 0.5), `colorTolerance` (per channel, default 2), `maxRows` (default 80), `onlyDiffs` (default true), `refresh`, `offline`
+  - Also compared: `text-transform` (Figma `textCase` UPPER/LOWER/TITLE). `letter-spacing` from the Figma API is in px (Dev Mode may show %)
+- **Returns**: summary (matched/unmatched, diffs per property), then rows like
+  ```
+  T Figma "Cell A" [5:3] <-> div.row > span.cell
+      font-family: figma MTS Compact | page MTS Compact (rendered: Arial)
+      font-size: figma 12 | page 14
+  B Figma "Row" [5:2] <-> div.row (iou 0.93)
+      height: figma 44 | page 41
+  ```
+  plus Figma texts without a page match, page texts without a Figma match, and Figma components (instances) without a page match with their size. `font-family` also checks the rendered font (see `getFontReport`). Figma px are compared as CSS px
+- **outputFile** (optional): write the report to a file
+- **Requests**: 0 when the node tree is cached (a parent tree is enough), else 1
+
+#### getFigmaNodeTree
+Compact node tree with styles for building or checking a layout.
+- **Parameters**: `fileKey` + `nodeId` / `nodeIds` (one request for all), or `figmaSpecPath`; `depth` (default 6), `includeHidden`, `textOnly` (flat list of texts), `refresh`, `offline`
+- **Returns** per node: `id, name, type, box [x, y, w, h]` relative to the requested node; `layout { mode, padding [t r b l], gap, align }`; `radius`; `fill`; `stroke`; `effects`; for texts `chars`, `font { family, size, weight, lineHeightPx, letterSpacing }`, `color`, `mixed` (style overrides). Empty values omitted, output cut at ~60 KB
 
 #### getFigmaSpecs
 Extract detailed design specifications from Figma including text content, colors, fonts, dimensions, and spacing.
 - **Parameters**:
   - `figmaToken` (optional): Figma API token
-  - `fileKey` (required): Figma file key
-  - `nodeId` (required): Figma frame/component ID
+  - `fileKey`, `nodeId`: Figma file key and frame/component ID (not needed with `figmaSpecPath`)
+  - `figmaSpecPath` (optional): saved node JSON (`/nodes` response, `{document}` or a node, e.g. a file from the cache `nodes/` folder); `nodeId` then selects a node inside it
+  - `refresh`, `offline` (optional): see [Figma disk cache](#figma-disk-cache)
 - **Use case**: Getting exact design specifications and text content for implementation
 - **Returns**: Complete design specs with:
   - **Text content**: All text from TEXT nodes (buttons, labels, headings, paragraphs)
@@ -1713,15 +1825,15 @@ Each tool definition is sent to the AI in every request, consuming context token
 
 | Group | Description | Tools (count) |
 |-------|-------------|---------------|
-| `core` | Basic tools | `ping`, `openBrowser` (2) |
+| `core` | Basic tools | `ping`, `openBrowser`, `executeScript`, `navigateTo`, `resetBrowser`, `listTabs`, `switchTab` (7) |
 | `interaction` | User interaction, frames & credentials | `click`, `type`, `scrollTo`, `waitForElement`, `hover`, `selectOption`, `selectFromGroup`, `drag`, `scrollHorizontal`, `switchFrame`, `listFrames`, `typeCredential`, `listCredentials` (13) |
-| `inspection` | Page inspection | `getComputedCss`, `getBoxModel`, `screenshot`, `saveScreenshot` (4) |
+| `inspection` | Page inspection | `getComputedCss`, `getBoxModel`, `screenshot`, `saveScreenshot`, `getFontReport` (5) |
 | `debug` | Debugging & network | `getConsoleLogs`, `listNetworkRequests`, `getNetworkRequest`, `filterNetworkRequests` (4) |
 | `advanced` | Advanced automation & AI | `executeScript`, `setStyles`, `setViewport`, `getViewport`, `navigateTo`, `smartFindElement`, `analyzePage`, `findElementsByText` (8) |
 | `recorder` | Scenario recording | `enableRecorder`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`, `appendScenarioToFile`, `generatePageObject` (9) |
-| `figma` | Figma integration | `getFigmaFrame`, `compareFigmaToElement`, `getFigmaSpecs`, `parseFigmaUrl`, `listFigmaPages`, `searchFigmaFrames`, `getFigmaComponents`, `getFigmaStyles`, `getFigmaColorPalette`, `convertFigmaToCode` (10) |
+| `figma` | Figma integration | `getFigmaFrame`, `compareFigmaToElement`, `getFigmaSpecs`, `parseFigmaUrl`, `listFigmaPages`, `searchFigmaFrames`, `getFigmaComponents`, `getFigmaStyles`, `getFigmaColorPalette`, `convertFigmaToCode`, `getFigmaNodeTree`, `compareFigmaSpecs`, `prefetchFigma`, `importFigmaCache`, `importFigmaRender`, `figmaCacheStatus`, `figmaCacheClear` (17) |
 
-**Total:** 50 tools across 7 groups
+**Total:** 70 tools
 
 **Configuration:**
 
@@ -1842,6 +1954,8 @@ To use Figma tools, you need to configure your Figma Personal Access Token.
 }
 ```
 
+**Token in a file:** instead of `FIGMA_TOKEN` set `"FIGMA_TOKEN_FILE": "/path/to/.figma.secrets"`, a file with a `FIGMA_TOKEN=...` line. The token is resolved on every call, so a changed file works without restarting the server. `ping` shows whether a token is configured and where it comes from.
+
 **Note:** Alternatively, you can pass the token directly in each Figma tool call using the `figmaToken` parameter, but using the environment variable is more convenient.
 
 **Proxy and timeouts:** Figma requests (API and image downloads from Figma's S3) honour `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` from the MCP server env. Each request times out after 30 s (`CHROMETOOLS_FIGMA_TIMEOUT_MS`), the error names the host. If `getFigmaFrame` / `compareFigmaToElement` time out while the API works, image hosts are probably reachable only through a proxy: add `HTTPS_PROXY` to the `env` block.
@@ -1858,6 +1972,8 @@ By default ChromeTools connects to a Chrome with remote debugging on port **9222
 | `CHROMETOOLS_DEBUG_PORT` | `9222` | Remote-debugging port to discover/connect to (and to launch with). |
 | `CHROMETOOLS_USER_DATA_DIR` | `<temp>/chrome-mcp-profile` | Chrome profile used when launching a new instance. Point at a real (or cloned) profile to reuse its cookies/logins. |
 | `CHROMETOOLS_CHROME_PATH` | platform default | Path to the Chrome executable. |
+| `CHROMETOOLS_CONNECT_TIMEOUT_MS` | `15000` | Max time to attach to a running Chrome. On timeout tools return an error and the next call retries. |
+| `CHROMETOOLS_CAPTURE_TIMEOUT_MS` | `15000` | Max time for one screenshot. |
 
 **Quick path — attach to your already-logged-in Chrome:**
 
@@ -1928,7 +2044,7 @@ npx @modelcontextprotocol/inspector node index.js
 
 ## Features
 
-- **56+ Powerful Tools**: Complete toolkit for browser automation (including model-based interaction system)
+- **70 Powerful Tools**: Complete toolkit for browser automation (including model-based interaction system)
   - Core: ping, openBrowser
   - Interaction: click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal, executeModelAction
   - Inspection: getElement, getComputedCss, getBoxModel, screenshot, saveScreenshot
@@ -2120,6 +2236,13 @@ npx chrometools-mcp --install-bridge
 - Bridge only runs when Chrome Extension is active
 - Close and reopen Chrome
 - Check Extension Service Worker console for errors
+
+**Tools fail with "Chrome on debug port 9222 is running but does not respond to automation":**
+- A Chrome on that port has a tab that never answers the debugger (seen with hidden prerendered/discarded tabs). Fully quit that Chrome (closing windows may leave `chrome.exe` running in background, check Task Manager) and call any tool: ChromeTools launches a new one. No MCP restart is needed.
+
+**Screenshots and the minimized window:**
+- Chrome does not render a minimized window or a background tab. Before a screenshot ChromeTools restores a minimized window and brings the tab to front, so the Chrome window may pop up. If the frame still does not arrive, the tool fails after 15 s with "Chrome is not rendering this tab".
+- Chrome launched by ChromeTools keeps rendering when its window is covered by other windows (`--disable-features=CalculateNativeWinOcclusion`, `--disable-backgrounding-occluded-windows`).
 
 ## Known Limitations
 

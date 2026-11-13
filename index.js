@@ -10,7 +10,7 @@ import {fileURLToPath} from 'url';
 import {homedir} from 'os';
 
 // Import browser and platform utilities
-import {closeBrowser, getBrowser, isConnectedToExistingChrome} from './browser/browser-manager.js';
+import {closeBrowser, getBrowser, isConnectedToExistingChrome, resetBrowserConnection} from './browser/browser-manager.js';
 import * as vaultClient from './utils/vault-client.js';
 import {randomUUID} from 'crypto';
 import {isWSL} from './utils/platform-utils.js';
@@ -43,14 +43,43 @@ import {
     setActiveFrame,
     clearActiveFrame,
     getActiveFrameMatcher,
-    listFramesForPage
+    listFramesForPage,
+    setRequestedViewport,
+    ensureViewport,
+    formatViewportNote,
+    openPages,
+    takeRecoveryNote,
+    resetPageState,
+    isDeadPageError
 } from './browser/page-manager.js';
+import * as pageState from './browser/page-manager.js';
+import {waitForSpaSettle} from './utils/spa-settle.js';
+import {compactTree} from './utils/figma-tree.js';
+import {fontReport} from './utils/platform-fonts.js';
+import {compareSpecs} from './utils/spec-compare.js';
+import {
+    createFigmaContext,
+    formatSourceLine,
+    getNodes as getFigmaNodes,
+    getImages as getFigmaImages,
+    getFile as getFigmaFileData,
+    peekNode as peekFigmaNode,
+    cachedFileName as cachedFigmaFileName,
+    loadNodeFromFile as loadFigmaNodeFromFile,
+    findFigmaNode,
+    prefetch as prefetchFigmaData,
+    cacheStatus as figmaCacheStatus,
+    cacheClear as figmaCacheClear,
+    importNodesFile as importFigmaNodesFile,
+    importRenderFile as importFigmaRenderFile
+} from './utils/figma-data.js';
 
 // Import image processing utilities
 import {compareImages, processScreenshot} from './utils/image-processing.js';
+import {capture, withHiddenElements} from './utils/capture.js';
 
 // Import CSS utilities
-import {filterCssStyles} from './utils/css-utils.js';
+import {filterCssStyles, CSS_CATEGORIES} from './utils/css-utils.js';
 
 // Import tool schemas and definitions
 import * as schemas from './server/tool-schemas.js';
@@ -102,8 +131,6 @@ import {ApiModelsPythonGenerator} from './utils/api-generators/api-models-python
 import {
     collectAllText,
     extractTextFromNode,
-    fetchFigmaAPI,
-    figmaFetch,
     getFigmaColorPalette,
     getFigmaComponents,
     getFigmaStyles,
@@ -119,15 +146,44 @@ import {
 const DEBUG_MODE = process.env.CHROMETOOLS_DEBUG === 'true';
 const debugLog = DEBUG_MODE ? console.error : () => {};
 
-// Figma token from environment variable (can be set in MCP config)
-const readFigmaTokenFile = (file) => {
-  if (!file || !existsSync(file)) {
-    return null;
+// Figma token: tool argument, FIGMA_TOKEN env, or FIGMA_TOKEN_FILE (a file with a
+// FIGMA_TOKEN=... line). Resolved on every call: an edited file works without restart.
+function getFigmaTokenStatus() {
+  if (process.env.FIGMA_TOKEN) {
+    return { token: process.env.FIGMA_TOKEN, source: 'FIGMA_TOKEN env' };
+  }
+  const file = process.env.FIGMA_TOKEN_FILE;
+  if (!file) {
+    return { token: null, source: null, problem: 'FIGMA_TOKEN and FIGMA_TOKEN_FILE are not set in the MCP server env' };
+  }
+  if (!existsSync(file)) {
+    return { token: null, source: null, problem: `FIGMA_TOKEN not set, FIGMA_TOKEN_FILE=${file} does not exist` };
   }
   const match = readFileSync(file, 'utf8').match(/^\s*FIGMA_TOKEN\s*=\s*(\S+)\s*$/m);
-  return match ? match[1] : null;
-};
-const FIGMA_TOKEN = process.env.FIGMA_TOKEN || readFigmaTokenFile(process.env.FIGMA_TOKEN_FILE) || null;
+  if (!match) {
+    return { token: null, source: null, problem: `FIGMA_TOKEN not set, FIGMA_TOKEN_FILE=${file} has no FIGMA_TOKEN=... line` };
+  }
+  return { token: match[1], source: `FIGMA_TOKEN_FILE (${file})` };
+}
+
+function resolveFigmaToken(argToken) {
+  if (argToken) return argToken;
+  const status = getFigmaTokenStatus();
+  if (!status.token) {
+    throw new Error(`Figma token is required: ${status.problem}. Pass figmaToken, or set FIGMA_TOKEN / FIGMA_TOKEN_FILE in the MCP server env.`);
+  }
+  return status.token;
+}
+
+// Figma data context: token resolved only when a request is needed (cache hits work without it)
+function figmaContext(validatedArgs) {
+  return createFigmaContext({
+    getToken: () => resolveFigmaToken(validatedArgs.figmaToken),
+    explicitToken: !!validatedArgs.figmaToken,
+    refresh: !!validatedArgs.refresh,
+    offline: !!validatedArgs.offline
+  });
+}
 
 // Tool filtering - read ENABLED_TOOLS environment variable
 // If set, only enable specified tool groups (comma-separated list)
@@ -316,17 +372,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const toolTimeout = name === 'executeScenario' ? 360000 : 120000; // 6 min for scenarios, 2 min for others
 
     const result = await executeToolWithTimeout(name, async () => {
-      return await executeToolInternal(name, args);
+      try {
+        return await executeToolInternal(name, args);
+      } catch (error) {
+        // The tab died between the liveness check and the call (close event not yet
+        // delivered): the call never reached a live page, so one retry is safe. The
+        // retry sees the dead page and re-attaches or reports it.
+        if (!isDeadPageError(error)) throw error;
+        await new Promise(r => setTimeout(r, 300));
+        return await executeToolInternal(name, args);
+      }
     }, toolTimeout);
+    appendTabNotes(name, result);
     // Credential vault: strip saved passwords from any output
-    return await vaultClient.redactToolResult(result);
+    const redacted = await vaultClient.redactToolResult(result);
+    // Written after redaction: saved passwords never reach the disk
+    return OUTPUT_FILE_TOOLS.has(name) && args?.outputFile && !redacted.isError
+      ? writeResultToFile(name, args.outputFile, redacted)
+      : redacted;
   } catch (error) {
+    const hint = isDeadPageError(error)
+      ? ' The browser tab was detached (closed, discarded or reconnected). Call navigateTo / openBrowser to continue, or resetBrowser.'
+      : '';
     return await vaultClient.redactToolResult({
       content: [{
         type: 'text',
         text: JSON.stringify({
           success: false,
-          error: error.message,
+          error: error.message + hint,
           tool: name
         }, null, 2)
       }],
@@ -335,14 +408,68 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+// Tools whose result can go to a file instead of the response (outputFile)
+const OUTPUT_FILE_TOOLS = new Set(['executeScript', 'analyzePage', 'getComputedCss', 'screenshot', 'getFontReport', 'getFigmaNodeTree', 'compareFigmaSpecs']);
+
+function writeResultToFile(name, outputFile, result) {
+  const file = path.resolve(outputFile);
+  mkdirSync(path.dirname(file), { recursive: true });
+  const image = (result.content || []).find(c => c.type === 'image');
+  let data;
+  if (name === 'screenshot' && image) {
+    data = Buffer.from(image.data, 'base64');
+  } else {
+    let text = (result.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n');
+    // executeScript: store the result value itself
+    const m = name === 'executeScript' && text.match(/^Script executed successfully\.\nResult: ([\s\S]*?)(\nHint: [^\n]*)?$/);
+    if (m) {
+      try { text = JSON.stringify(JSON.parse(m[1]), null, 2); } catch { text = m[1]; }
+    }
+    data = Buffer.from(text, 'utf8');
+  }
+  writeFileSync(file, data);
+  return {
+    content: [{ type: 'text', text: `Saved ${name} result to ${file} (${(data.length / 1024).toFixed(1)} KB)` +
+      (image && name !== 'screenshot' ? ' (images not saved)' : '') }]
+  };
+}
+
+// Tell the caller which tab tools work on: after an automatic re-attach, and whenever
+// the active tab changed since the last report (user's own tabs may be open next to ours)
+let lastReportedPage = null;
+const TAB_NOTE_SKIP = new Set(['ping', 'listTabs', 'parseFigmaUrl', 'figmaCacheStatus', 'figmaCacheClear', 'prefetchFigma',
+  'listFigmaPages', 'searchFigmaFrames', 'getFigmaComponents', 'getFigmaStyles', 'getFigmaColorPalette', 'getFigmaFrame',
+  'getFigmaSpecs', 'getFigmaNodeTree', 'convertFigmaToCode', 'listScenarios', 'searchScenarios', 'getScenarioInfo',
+  'deleteScenario', 'loadSwagger', 'generateApiModels', 'listCredentials']);
+function appendTabNotes(name, result) {
+  if (!result || !Array.isArray(result.content)) return;
+  const notes = [];
+  const recovery = takeRecoveryNote();
+  if (recovery) notes.push(recovery);
+  const page = pageState.lastPage;
+  if (page && page !== lastReportedPage && !TAB_NOTE_SKIP.has(name)) {
+    let url = '';
+    try { url = page.url(); } catch { /* detached */ }
+    if (url) notes.push(`Active tab: ${url}`);
+    lastReportedPage = page;
+  }
+  if (!notes.length) return;
+  const text = notes.map(n => `[${n}]`).join('\n');
+  const first = result.content.find(c => c.type === 'text');
+  if (first) first.text += '\n' + text;
+  else result.content.push({ type: 'text', text });
+}
+
 // Internal tool execution function
 async function executeToolInternal(name, args) {
   try {
     if (name === "ping") {
       const validatedArgs = schemas.PingSchema.parse(args);
-      const responseMessage = validatedArgs.message
+      const figma = getFigmaTokenStatus();
+      const responseMessage = (validatedArgs.message
         ? `pong: ${validatedArgs.message}`
-        : "pong";
+        : "pong") +
+        `\nfigmaToken: ${figma.token ? `configured (${figma.source})` : `not configured (${figma.problem})`}`;
 
       return {
         content: [
@@ -362,7 +489,8 @@ async function executeToolInternal(name, args) {
       const beforeOpenTimestamp = Date.now();
 
       const page = await getOrCreatePage(validatedArgs.url);
-      const title = await page.title();
+      const { title } = await waitForSpaSettle(page);
+      const viewportNote = formatViewportNote(await ensureViewport(page));
 
       // Run post-navigation diagnostics (same as navigateTo)
       const diagnostics = await runPostClickDiagnostics(page, beforeOpenTimestamp);
@@ -403,7 +531,7 @@ async function executeToolInternal(name, args) {
         content: [
           {
             type: "text",
-            text: `Browser opened successfully!\nURL: ${validatedArgs.url}\nPage title: ${title}\n\nBrowser remains open for interaction.${hintsText}${diagnosticsText}${extensionNote}`,
+            text: `Browser opened successfully!\nURL: ${validatedArgs.url}\nPage title: ${title}${viewportNote}\n\nBrowser remains open for interaction.${hintsText}${diagnosticsText}${extensionNote}`,
           },
         ],
       };
@@ -950,6 +1078,41 @@ async function executeToolInternal(name, args) {
       const validatedArgs = schemas.GetComputedCssSchema.parse(args);
       const page = await getLastOpenPage();
 
+      // Batch: many selectors, one evaluate, a table of properties
+      if (validatedArgs.selectors?.length) {
+        const DEFAULT_BATCH_PROPS = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'color',
+          'background-color', 'width', 'height', 'padding', 'gap', 'border-radius', 'border'];
+        const props = validatedArgs.properties?.length ? validatedArgs.properties
+          : (validatedArgs.category && validatedArgs.category !== 'all' ? CSS_CATEGORIES[validatedArgs.category] : DEFAULT_BATCH_PROPS);
+        const ctx = await getTargetFrame(page);
+        const table = await ctx.evaluate((selectors, props, all, maxTotal) => {
+          const rows = [];
+          const notFound = [];
+          let truncated = false;
+          for (const sel of selectors) {
+            let list;
+            try { list = [...document.querySelectorAll(sel)]; } catch (e) { notFound.push(`${sel} (invalid: ${e.message})`); continue; }
+            if (!list.length) { notFound.push(sel); continue; }
+            if (!all) list = list.slice(0, 1);
+            list.forEach((el, i) => {
+              if (rows.length >= maxTotal) { truncated = true; return; }
+              const cs = getComputedStyle(el);
+              const r = el.getBoundingClientRect();
+              const round = n => Math.round(n * 100) / 100;
+              rows.push({
+                sel, i,
+                box: [round(r.left), round(r.top), round(r.width), round(r.height)],
+                values: props.map(p => cs.getPropertyValue(p))
+              });
+            });
+          }
+          return { rows, notFound, truncated };
+        }, validatedArgs.selectors, props, !!validatedArgs.all, 100);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ props, ...table, ...(table.truncated ? { note: 'Limited to 100 elements' } : {}) }, null, 2) }],
+        };
+      }
+
       const client = await page.target().createCDPSession();
       await client.send('DOM.enable');
       await client.send('CSS.enable');
@@ -1041,7 +1204,7 @@ async function executeToolInternal(name, args) {
       // No identifier → full viewport screenshot. Mirrors processSceenshot pipeline used
       // by element screenshots so the output (JPEG, scaled, base64) stays consistent.
       if (!identifier) {
-        const buffer = await page.screenshot({ encoding: 'binary', fullPage: false });
+        const buffer = await capture(page, () => page.screenshot({ encoding: 'binary', fullPage: false }));
         const processed = await processScreenshot(buffer, {
           maxWidth: validatedArgs.maxWidth !== undefined ? validatedArgs.maxWidth : 1024,
           maxHeight: validatedArgs.maxHeight !== undefined ? validatedArgs.maxHeight : 8000,
@@ -1082,31 +1245,85 @@ async function executeToolInternal(name, args) {
       const validatedArgs = schemas.SaveScreenshotSchema.parse(args);
       const page = await getLastOpenPage();
 
-      const element = await page.$(validatedArgs.selector);
-      if (!element) {
-        throw new Error(`Element not found: ${validatedArgs.selector}`);
+      if (!validatedArgs.viewport && !validatedArgs.selector && !validatedArgs.clip) {
+        throw new Error('Pass selector, clip {x, y, width, height}, or viewport: true.');
       }
 
-      const box = await element.boundingBox();
-      if (!box) {
-        throw new Error(`Element not visible: ${validatedArgs.selector}`);
+      // Re-apply requested viewport before measuring: the clip depends on it
+      await ensureViewport(page);
+
+      // Viewport metrics in CSS px. Clip for CDP is in document coordinates.
+      const vp = await page.evaluate(() => ({
+        pageLeft: window.visualViewport ? window.visualViewport.pageLeft : window.scrollX,
+        pageTop: window.visualViewport ? window.visualViewport.pageTop : window.scrollY,
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        clientWidth: document.documentElement.clientWidth,
+        clientHeight: document.documentElement.clientHeight,
+        dpr: window.devicePixelRatio
+      }));
+
+      const dprText = Math.round(vp.dpr * 100) / 100;
+      const cssScale = validatedArgs.scale === 'css';
+      let clip = null;
+      let what;
+      // Size the image must have in CSS px (used for the css scale without clip)
+      let cssSize = null;
+      if (validatedArgs.clip) {
+        // Area in CSS px relative to the viewport (as getBoundingClientRect)
+        const c = validatedArgs.clip;
+        clip = { x: c.x + vp.pageLeft, y: c.y + vp.pageTop, width: c.width, height: c.height };
+        what = `area ${c.x},${c.y} ${c.width}x${c.height} CSS px`;
+      } else if (validatedArgs.viewport && !validatedArgs.excludeScrollbar) {
+        // No clip: a clip is cut to the layout viewport, which has no scrollbars
+        cssSize = { width: vp.innerWidth, height: vp.innerHeight };
+        what = `viewport ${vp.innerWidth}x${vp.innerHeight} CSS px`;
+      } else if (validatedArgs.viewport) {
+        clip = { x: vp.pageLeft, y: vp.pageTop, width: vp.clientWidth, height: vp.clientHeight };
+        what = `viewport ${vp.clientWidth}x${vp.clientHeight} CSS px (without scrollbar)`;
+      } else {
+        const element = await page.$(validatedArgs.selector);
+        if (!element) {
+          throw new Error(`Element not found: ${validatedArgs.selector}`);
+        }
+        const box = await element.evaluate(el => {
+          const r = el.getBoundingClientRect();
+          return { x: r.left, y: r.top, width: r.width, height: r.height };
+        });
+        if (!box || box.width === 0 || box.height === 0) {
+          throw new Error(`Element not visible: ${validatedArgs.selector}`);
+        }
+        const padding = validatedArgs.padding || 0;
+        clip = {
+          x: Math.max(box.x + vp.pageLeft - padding, 0),
+          y: Math.max(box.y + vp.pageTop - padding, 0),
+          width: Math.max(box.width + padding * 2, 1),
+          height: Math.max(box.height + padding * 2, 1)
+        };
+        what = `element box ${Math.round(box.width * 100) / 100}x${Math.round(box.height * 100) / 100} CSS px` +
+          (padding ? ` + padding ${padding}` : '');
       }
 
-      const padding = validatedArgs.padding || 0;
-      const clip = {
-        x: Math.max(box.x - padding, 0),
-        y: Math.max(box.y - padding, 0),
-        width: Math.max(box.width + padding * 2, 1),
-        height: Math.max(box.height + padding * 2, 1)
-      };
+      // scale 'css': Chrome renders the clip in CSS pixels (1 image px = 1 CSS px) at any DPR
+      if (cssScale && clip) {
+        clip.scale = 1 / vp.dpr;
+      }
 
       // Get screenshot as buffer (not base64)
-      const screenshotBuffer = await page.screenshot({ clip, encoding: 'binary' });
+      let screenshotBuffer = await withHiddenElements(page, validatedArgs.hideSelectors, () => capture(page, () => page.screenshot(clip
+        ? { clip, encoding: 'binary', captureBeyondViewport: !validatedArgs.viewport }
+        : { encoding: 'binary', captureBeyondViewport: false })));
 
-      // Process with compression and scaling
+      if (cssScale && !clip && Math.abs(vp.dpr - 1) > 0.01) {
+        const img = await Jimp.read(screenshotBuffer);
+        img.resize(cssSize.width, cssSize.height);
+        screenshotBuffer = await img.getBufferAsync(Jimp.MIME_PNG);
+      }
+
+      // Process with compression and scaling (null = original size; ?? would turn null into the default)
       const processed = await processScreenshot(screenshotBuffer, {
-        maxWidth: validatedArgs.maxWidth ?? 1024,
-        maxHeight: validatedArgs.maxHeight ?? 8000,
+        maxWidth: validatedArgs.maxWidth === undefined ? 1024 : validatedArgs.maxWidth,
+        maxHeight: validatedArgs.maxHeight === undefined ? 8000 : validatedArgs.maxHeight,
         quality: validatedArgs.quality ?? 80,
         format: validatedArgs.format ?? 'auto'
       });
@@ -1120,9 +1337,12 @@ async function executeToolInternal(name, args) {
 
       const infoText = `Screenshot saved to: ${validatedArgs.filePath}\n` +
         `Dimensions: ${processed.metadata.width}x${processed.metadata.height}\n` +
+        `Captured: ${what}, DPR ${dprText}${cssScale ? ', scale css (1 px = 1 CSS px)' : ''}\n` +
         `Format: ${processed.metadata.format.toUpperCase()}\n` +
         `Size: ${(processed.metadata.finalSize / 1024).toFixed(1)}KB` +
-        (processed.metadata.scaled ? ` (scaled from ${processed.metadata.originalWidth}x${processed.metadata.originalHeight})` : '') +
+        (processed.metadata.scaled
+          ? `\n⚠️ Scaled from ${processed.metadata.originalWidth}x${processed.metadata.originalHeight} by maxWidth/maxHeight. Pass maxWidth: null, maxHeight: null for exact size.`
+          : '') +
         (processed.metadata.compressed ? `\nCompression: ${processed.metadata.compressionRatio}% saved` : '');
 
       return {
@@ -1240,16 +1460,34 @@ async function executeToolInternal(name, args) {
           try {
             return { success: true, result: await runEval(code) };
           } catch (error) {
-            const isIllegalReturn = error instanceof SyntaxError &&
-              /return/i.test(error.message) && /illegal|outside|unexpected/i.test(error.message);
-            if (isIllegalReturn) {
+            if (!(error instanceof SyntaxError)) {
+              return { success: false, error: error.message };
+            }
+            const isIllegalReturn = /return/i.test(error.message) && /illegal|outside|unexpected/i.test(error.message);
+            const isTopLevelAwait = /await is only valid|reserved word|unexpected identifier/i.test(error.message) &&
+              /\bawait\b/.test(code);
+            if (!isIllegalReturn && !isTopLevelAwait) {
+              return { success: false, error: error.message };
+            }
+            // Single expression with await (`await fetch(...).then(r => r.json())`): keep its value
+            if (isTopLevelAwait && !/\breturn\b/.test(code)) {
               try {
-                return { success: true, result: await runEval(`(async () => { ${code} })()`) };
-              } catch (wrapErr) {
-                return { success: false, error: wrapErr.message };
+                return { success: true, result: await runEval(`(async () => (\n${code.replace(/;\s*$/, '')}\n))()`) };
+              } catch (exprErr) {
+                if (!(exprErr instanceof SyntaxError)) {
+                  return { success: false, error: exprErr.message };
+                }
               }
             }
-            return { success: false, error: error.message };
+            try {
+              const result = await runEval(`(async () => {\n${code}\n})()`);
+              const hint = result === undefined && !/\breturn\b/.test(code)
+                ? 'Script ran inside an async function: add `return` to get a value.'
+                : undefined;
+              return { success: true, result, hint };
+            } catch (wrapErr) {
+              return { success: false, error: wrapErr.message };
+            }
           }
         }, scriptToRun);
 
@@ -1259,14 +1497,14 @@ async function executeToolInternal(name, args) {
           {
             type: "text",
             text: result.success
-              ? `Script executed successfully.\nResult: ${JSON.stringify(result.result)}`
+              ? `Script executed successfully.\nResult: ${JSON.stringify(result.result)}${result.hint ? `\nHint: ${result.hint}` : ''}`
               : `Script execution failed: ${result.error}`
           }
         ];
 
         // Only add screenshot if requested
         if (validatedArgs.screenshot === true) {
-          const screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
+          const screenshot = await capture(page, () => page.screenshot({ encoding: 'base64', fullPage: false }));
           content.push({ type: "image", data: screenshot, mimeType: "image/png" });
         }
 
@@ -1892,22 +2130,73 @@ async function executeToolInternal(name, args) {
       const validatedArgs = schemas.SetViewportSchema.parse(args);
       const page = await getLastOpenPage();
 
-      await page.setViewport({
-        width: validatedArgs.width,
-        height: validatedArgs.height,
+      let frameNote = '';
+      let width = validatedArgs.width;
+      let height = validatedArgs.height;
+      if (validatedArgs.matchFigmaFrame) {
+        // Viewport = size of a Figma frame (tree from cache, file, or one /nodes request)
+        const m = validatedArgs.matchFigmaFrame;
+        const fctx = figmaContext(m);
+        let frame;
+        if (m.figmaSpecPath) {
+          frame = loadFigmaNodeFromFile(m.figmaSpecPath, m.nodeId).data.document;
+        } else {
+          if (!m.fileKey || !m.nodeId) throw new Error('matchFigmaFrame needs fileKey + nodeId, or figmaSpecPath.');
+          const id = normalizeFigmaNodeId(m.nodeId);
+          frame = (await getFigmaNodes(m.fileKey, [id], fctx))[id].document;
+        }
+        const b = frame.absoluteBoundingBox;
+        if (!b) throw new Error(`Figma node ${frame.id} has no size`);
+        width = Math.round(b.width);
+        height = Math.round(b.height);
+        frameNote = `\nFigma frame "${frame.name}" (${frame.id}): ${b.width}x${b.height}${formatSourceLine(fctx)}`;
+      }
+      if (!width || !height) {
+        throw new Error('Pass width and height, or matchFigmaFrame.');
+      }
+      const requested = {
+        width,
+        height,
         deviceScaleFactor: validatedArgs.deviceScaleFactor || 1
-      });
+      };
+      await page.setViewport(requested);
+      // Remembered for the session: re-applied after navigation, on other tabs and before screenshots
+      setRequestedViewport(requested);
 
-      const actual = await page.evaluate(() => ({
-        width: window.innerWidth,
-        height: window.innerHeight,
-        devicePixelRatio: window.devicePixelRatio
-      }));
+      const actual = await page.evaluate(() => {
+        // A 1px border shows the real device scale: emulation does not override OS display scaling
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:absolute;left:-9999px;top:0;width:10px;height:10px;border:1px solid transparent';
+        (document.body || document.documentElement).appendChild(probe);
+        const border = parseFloat(getComputedStyle(probe).borderTopWidth);
+        probe.remove();
+        return {
+          width: window.innerWidth,
+          height: window.innerHeight,
+          devicePixelRatio: window.devicePixelRatio,
+          onePx: border
+        };
+      });
+      const osScale = actual.onePx > 0 && Math.abs(actual.onePx - 1) > 0.01
+        ? Math.round((requested.deviceScaleFactor / actual.onePx) * 100) / 100 : null;
+      const osNote = osScale
+        ? `\n⚠️ OS display scaling ${Math.round(osScale * 100)}% still applies: 1px border renders as ${Math.round(actual.onePx * 1000) / 1000}px, sizes may be off by 1px. ` +
+          'Emulation cannot change it. For exact px: Windows scaling 100%, or start Chrome with --force-device-scale-factor=1 ' +
+          '(Chrome launched by chrometools: set CHROMETOOLS_FORCE_DEVICE_SCALE_FACTOR=1 in the MCP env and restart that Chrome).'
+        : '';
+
+      const exact = actual.width === requested.width && actual.height === requested.height &&
+        Math.abs(actual.devicePixelRatio - requested.deviceScaleFactor) < 0.01;
+      const offByOne = !exact && Math.abs(actual.width - requested.width) <= 1 && Math.abs(actual.height - requested.height) <= 1 &&
+        Math.abs(actual.devicePixelRatio - requested.deviceScaleFactor) < 0.01;
+      const warning = exact ? '' : offByOne
+        ? '\n⚠️ 1 px off: Chrome rounds the emulated size through the OS display scaling (e.g. 110%). Set Windows scaling to 100% for exact size.'
+        : '\n⚠️ Actual viewport differs from requested. Check browser zoom (must be 100%).';
 
       return {
         content: [{
           type: "text",
-          text: `Viewport set to ${validatedArgs.width}x${validatedArgs.height}\nActual: ${actual.width}x${actual.height} (DPR: ${actual.devicePixelRatio})`
+          text: `Viewport set to ${requested.width}x${requested.height}\nActual: ${actual.width}x${actual.height} (DPR: ${Math.round(actual.devicePixelRatio * 100) / 100})${warning}\nKept for this session (re-applied after navigation and before screenshots).${osNote}${frameNote}`
         }],
       };
     }
@@ -1936,29 +2225,36 @@ async function executeToolInternal(name, args) {
       vaultClient.assertNotExtensionUrl(validatedArgs.url);
 
       // Auto-open browser if no page is open (instead of throwing error)
-      let page;
+      let page = null;
       let browserOpened = false;
       try {
         page = await getLastOpenPage();
       } catch (e) {
-        // No page open - create one automatically
-        page = await getOrCreatePage(validatedArgs.url);
-        browserOpened = true;
+        page = null;
       }
 
       // Capture timestamp BEFORE navigation for diagnostics
       const beforeNavTimestamp = Date.now();
 
-      // Navigate to the new URL (skip if we just created page with this URL)
-      if (!browserOpened) {
+      let prevTitle = null;
+      if (page) {
+        prevTitle = await page.title().catch(() => null);
         await page.goto(validatedArgs.url, { waitUntil: validatedArgs.waitUntil || 'networkidle2' });
+      } else {
+        // No page open - create one automatically
+        page = await getOrCreatePage(validatedArgs.url);
+        browserOpened = true;
       }
 
       // Top-level navigation invalidates any previously-selected iframe (P0-1).
       // Reset to main frame so subsequent tools don't target a dead frame.
       clearActiveFrame(page);
 
-      const title = await page.title();
+      // Hash routes: goto resolves before the router renders and sets the title
+      const settle = await waitForSpaSettle(page, { prevTitle });
+      const title = settle.title;
+      const titleNote = settle.titleChanged === false ? ' (unchanged after navigation)' : '';
+      const viewportNote = formatViewportNote(await ensureViewport(page));
 
       // Run post-navigation diagnostics (same as post-click)
       const diagnostics = await runPostClickDiagnostics(page, beforeNavTimestamp);
@@ -1970,7 +2266,7 @@ async function executeToolInternal(name, args) {
       const diagnosticsText = formatDiagnosticsForAI(diagnostics);
 
       const message = browserOpened
-        ? `Browser opened and navigated to: ${validatedArgs.url}`
+        ? `No active tab was available, opened a new tab: ${validatedArgs.url}`
         : `Navigated to: ${validatedArgs.url}`;
 
       let hintsText = '\n\n** AI HINTS **';
@@ -1992,7 +2288,7 @@ async function executeToolInternal(name, args) {
       return {
         content: [{
           type: "text",
-          text: `${message}\nPage title: ${title}${hintsText}${diagnosticsText}`
+          text: `${message}\nPage title: ${title}${titleNote}${viewportNote}${hintsText}${diagnosticsText}`
         }],
       };
     }
@@ -2064,231 +2360,382 @@ async function executeToolInternal(name, args) {
     // Figma tools
     if (name === "getFigmaFrame") {
       const validatedArgs = schemas.GetFigmaFrameSchema.parse(args);
-      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
-      if (!token) {
-        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
-      }
+      const fctx = figmaContext(validatedArgs);
 
-      // Normalize node ID (convert URL format like "123-456" to API format "123:456")
-      const nodeId = normalizeFigmaNodeId(validatedArgs.nodeId);
+      // One node or a batch: one /images request for all nodes missing in the cache
+      const rawIds = validatedArgs.nodeIds?.length ? validatedArgs.nodeIds : (validatedArgs.nodeId ? [validatedArgs.nodeId] : []);
+      if (!rawIds.length) {
+        throw new Error('Pass nodeId or nodeIds.');
+      }
+      const ids = [...new Set(rawIds.map(normalizeFigmaNodeId))];
+      const MAX_INLINE = 5;
+      if (ids.length > MAX_INLINE && !validatedArgs.outputDir) {
+        throw new Error(`${ids.length} nodes: pass outputDir to save them as files (inline images are limited to ${MAX_INLINE}).`);
+      }
 
       const scale = validatedArgs.scale || 2;
       const format = validatedArgs.format || 'png';
+      const buffers = await getFigmaImages(validatedArgs.fileKey, ids, { scale, format }, fctx);
+      const fileName = cachedFigmaFileName(validatedArgs.fileKey);
 
-      // Get export URL from Figma
-      const exportData = await fetchFigmaAPI(
-        `images/${validatedArgs.fileKey}?ids=${nodeId}&scale=${scale}&format=${format}`,
-        token
-      );
-
-      if (!exportData.images || !exportData.images[nodeId]) {
-        throw new Error(`Failed to export node ${nodeId} from file ${validatedArgs.fileKey}`);
-      }
-
-      const imageUrl = exportData.images[nodeId];
-
-      // Download image
-      const imageResponse = await figmaFetch(imageUrl);
-      if (!imageResponse.ok) {
-        throw new Error(`Failed to download image: ${imageResponse.status}`);
-      }
-
-      const imageBuffer = imageResponse.buffer;
-
-      // Get frame info
-      const nodesData = await fetchFigmaAPI(`files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(nodeId)}`, token);
-      const frameInfo = nodesData.nodes?.[nodeId]?.document;
-
-      // Process image to ensure it doesn't exceed 3 MB
-      const processedImage = await processScreenshot(imageBuffer, {
-        maxWidth: null, // Keep original dimensions
-        maxHeight: null,
-        quality: 85,
-        format: format,
-        maxFileSize: 3 * 1024 * 1024 // 3 MB limit
-      });
-
-      const result = {
-        figmaInfo: {
-          fileName: nodesData.name || 'Unknown',
+      const frames = [];
+      const content = [];
+      let inlineBytes = 0;
+      for (const nodeId of ids) {
+        const imageBuffer = buffers[nodeId];
+        // Frame info only from the cache: not worth a request of its own
+        const frameInfo = peekFigmaNode(validatedArgs.fileKey, nodeId)?.document;
+        const frame = {
           frameId: nodeId,
           frameName: frameInfo?.name || 'Unknown',
           dimensions: frameInfo ? {
             width: frameInfo.absoluteBoundingBox?.width,
             height: frameInfo.absoluteBoundingBox?.height
-          } : null,
-          exportSettings: {
-            scale,
+          } : 'node tree not cached (prefetchFigma / getFigmaSpecs to get it)'
+        };
+
+        if (validatedArgs.outputDir) {
+          // Files keep the exact render (no recompression): needed for pixel checks
+          const dir = path.resolve(validatedArgs.outputDir);
+          mkdirSync(dir, { recursive: true });
+          const file = path.join(dir, `${nodeId.replace(/[:;]/g, '-')}@${scale}x.${format}`);
+          writeFileSync(file, imageBuffer);
+          frame.file = file;
+          frame.fileSize = imageBuffer.length;
+        } else {
+          // Process image to ensure it doesn't exceed 3 MB
+          const processedImage = await processScreenshot(imageBuffer, {
+            maxWidth: null, // Keep original dimensions
+            maxHeight: null,
+            quality: 85,
+            format: format,
+            maxFileSize: 3 * 1024 * 1024 // 3 MB limit
+          });
+          inlineBytes += processedImage.buffer.length;
+          frame.exportSettings = {
             format: processedImage.metadata.format,
             fileSize: processedImage.metadata.finalSize,
             originalFileSize: imageBuffer.length,
             compressed: processedImage.metadata.autoCompressed,
             quality: processedImage.metadata.quality
-          }
+          };
+          content.push({ type: 'image', data: processedImage.buffer.toString('base64'), mimeType: processedImage.mimeType });
         }
-      };
+        frames.push(frame);
+      }
+      if (inlineBytes > 3 * 1024 * 1024 * 1.5) {
+        throw new Error('Inline images exceed the response size limit: pass outputDir.');
+      }
+
+      const result = ids.length === 1 && !validatedArgs.nodeIds
+        ? { figmaInfo: { fileName, ...frames[0], exportSettings: { scale, ...(frames[0].exportSettings || {}) } } }
+        : { fileName, scale, format, frames };
 
       return {
         content: [
-          { type: 'text', text: JSON.stringify(result, null, 2) },
-          {
-            type: 'image',
-            data: processedImage.buffer.toString('base64'),
-            mimeType: processedImage.mimeType
-          }
+          { type: 'text', text: JSON.stringify(result, null, 2) + formatSourceLine(fctx) },
+          ...content
         ]
       };
     }
 
     if (name === "compareFigmaToElement") {
       const validatedArgs = schemas.CompareFigmaToElementSchema.parse(args);
-      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
-      if (!token) {
-        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
-      }
+      const fctx = figmaContext(validatedArgs);
+      const v = validatedArgs;
 
       const t0 = Date.now();
       const step = label => debugLog(`[compareFigmaToElement] +${Date.now() - t0}ms ${label}`);
       const page = await getLastOpenPage();
-      const figmaScale = validatedArgs.figmaScale || 2;
-      const threshold = validatedArgs.threshold || 0.05;
+      await ensureViewport(page);
+      const dpr = Math.round((await page.evaluate(() => window.devicePixelRatio)) * 100) / 100;
+      // Same pixel density on both sides by default
+      const figmaScale = v.figmaScale || dpr;
+      const threshold = v.threshold || 0.05;
 
-      // Normalize node ID (convert URL format like "123-456" to API format "123:456")
-      const nodeId = normalizeFigmaNodeId(validatedArgs.nodeId);
-
-      // Get Figma image
-      const exportData = await fetchFigmaAPI(
-        `images/${validatedArgs.fileKey}?ids=${nodeId}&scale=${figmaScale}&format=png`,
-        token
-      );
-
-      if (!exportData.images || !exportData.images[nodeId]) {
-        throw new Error(`Failed to export Figma node ${nodeId}`);
-      }
-
-      const figmaImageUrl = exportData.images[nodeId];
-      step('figma export url');
-      const figmaResponse = await figmaFetch(figmaImageUrl);
-      if (!figmaResponse.ok) {
-        throw new Error(`Failed to download Figma image: ${figmaResponse.status}`);
-      }
-      const figmaBuffer = figmaResponse.buffer;
-      step(`figma image downloaded (${figmaBuffer.length} bytes)`);
-
-      // Get page element screenshot
-      const element = await page.$(validatedArgs.selector);
-      if (!element) {
-        throw new Error(`Selector not found: ${validatedArgs.selector}`);
-      }
-
-      const pageBuffer = await element.screenshot();
-      step('element screenshot');
-
-      const cmp = await compareImages(figmaBuffer, pageBuffer);
-      step(`compared ${cmp.width}x${cmp.height}`);
-      const { width: targetWidth, height: targetHeight, diffPixels } = cmp;
-      const totalPixels = targetWidth * targetHeight;
-      const differencePercent = (diffPixels / totalPixels) * 100;
-      const sameSize = cmp.figmaSize.width === cmp.pageSize.width && cmp.figmaSize.height === cmp.pageSize.height;
-
-      // Analysis
-      const analysis = {
-        figmaVsPage: {
-          identical: diffPixels === 0,
-          withinThreshold: differencePercent <= (threshold * 100),
-          pixelDifferences: diffPixels,
-          differencePercent: Math.round(differencePercent * 100) / 100,
-          ssim: Math.round(cmp.ssim * 10000) / 10000,
-          recommendation: differencePercent < 1 ? 'Pixel-perfect match' :
-            differencePercent < 3 ? 'Very close to design' :
-              differencePercent < 10 ? 'Minor differences detected' :
-                'Significant differences from design'
-        },
-        dimensions: {
-          figma: cmp.figmaSize,
-          page: cmp.pageSize,
-          comparison: { width: targetWidth, height: targetHeight },
-          sameSize,
-          note: sameSize ? undefined :
-            'Sizes differ: both images are aligned top-left without scaling, area covered by only one image counts as difference. ' +
-            'Check figmaScale against the page devicePixelRatio.'
+      // Pairs: one (nodeId + selector) or a batch (nodeIds + selectors)
+      let pairs;
+      if (v.nodeIds?.length) {
+        if (!v.selectors || v.selectors.length !== v.nodeIds.length) {
+          throw new Error('nodeIds and selectors must have the same length: pair i compares nodeIds[i] with selectors[i].');
         }
-      };
-
-      const [diffBuffer, overlayBuffer] = await Promise.all([
-        cmp.diff.getBufferAsync(Jimp.MIME_PNG),
-        cmp.overlay.getBufferAsync(Jimp.MIME_PNG)
-      ]);
-
-      if (validatedArgs.outputDir) {
-        const dir = path.resolve(validatedArgs.outputDir);
-        mkdirSync(dir, { recursive: true });
-        const files = {
-          figma: path.join(dir, 'figma.png'),
-          page: path.join(dir, 'page.png'),
-          diff: path.join(dir, 'diff.png'),
-          overlay: path.join(dir, 'overlay.png')
-        };
-        writeFileSync(files.figma, figmaBuffer);
-        writeFileSync(files.page, pageBuffer);
-        writeFileSync(files.diff, diffBuffer);
-        writeFileSync(files.overlay, overlayBuffer);
-        analysis.files = files;
-        step('files saved');
+        pairs = v.nodeIds.map((n, i) => ({ nodeId: normalizeFigmaNodeId(n), selector: v.selectors[i] }));
+      } else {
+        if (!v.selector) throw new Error('Pass selector (or nodeIds + selectors).');
+        pairs = [{ nodeId: v.nodeId ? normalizeFigmaNodeId(v.nodeId) : null, selector: v.selector }];
+      }
+      const batch = pairs.length > 1;
+      if (v.figmaImagePath && batch) throw new Error('figmaImagePath compares one image: use nodeId + selector.');
+      if (!v.figmaImagePath && (!v.fileKey || pairs.some(p => !p.nodeId))) {
+        throw new Error('Pass fileKey and nodeId, or figmaImagePath with a local PNG.');
+      }
+      if (batch && (v.figmaChildNodeId || v.figmaCrop || v.anchor)) {
+        throw new Error('figmaChildNodeId, figmaCrop and anchor work with a single pair.');
       }
 
-      const shrink = buf => processScreenshot(buf, {
-        maxWidth: null,
-        maxHeight: null,
-        quality: 85,
-        format: 'auto',
-        maxFileSize: 3 * 1024 * 1024
-      });
+      // All renders in one request (cached ones are not requested)
+      const renders = v.figmaImagePath ? {} :
+        await getFigmaImages(v.fileKey, pairs.map(p => p.nodeId), { scale: figmaScale, format: 'png' }, fctx);
+      step('figma renders ready');
 
-      // Process images to ensure they don't exceed 3 MB
-      const [processedFigma, processedPage, processedOverlay] = await Promise.all([
-        shrink(figmaBuffer), shrink(pageBuffer), shrink(overlayBuffer)
-      ]);
+      // Node trees: crop by a child node, align by an anchor node, and cut the render to the
+      // frame bounds (strokes and shadows make the render larger: 1448x912 for a 1440x904 frame)
+      const trees = {};
+      if (v.figmaSpecPath) {
+        const loaded = loadFigmaNodeFromFile(v.figmaSpecPath, pairs[0].nodeId);
+        trees[pairs[0].nodeId || loaded.id] = loaded.data.document;
+        if (!pairs[0].nodeId) pairs[0].nodeId = loaded.id;
+      } else if (!v.figmaImagePath && (v.figmaChildNodeId || v.anchor || v.cropToBounds !== false)) {
+        const ids = pairs.map(p => p.nodeId);
+        // Cached trees cost nothing. Missing ones are requested (one /nodes call) only when needed:
+        // child crop / anchor, or cropToBounds: true. Default bounds crop uses cached trees only.
+        const needFetch = !!(v.figmaChildNodeId || v.anchor || v.cropToBounds === true);
+        const got = needFetch
+          ? await getFigmaNodes(v.fileKey, ids, fctx).catch(e => { if (v.figmaChildNodeId || v.anchor) throw e; return {}; })
+          : Object.fromEntries(ids.map(id => [id, peekFigmaNode(v.fileKey, id)]).filter(([, n]) => n));
+        for (const [id, n] of Object.entries(got)) trees[id] = n.document;
+      }
+      if ((v.figmaChildNodeId || v.anchor) && !trees[pairs[0].nodeId]) {
+        throw new Error('figmaChildNodeId / anchor need the node tree: pass fileKey + nodeId, or figmaSpecPath.');
+      }
 
-      const content = [
-        { type: 'text', text: JSON.stringify(analysis, null, 2) + '\nImages: figma, page, overlay (page + 50% figma)' + (diffPixels > 0 ? ', diff map' : '') },
-        { type: 'image', data: processedFigma.buffer.toString('base64'), mimeType: processedFigma.mimeType },
-        { type: 'image', data: processedPage.buffer.toString('base64'), mimeType: processedPage.mimeType },
-        { type: 'image', data: processedOverlay.buffer.toString('base64'), mimeType: processedOverlay.mimeType }
-      ];
+      const rows = [];
+      const content = [];
+      for (let i = 0; i < pairs.length; i++) {
+        const pair = pairs[i];
+        let figmaBuffer;
+        if (v.figmaImagePath) {
+          if (!existsSync(v.figmaImagePath)) throw new Error(`figmaImagePath not found: ${v.figmaImagePath}`);
+          figmaBuffer = readFileSync(v.figmaImagePath);
+          if (i === 0) fctx.notes.push(`local file ${v.figmaImagePath}`);
+        } else {
+          figmaBuffer = renders[pair.nodeId];
+        }
+        let figmaImg = await Jimp.read(figmaBuffer);
+        const rootTree = trees[pair.nodeId] || null;
 
-      // Add difference map if there are differences
-      if (diffPixels > 0) {
-        const processedDiff = await shrink(diffBuffer);
-        content.push({
-          type: 'image',
-          data: processedDiff.buffer.toString('base64'),
-          mimeType: processedDiff.mimeType
-        });
+        // Render px of a Figma node relative to the image (render bounds include shadows)
+        const toRender = (node) => {
+          const root = rootTree;
+          const rb = root.absoluteRenderBounds || root.absoluteBoundingBox;
+          const b = node.absoluteBoundingBox;
+          if (!rb || !b) throw new Error(`Node ${node.id} has no bounding box`);
+          return {
+            x: (b.x - rb.x) * figmaScale, y: (b.y - rb.y) * figmaScale,
+            width: b.width * figmaScale, height: b.height * figmaScale
+          };
+        };
+
+        // Crop the Figma image to a child node or a rectangle (Figma px, relative to the node)
+        let cropOrigin = { x: 0, y: 0 };
+        let cropInfo = null;
+        let cropRect = null;
+        if (v.figmaChildNodeId) {
+          const childId = normalizeFigmaNodeId(v.figmaChildNodeId);
+          const child = findFigmaNode(rootTree, childId);
+          if (!child) throw new Error(`figmaChildNodeId ${childId} is not inside node ${pair.nodeId}`);
+          cropRect = toRender(child);
+          cropInfo = { childNodeId: childId, childName: child.name };
+        } else if (v.figmaCrop) {
+          cropRect = {
+            x: v.figmaCrop.x * figmaScale, y: v.figmaCrop.y * figmaScale,
+            width: v.figmaCrop.width * figmaScale, height: v.figmaCrop.height * figmaScale
+          };
+          cropInfo = { rect: v.figmaCrop };
+        } else if (rootTree && !v.figmaImagePath && v.cropToBounds !== false && rootTree.absoluteBoundingBox) {
+          // Render larger than the frame (outside stroke / shadow): compare the frame box only
+          const b = toRender(rootTree);
+          const offBy = Math.abs(figmaImg.bitmap.width - b.width) + Math.abs(figmaImg.bitmap.height - b.height);
+          if (offBy >= 1 && b.x >= 0 && b.y >= 0) {
+            cropRect = b;
+            cropInfo = { toFrameBounds: true, renderSize: `${figmaImg.bitmap.width}x${figmaImg.bitmap.height}` };
+          }
+        }
+        if (cropRect) {
+          const x = Math.max(0, Math.round(cropRect.x)), y = Math.max(0, Math.round(cropRect.y));
+          const w = Math.min(figmaImg.bitmap.width - x, Math.round(cropRect.width));
+          const h = Math.min(figmaImg.bitmap.height - y, Math.round(cropRect.height));
+          if (w < 1 || h < 1) throw new Error('Crop area is outside the Figma image');
+          figmaImg = figmaImg.crop(x, y, w, h);
+          cropOrigin = { x, y };
+          cropInfo.renderPx = { x, y, width: w, height: h };
+        }
+
+        // Page element
+        const element = await page.$(pair.selector);
+        if (!element) throw new Error(`Selector not found: ${pair.selector}`);
+        // hideSelectors: widgets over the layout (chat button, cookie banner) hidden for the shot
+        const pageBuffer = await withHiddenElements(page, v.hideSelectors, () => capture(page, () => element.screenshot()));
+        step(`element screenshot ${i}`);
+        const pageImg = await Jimp.read(pageBuffer);
+
+        // Optional: scale Figma to the element width
+        let fitRatio = 1;
+        if (v.scaleToFit && figmaImg.bitmap.width !== pageImg.bitmap.width) {
+          fitRatio = pageImg.bitmap.width / figmaImg.bitmap.width;
+          figmaImg = figmaImg.resize(pageImg.bitmap.width, Math.round(figmaImg.bitmap.height * fitRatio));
+        }
+
+        // Page boxes relative to the element, in image px
+        const boxesInElement = (selectors) => element.evaluate((el, sels, scale) => {
+          const r0 = el.getBoundingClientRect();
+          const out = [];
+          for (const sel of sels) {
+            let list = [];
+            try { list = [...document.querySelectorAll(sel)]; } catch (e) { list = []; }
+            out.push(list.map(n => {
+              const r = n.getBoundingClientRect();
+              return { x: (r.left - r0.left) * scale, y: (r.top - r0.top) * scale, width: r.width * scale, height: r.height * scale };
+            }));
+          }
+          return out;
+        }, selectors, dpr);
+
+        // Alignment by an anchor: Figma node and page element that must coincide
+        let offset = null;
+        let alignment = { mode: 'top-left' };
+        if (v.anchor) {
+          const anchorNode = findFigmaNode(rootTree, normalizeFigmaNodeId(v.anchor.figmaNodeId));
+          if (!anchorNode) throw new Error(`anchor.figmaNodeId ${v.anchor.figmaNodeId} is not inside node ${pair.nodeId}`);
+          const fa = toRender(anchorNode);
+          const [[pa]] = await boxesInElement([v.anchor.selector]);
+          if (!pa) throw new Error(`anchor.selector not found: ${v.anchor.selector}`);
+          offset = {
+            x: pa.x - (fa.x - cropOrigin.x) * fitRatio,
+            y: pa.y - (fa.y - cropOrigin.y) * fitRatio
+          };
+          alignment = {
+            mode: 'anchor', figmaNodeId: anchorNode.id, figmaName: anchorNode.name, selector: v.anchor.selector,
+            offsetPx: { x: Math.round(offset.x), y: Math.round(offset.y) }
+          };
+        }
+
+        // Ignored areas
+        const masks = [];
+        const ignore = v.ignore || [];
+        const ignoreSelectors = ignore.filter(m => m.selector).map(m => m.selector);
+        if (ignoreSelectors.length) {
+          for (const list of await boxesInElement(ignoreSelectors)) masks.push(...list);
+        }
+        for (const m of ignore.filter(m => !m.selector && m.width && m.height)) {
+          masks.push({ x: m.x * dpr, y: m.y * dpr, width: m.width * dpr, height: m.height * dpr });
+        }
+
+        const figmaPng = await figmaImg.getBufferAsync(Jimp.MIME_PNG);
+        const cmp = await compareImages(figmaPng, pageBuffer, { offset, masks });
+        step(`compared ${cmp.width}x${cmp.height}`);
+        const { diffPixels } = cmp;
+        const differencePercent = cmp.comparedPixels > 0 ? (diffPixels / cmp.comparedPixels) * 100 : 0;
+        const sameSize = cmp.figmaSize.width === cmp.pageSize.width && cmp.figmaSize.height === cmp.pageSize.height;
+
+        const notes = [];
+        if (!sameSize && !offset) {
+          notes.push('Sizes differ: images are aligned top-left without scaling, area covered by only one image counts as difference. Use anchor, figmaChildNodeId / figmaCrop, or scaleToFit.');
+        }
+        if (Math.abs(figmaScale - dpr) > 0.01 && !v.figmaImagePath) {
+          notes.push(`figmaScale ${figmaScale} differs from page devicePixelRatio ${dpr}: pixel densities differ.`);
+        }
+        if (offset && cmp.outsidePixels > 0) {
+          notes.push(`${cmp.outsidePixels} px outside the overlap of the aligned images are not compared.`);
+        }
+
+        const analysis = {
+          ...(batch ? { nodeId: pair.nodeId, selector: pair.selector } : {}),
+          figmaVsPage: {
+            identical: diffPixels === 0 && sameSize,
+            withinThreshold: differencePercent <= (threshold * 100),
+            pixelDifferences: diffPixels,
+            differencePercent: Math.round(differencePercent * 100) / 100,
+            ssim: Math.round(cmp.ssim * 10000) / 10000,
+            recommendation: differencePercent < 1 ? 'Pixel-perfect match' :
+              differencePercent < 3 ? 'Very close to design' :
+                differencePercent < 10 ? 'Minor differences detected' :
+                  'Significant differences from design'
+          },
+          dimensions: {
+            figma: cmp.figmaSize,
+            page: cmp.pageSize,
+            comparedRegion: cmp.region,
+            sameSize,
+            figmaScale,
+            pageDevicePixelRatio: dpr
+          },
+          alignment,
+          ...(cropInfo ? { figmaCrop: cropInfo } : {}),
+          ...(fitRatio !== 1 ? { scaleToFit: Math.round(fitRatio * 10000) / 10000 } : {}),
+          ...(masks.length ? { ignored: { areas: masks.length, pixels: cmp.maskedPixels } } : {}),
+          ...(notes.length ? { notes } : {})
+        };
+
+        const [diffBuffer, overlayBuffer] = await Promise.all([
+          cmp.diff.getBufferAsync(Jimp.MIME_PNG),
+          cmp.overlay.getBufferAsync(Jimp.MIME_PNG)
+        ]);
+
+        if (v.outputDir) {
+          const base = path.resolve(v.outputDir);
+          const dir = batch ? path.join(base, `${i + 1}-${pair.nodeId.replace(/[:;]/g, '-')}`) : base;
+          mkdirSync(dir, { recursive: true });
+          const files = {
+            figma: path.join(dir, 'figma.png'),
+            page: path.join(dir, 'page.png'),
+            diff: path.join(dir, 'diff.png'),
+            overlay: path.join(dir, 'overlay.png')
+          };
+          writeFileSync(files.figma, figmaPng);
+          writeFileSync(files.page, pageBuffer);
+          writeFileSync(files.diff, diffBuffer);
+          writeFileSync(files.overlay, overlayBuffer);
+          analysis.files = files;
+        }
+        rows.push(analysis);
+
+        // Inline images only for a single pair
+        if (!batch) {
+          const shrink = buf => processScreenshot(buf, {
+            maxWidth: null, maxHeight: null, quality: 85, format: 'auto', maxFileSize: 3 * 1024 * 1024
+          });
+          const imgs = [figmaPng, pageBuffer, overlayBuffer];
+          if (diffPixels > 0) imgs.push(diffBuffer);
+          for (const buf of imgs) {
+            const pr = await shrink(buf);
+            content.push({ type: 'image', data: pr.buffer.toString('base64'), mimeType: pr.mimeType });
+          }
+        }
       }
       step('done');
 
-      return { content };
+      const text = batch
+        ? JSON.stringify({
+          pairs: rows.length,
+          summary: rows.map(r => ({
+            nodeId: r.nodeId, selector: r.selector, differencePercent: r.figmaVsPage.differencePercent,
+            ssim: r.figmaVsPage.ssim, sameSize: r.dimensions.sameSize, withinThreshold: r.figmaVsPage.withinThreshold
+          })),
+          details: rows
+        }, null, 2) + (v.outputDir ? '' : '\nImages are not inlined for several pairs: pass outputDir to save them.')
+        : JSON.stringify(rows[0], null, 2) + '\nImages: figma, page, overlay (page + 50% figma)' + (rows[0].figmaVsPage.pixelDifferences > 0 ? ', diff map' : '');
+
+      return { content: [{ type: 'text', text: text + formatSourceLine(fctx) }, ...content] };
     }
 
     if (name === "getFigmaSpecs") {
       const validatedArgs = schemas.GetFigmaSpecsSchema.parse(args);
-      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
-      if (!token) {
-        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
+      const fctx = figmaContext(validatedArgs);
+
+      let node;
+      if (validatedArgs.figmaSpecPath) {
+        // Saved node JSON: no API at all
+        node = loadFigmaNodeFromFile(validatedArgs.figmaSpecPath, validatedArgs.nodeId).data.document;
+        fctx.notes.push(`local file ${validatedArgs.figmaSpecPath}`);
+      } else {
+        if (!validatedArgs.fileKey || !validatedArgs.nodeId) {
+          throw new Error('Pass fileKey and nodeId, or figmaSpecPath with a saved node JSON.');
+        }
+        // Normalize node ID (convert URL format like "123-456" to API format "123:456")
+        const nodeId = normalizeFigmaNodeId(validatedArgs.nodeId);
+        node = (await getFigmaNodes(validatedArgs.fileKey, [nodeId], fctx))[nodeId].document;
       }
-
-      // Normalize node ID (convert URL format like "123-456" to API format "123:456")
-      const nodeId = normalizeFigmaNodeId(validatedArgs.nodeId);
-
-      // Get specific node via nodes API
-      const nodesData = await fetchFigmaAPI(`files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(nodeId)}`, token);
-
-      if (!nodesData.nodes || !nodesData.nodes[nodeId]) {
-        throw new Error(`Node ${nodeId} not found in Figma file`);
-      }
-
-      const node = nodesData.nodes[nodeId].document;
 
       // Extract specifications
       const specs = {
@@ -2408,8 +2855,133 @@ async function executeToolInternal(name, args) {
 
       return {
         content: [
-          { type: 'text', text: JSON.stringify(specs, null, 2) }
+          { type: 'text', text: JSON.stringify(specs, null, 2) + formatSourceLine(fctx) }
         ]
+      };
+    }
+
+    if (name === "getFontReport") {
+      const validatedArgs = schemas.GetFontReportSchema.parse(args);
+      const page = await getLastOpenPage();
+      const report = await fontReport(page, {
+        selector: validatedArgs.selector || 'body',
+        maxElements: validatedArgs.maxElements || 300
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] };
+    }
+
+    if (name === "compareFigmaSpecs") {
+      const validatedArgs = schemas.CompareFigmaSpecsSchema.parse(args);
+      const fctx = figmaContext(validatedArgs);
+      let root;
+      if (validatedArgs.figmaSpecPath) {
+        root = loadFigmaNodeFromFile(validatedArgs.figmaSpecPath, validatedArgs.nodeId).data.document;
+        fctx.notes.push(`local file ${validatedArgs.figmaSpecPath}`);
+      } else {
+        if (!validatedArgs.fileKey || !validatedArgs.nodeId) throw new Error('Pass fileKey + nodeId, or figmaSpecPath.');
+        const id = normalizeFigmaNodeId(validatedArgs.nodeId);
+        root = (await getFigmaNodes(validatedArgs.fileKey, [id], fctx))[id].document;
+      }
+      const page = await getLastOpenPage();
+      const ctx = await getTargetFrame(page);
+      const result = await compareSpecs(page, ctx, root, validatedArgs);
+      const head = `Figma "${root.name}" [${root.id}] vs ${validatedArgs.selector}\n` +
+        JSON.stringify(result.summary) + '\n\n' + (result.text || 'No differences in matched elements.');
+      const more = (list, total) => (total > list.length ? `; ... ${total - list.length} more` : '');
+      const uc = result.unmatchedCounts;
+      const tail = [
+        result.unmatchedFigmaTexts.length ? `\n\nFigma texts without a page match (${uc.figmaTexts}): ${result.unmatchedFigmaTexts.join('; ')}${more(result.unmatchedFigmaTexts, uc.figmaTexts)}` : '',
+        result.unmatchedPageTexts.length ? `\nPage texts without a Figma match (${uc.pageTexts}): ${result.unmatchedPageTexts.join('; ')}${more(result.unmatchedPageTexts, uc.pageTexts)}` : '',
+        result.unmatchedFigmaBlocks.length ? `\nFigma components without a page match (${uc.figmaBlocks}): ${result.unmatchedFigmaBlocks.join('; ')}${more(result.unmatchedFigmaBlocks, uc.figmaBlocks)}` : '',
+        result.mixedStyleTexts.length ? `\nFigma texts with mixed styles (base style compared): ${result.mixedStyleTexts.join('; ')}` : ''
+      ].join('');
+      return { content: [{ type: 'text', text: head + tail + formatSourceLine(fctx) }] };
+    }
+
+    if (name === "getFigmaNodeTree") {
+      const validatedArgs = schemas.GetFigmaNodeTreeSchema.parse(args);
+      const fctx = figmaContext(validatedArgs);
+      const opts = {
+        depth: validatedArgs.depth ?? 6,
+        includeHidden: !!validatedArgs.includeHidden,
+        textOnly: !!validatedArgs.textOnly
+      };
+      let roots;
+      if (validatedArgs.figmaSpecPath) {
+        const loaded = loadFigmaNodeFromFile(validatedArgs.figmaSpecPath, validatedArgs.nodeId);
+        roots = { [loaded.id]: loaded.data.document };
+        fctx.notes.push(`local file ${validatedArgs.figmaSpecPath}`);
+      } else {
+        const ids = validatedArgs.nodeIds?.length ? validatedArgs.nodeIds : (validatedArgs.nodeId ? [validatedArgs.nodeId] : []);
+        if (!validatedArgs.fileKey || !ids.length) throw new Error('Pass fileKey + nodeId / nodeIds, or figmaSpecPath.');
+        const nodes = await getFigmaNodes(validatedArgs.fileKey, ids, fctx);
+        roots = Object.fromEntries(Object.entries(nodes).map(([id, n]) => [id, n.document]));
+      }
+      const budget = Math.floor(60000 / Object.keys(roots).length);
+      const trees = Object.values(roots).map(r => compactTree(r, { ...opts, maxBytes: budget }));
+      const result = trees.length === 1 ? trees[0] : { trees };
+      const truncatedNote = trees.some(t => t.truncated)
+        ? '\nTruncated at ~60 KB: request a deeper child node, lower depth, or textOnly.' : '';
+      return {
+        content: [{
+          type: 'text',
+          text: 'Boxes: [x, y, width, height] relative to the requested node. padding: [top, right, bottom, left].\n' +
+            JSON.stringify(result) + truncatedNote + formatSourceLine(fctx)
+        }]
+      };
+    }
+
+    if (name === "prefetchFigma") {
+      const validatedArgs = schemas.PrefetchFigmaSchema.parse(args);
+      const fctx = figmaContext(validatedArgs);
+      const fileKey = parseFigmaUrl(validatedArgs.fileKey).fileKey;
+      const result = await prefetchFigmaData(fileKey, validatedArgs.nodeIds, {
+        scales: validatedArgs.scales || [2],
+        format: validatedArgs.format || 'png',
+        tree: validatedArgs.tree !== false
+      }, fctx);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) + formatSourceLine(fctx) }]
+      };
+    }
+
+    if (name === "importFigmaCache") {
+      const validatedArgs = schemas.ImportFigmaCacheSchema.parse(args);
+      const fileKey = parseFigmaUrl(validatedArgs.fileKey).fileKey;
+      const result = importFigmaNodesFile(fileKey, validatedArgs.path);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2) +
+            '\nNested nodes are found by id: getFigmaSpecs / compareFigmaSpecs / getFigmaNodeTree with fileKey + nodeId and offline: true.'
+        }]
+      };
+    }
+
+    if (name === "importFigmaRender") {
+      const validatedArgs = schemas.ImportFigmaRenderSchema.parse(args);
+      const fileKey = parseFigmaUrl(validatedArgs.fileKey).fileKey;
+      const result = importFigmaRenderFile(fileKey, validatedArgs.nodeId, validatedArgs.path, {
+        scale: validatedArgs.scale ?? 1,
+        format: validatedArgs.format || null
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+
+    if (name === "figmaCacheStatus") {
+      const validatedArgs = schemas.FigmaCacheStatusSchema.parse(args);
+      const fileKey = validatedArgs.fileKey ? parseFigmaUrl(validatedArgs.fileKey).fileKey : null;
+      return {
+        content: [{ type: 'text', text: JSON.stringify(figmaCacheStatus(fileKey), null, 2) }]
+      };
+    }
+
+    if (name === "figmaCacheClear") {
+      const validatedArgs = schemas.FigmaCacheClearSchema.parse(args);
+      const fileKey = validatedArgs.fileKey ? parseFigmaUrl(validatedArgs.fileKey).fileKey : null;
+      const result = figmaCacheClear({ fileKey, nodeIds: validatedArgs.nodeIds || null, kind: validatedArgs.kind || null });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
       };
     }
 
@@ -2426,140 +2998,111 @@ async function executeToolInternal(name, args) {
 
     if (name === "listFigmaPages") {
       const validatedArgs = schemas.ListFigmaPagesSchema.parse(args);
-      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
-      if (!token) {
-        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
-      }
+      const fctx = figmaContext(validatedArgs);
 
       // Parse fileKey from URL if needed
       const parsed = parseFigmaUrl(validatedArgs.fileKey);
       const fileKey = parsed.fileKey;
 
-      const result = await listFigmaPages(fileKey, token);
+      const fileData = await getFigmaFileData(fileKey, fctx);
+      const result = listFigmaPages(fileData);
 
       return {
         content: [
-          { type: 'text', text: JSON.stringify(result, null, 2) }
+          { type: 'text', text: JSON.stringify(result, null, 2) + formatSourceLine(fctx) }
         ]
       };
     }
 
     if (name === "searchFigmaFrames") {
       const validatedArgs = schemas.SearchFigmaFramesSchema.parse(args);
-      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
-      if (!token) {
-        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
-      }
+      const fctx = figmaContext(validatedArgs);
 
       // Parse fileKey from URL if needed
       const parsed = parseFigmaUrl(validatedArgs.fileKey);
       const fileKey = parsed.fileKey;
 
-      const result = await searchFigmaFrames(fileKey, token, validatedArgs.searchQuery);
+      const fileData = await getFigmaFileData(fileKey, fctx);
+      const result = searchFigmaFrames(fileData, validatedArgs.searchQuery);
 
       return {
         content: [
-          { type: 'text', text: JSON.stringify(result, null, 2) }
+          { type: 'text', text: JSON.stringify(result, null, 2) + formatSourceLine(fctx) }
         ]
       };
     }
 
     if (name === "getFigmaComponents") {
       const validatedArgs = schemas.GetFigmaComponentsSchema.parse(args);
-      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
-      if (!token) {
-        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
-      }
+      const fctx = figmaContext(validatedArgs);
 
       // Parse fileKey from URL if needed
       const parsed = parseFigmaUrl(validatedArgs.fileKey);
       const fileKey = parsed.fileKey;
 
-      const result = await getFigmaComponents(fileKey, token);
+      const fileData = await getFigmaFileData(fileKey, fctx);
+      const result = getFigmaComponents(fileData);
 
       return {
         content: [
-          { type: 'text', text: JSON.stringify(result, null, 2) }
+          { type: 'text', text: JSON.stringify(result, null, 2) + formatSourceLine(fctx) }
         ]
       };
     }
 
     if (name === "getFigmaStyles") {
       const validatedArgs = schemas.GetFigmaStylesSchema.parse(args);
-      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
-      if (!token) {
-        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
-      }
+      const fctx = figmaContext(validatedArgs);
 
       // Parse fileKey from URL if needed
       const parsed = parseFigmaUrl(validatedArgs.fileKey);
       const fileKey = parsed.fileKey;
 
-      const result = await getFigmaStyles(fileKey, token);
+      const fileData = await getFigmaFileData(fileKey, fctx);
+      const result = getFigmaStyles(fileData);
 
       return {
         content: [
-          { type: 'text', text: JSON.stringify(result, null, 2) }
+          { type: 'text', text: JSON.stringify(result, null, 2) + formatSourceLine(fctx) }
         ]
       };
     }
 
     if (name === "getFigmaColorPalette") {
       const validatedArgs = schemas.GetFigmaColorPaletteSchema.parse(args);
-      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
-      if (!token) {
-        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
-      }
+      const fctx = figmaContext(validatedArgs);
 
       // Parse fileKey from URL if needed
       const parsed = parseFigmaUrl(validatedArgs.fileKey);
       const fileKey = parsed.fileKey;
 
-      const result = await getFigmaColorPalette(fileKey, token);
+      const fileData = await getFigmaFileData(fileKey, fctx);
+      const result = getFigmaColorPalette(fileData);
 
       return {
         content: [
-          { type: 'text', text: JSON.stringify(result, null, 2) }
+          { type: 'text', text: JSON.stringify(result, null, 2) + formatSourceLine(fctx) }
         ]
       };
     }
 
     if (name === "convertFigmaToCode") {
       const validatedArgs = schemas.ConvertFigmaToCodeSchema.parse(args);
-      const token = validatedArgs.figmaToken || FIGMA_TOKEN;
-      if (!token) {
-        throw new Error('Figma token is required. Pass it as parameter or set FIGMA_TOKEN environment variable in MCP config.');
-      }
+      const fctx = figmaContext(validatedArgs);
 
       // Normalize node ID
       const nodeId = normalizeFigmaNodeId(validatedArgs.nodeId);
       const framework = validatedArgs.framework || 'react';
       const includeComments = validatedArgs.includeComments !== false; // default true
 
-      // Fetch node structure
-      const nodesData = await fetchFigmaAPI(
-        `files/${validatedArgs.fileKey}/nodes?ids=${encodeURIComponent(nodeId)}`,
-        token
-      );
-
-      if (!nodesData.nodes || !nodesData.nodes[nodeId]) {
-        throw new Error(`Node ${nodeId} not found in Figma file ${validatedArgs.fileKey}`);
-      }
-
-      // Fetch rendered image at 2x scale
-      const exportData = await fetchFigmaAPI(
-        `images/${validatedArgs.fileKey}?ids=${nodeId}&scale=2&format=png`,
-        token
-      );
-
-      if (!exportData.images || !exportData.images[nodeId]) {
-        throw new Error(`Failed to export image for node ${nodeId}`);
-      }
-
-      const imageUrl = exportData.images[nodeId];
+      // Node structure and render at 2x: cache first
+      const nodeInfo = (await getFigmaNodes(validatedArgs.fileKey, [nodeId], fctx))[nodeId];
+      const designImage = (await getFigmaImages(validatedArgs.fileKey, [nodeId], { scale: 2, format: 'png' }, fctx))[nodeId];
+      const processedDesign = await processScreenshot(designImage, {
+        maxWidth: null, maxHeight: null, quality: 85, format: 'png', maxFileSize: 3 * 1024 * 1024
+      });
 
       // Simplify node structure
-      const nodeInfo = nodesData.nodes[nodeId];
       const simplifiedNode = simplifyNode(nodeInfo.document);
 
       // Build AI instruction based on framework
@@ -2572,7 +3115,7 @@ async function executeToolInternal(name, args) {
       const instruction = `# Figma to Code Conversion
 
 ## Design Image
-![Design](${imageUrl})
+Attached below (rendered at 2x).
 
 ## Task
 Convert this Figma design to ${frameworkInstructions[framework]}.
@@ -2622,10 +3165,10 @@ Return ONLY the code, no explanations. ${framework.startsWith('react') ? 'Export
 Start coding now.`;
 
       return {
-        content: [{
-          type: "text",
-          text: instruction
-        }],
+        content: [
+          { type: "text", text: instruction + formatSourceLine(fctx) },
+          { type: "image", data: processedDesign.buffer.toString('base64'), mimeType: processedDesign.mimeType }
+        ],
       };
     }
 
@@ -4149,26 +4692,58 @@ Start coding now.`;
     }
 
     // Tab management tools
+    if (name === "resetBrowser") {
+      const validatedArgs = schemas.ResetBrowserSchema.parse(args);
+      // Forget pages and the CDP connection; Chrome and user tabs stay open
+      resetPageState();
+      await resetBrowserConnection();
+      lastReportedPage = null;
+      let text = 'Browser connection reset (Chrome and its tabs stay open). Next tool call connects again.';
+      if (validatedArgs.url) {
+        vaultClient.assertNotExtensionUrl(validatedArgs.url);
+        const page = await getOrCreatePage(validatedArgs.url);
+        const { title } = await waitForSpaSettle(page);
+        text = `Browser connection reset, opened ${validatedArgs.url}\nPage title: ${title}` +
+          formatViewportNote(await ensureViewport(page));
+      }
+      return { content: [{ type: 'text', text }] };
+    }
+
     if (name === "listTabs") {
+      const validatedArgs = schemas.ListTabsSchema.parse(args || {});
       // Prefer extension tabs if connected (sees ALL tabs including manually opened)
       let tabs = [];
       let source = 'puppeteer';
+      let hiddenTabs = 0;
 
       if (isExtensionConnected()) {
         const extTabs = getTabsFromExtension();
         if (extTabs.length > 0) {
-          tabs = extTabs.map((t, index) => ({
-            index,
+          // The extension sees the user's own tabs too: by default list only tabs chrometools works with
+          const ours = new Set();
+          for (const pg of openPages.values()) {
+            try { if (!pg.isClosed()) ours.add(pg.url()); } catch { /* ignore */ }
+          }
+          try { if (pageState.lastPage) ours.add(pageState.lastPage.url()); } catch { /* ignore */ }
+          const all = extTabs.map((t, index) => ({
+            index, // index for switchTab (position among all tabs)
             url: t.url,
             title: t.title,
-            isActive: t.active
+            isActive: t.active,
+            chrometools: ours.has(t.url)
           }));
+          if (validatedArgs.all) {
+            tabs = all.map(t => (t.chrometools ? t : { index: t.index, url: t.url, isActive: t.isActive, chrometools: false }));
+          } else {
+            tabs = all.filter(t => t.chrometools);
+            hiddenTabs = all.length - tabs.length;
+          }
           source = 'extension';
         }
       }
 
       // Fallback to Puppeteer if extension not connected or has no tabs
-      if (tabs.length === 0) {
+      if (tabs.length === 0 && source !== 'extension') {
         const pages = await getAllPages();
         tabs = pages.map((p, index) => ({
           index,
@@ -4185,7 +4760,8 @@ Start coding now.`;
         tabs,
         totalCount: tabs.length,
         source,
-        extensionConnected
+        extensionConnected,
+        ...(hiddenTabs ? { hiddenTabs, note: `${hiddenTabs} other tab(s) of the user are hidden. Pass all: true to list them (without titles).` } : {})
       };
 
       // Include new tab notifications if any
@@ -4213,13 +4789,19 @@ Start coding now.`;
       if (isExtensionConnected()) {
         const tab = switchTabViaExtension(validatedArgs.tab);
         if (tab) {
-          // Also connect Puppeteer to this tab for analyzePage etc.
-          const page = await connectToTabByUrl(tab.url);
+          // Also connect Puppeteer to this tab: tools work only through it
+          let page = await connectToTabByUrl(tab.url, { loose: true }).catch(() => null);
+          if (!page) {
+            // Stale CDP connection does not see the tab: reconnect once
+            await resetBrowserConnection();
+            page = await connectToTabByUrl(tab.url, { loose: true }).catch(() => null);
+          }
+          if (page) lastReportedPage = page;
 
           return {
             content: [{
               type: 'text',
-              text: JSON.stringify({
+              text: JSON.stringify(page ? {
                 success: true,
                 switchedTo: {
                   url: tab.url,
@@ -4227,9 +4809,17 @@ Start coding now.`;
                 },
                 message: `Switched to tab: ${tab.title || tab.url}`,
                 source: 'extension',
-                puppeteerConnected: !!page
+                puppeteerConnected: true
+              } : {
+                success: false,
+                switchedTo: { url: tab.url, title: tab.title },
+                message: 'The tab was activated in Chrome, but chrometools could not attach to it: other tools would not work on it. ' +
+                  'Call resetBrowser, or navigateTo the URL.',
+                source: 'extension',
+                puppeteerConnected: false
               }, null, 2)
-            }]
+            }],
+            ...(page ? {} : { isError: true })
           };
         }
       }
@@ -4400,6 +4990,7 @@ Environment variables:
   CHROMETOOLS_DEBUG=true   Enable debug logging
   ENABLED_TOOLS=group1,..  Enable only specified tool groups
   FIGMA_TOKEN=xxx          Figma API token for Figma tools
+  FIGMA_TOKEN_FILE=path    File with a FIGMA_TOKEN=xxx line (read on every call)
 `);
     process.exit(0);
   }
@@ -4425,7 +5016,8 @@ async function main() {
   await startWebSocketServer();
 
   // Register handler for syncing active tab when user switches tabs
-  setActiveTabSyncHandler(connectToTabByUrl);
+  // User clicked a tab: follow it only if chrometools already works with that tab
+  setActiveTabSyncHandler(url => connectToTabByUrl(url, { trackedOnly: true }));
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

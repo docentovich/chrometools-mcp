@@ -3,7 +3,53 @@
  * Collects errors and waits for network requests after user actions (click, navigation, etc.)
  */
 
-import { consoleLogs, networkRequests } from '../browser/page-manager.js';
+import { consoleLogs, networkRequests, formatStackTrace } from '../browser/page-manager.js';
+
+/**
+ * Find dev-server error overlays (webpack, Vite, Next.js, CRA, Parcel).
+ * They cover the page and swallow clicks, but nothing reaches the console log.
+ * @param {import('puppeteer').Page} page
+ * @returns {Promise<Array<{source: string, selector: string, text: string}>>}
+ */
+export async function detectErrorOverlays(page) {
+  return page.evaluate(() => {
+    const visible = (el) => {
+      if (!el || !el.isConnected) return false;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const clean = (t) => (t || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+    const iframeText = (el) => {
+      try { return el.contentDocument?.body?.innerText || ''; } catch (e) { return ''; }
+    };
+    const shadowText = (el) => {
+      try { return el.shadowRoot?.textContent || el.textContent || ''; } catch (e) { return ''; }
+    };
+    const candidates = [
+      { source: 'webpack-dev-server', selector: '#webpack-dev-server-client-overlay', read: iframeText },
+      { source: 'webpack-dev-server', selector: '#webpack-dev-server-client-overlay-div', read: el => el.innerText },
+      { source: 'vite', selector: 'vite-error-overlay', read: shadowText },
+      { source: 'next.js', selector: 'nextjs-portal', read: shadowText, needText: true },
+      { source: 'react-error-overlay', selector: 'iframe[id^="react-refresh-overlay"], body > iframe[style*="z-index: 2147483647"]', read: iframeText, needText: true },
+      { source: 'parcel', selector: '#__parcel__error__overlay__', read: el => el.innerText }
+    ];
+    const found = [];
+    const seen = new Set();
+    for (const c of candidates) {
+      for (const el of document.querySelectorAll(c.selector)) {
+        if (seen.has(c.source) || !visible(el)) continue;
+        const text = clean(c.read(el));
+        // Next.js keeps an empty portal for its dev indicator; CRA iframe selector is broad
+        if (c.needText && !/error|exception|failed/i.test(text)) continue;
+        seen.add(c.source);
+        found.push({ source: c.source, selector: c.selector.split(',')[0], text });
+      }
+    }
+    return found;
+  }).catch(() => []);
+}
 import { getNetworkRequestsFromBridge, isBridgeConnected } from '../bridge/bridge-client.js';
 
 /**
@@ -118,10 +164,17 @@ export function collectErrors(sinceTimestamp = null, maxConsoleErrors = 15, maxN
       const logTime = new Date(log.timestamp || 0).toISOString();
       if (!sinceTimestamp || logTime >= cutoffDate) {
         if (consoleErrorCount < maxConsoleErrors) {
+          const stack = formatStackTrace(log.stackTrace);
+          let location = log.location || 'unknown';
+          if (location === 'unknown' && log.url) {
+            location = `${log.url}${log.lineNumber != null ? ':' + (log.lineNumber + 1) : ''}`;
+          }
           errors.consoleErrors.push({
-            message: log.text,
+            message: String(log.message ?? log.text ?? '(no message)').slice(0, 800),
             timestamp: log.timestamp,
-            location: log.location || 'unknown'
+            location,
+            stack,
+            uncaught: !!log.uncaught
           });
         } else {
           errors.consoleErrorsOmitted++;
@@ -225,6 +278,9 @@ export async function runPostClickDiagnostics(page, beforeActionTimestamp, optio
   // Collect errors that occurred after the action (including errors from just-completed requests)
   const errors = collectErrors(beforeActionTimestamp);
 
+  // Error overlays may come from an earlier page (dev server keeps them across SPA routes)
+  const errorOverlays = chromeErrorInfo ? [] : await detectErrorOverlays(page);
+
   // Combine into diagnostics report
   const diagnostics = {
     networkActivity: {
@@ -247,6 +303,7 @@ export async function runPostClickDiagnostics(page, beforeActionTimestamp, optio
     },
     navigation: navigationDetected,
     chromeError: chromeErrorInfo,
+    errorOverlays,
     errors: {
       consoleErrors: errors.consoleErrors,
       networkErrors: errors.networkErrors,
@@ -254,7 +311,8 @@ export async function runPostClickDiagnostics(page, beforeActionTimestamp, optio
       networkErrorsOmitted: errors.networkErrorsOmitted,
       totalErrors: errors.consoleErrors.length + errors.networkErrors.length
     },
-    hasErrors: (errors.consoleErrors.length + errors.networkErrors.length) > 0 || chromeErrorInfo !== null
+    hasErrors: (errors.consoleErrors.length + errors.networkErrors.length) > 0 || chromeErrorInfo !== null ||
+      errorOverlays.length > 0
   };
 
   return diagnostics;
@@ -274,6 +332,13 @@ export function formatDiagnosticsForAI(diagnostics) {
     output += `\n   Error: ${diagnostics.chromeError.errorCode}`;
     output += `\n   Suggestion: ${diagnostics.chromeError.suggestion}`;
     output += `\n   → Backend likely not running or unreachable`;
+  }
+
+  // Dev-server error overlay covering the page
+  for (const ov of diagnostics.errorOverlays || []) {
+    output += `\n\n🔴 Dev error overlay covers the page (${ov.source}, ${ov.selector})`;
+    if (ov.text) output += `\n   ${ov.text}`;
+    output += `\n   → Clicks hit the overlay, screenshots show it. Fix the error or close the overlay.`;
   }
 
   // Page navigation detection (form submit in non-SPA apps)
@@ -356,9 +421,14 @@ export function formatDiagnosticsForAI(diagnostics) {
     if (diagnostics.errors.consoleErrors.length > 0) {
       output += `\n\nJavaScript Console Errors (${diagnostics.errors.consoleErrors.length}):`;
       diagnostics.errors.consoleErrors.forEach((err, idx) => {
-        output += `\n  ${idx + 1}. ${err.message}`;
-        if (err.location && err.location !== 'unknown') {
+        output += `\n  ${idx + 1}. ${err.uncaught ? '(uncaught) ' : ''}${err.message}`;
+        // Error descriptions already carry their stack; add frames only when missing
+        const hasStack = /\n\s+at /.test(err.message);
+        if (err.location && err.location !== 'unknown' && !hasStack) {
           output += ` [${err.location}]`;
+        }
+        if (!hasStack && err.stack && err.stack.length > 0) {
+          output += err.stack.map(f => `\n       at ${f}`).join('');
         }
       });
       // Show if some errors were omitted
@@ -382,7 +452,7 @@ export function formatDiagnosticsForAI(diagnostics) {
         output += `\n  ... and ${diagnostics.errors.networkErrorsOmitted} more network error(s) (omitted to prevent spam)`;
       }
     }
-  } else {
+  } else if (!(diagnostics.errorOverlays || []).length && !diagnostics.chromeError) {
     output += '\n✓ No errors detected';
   }
 

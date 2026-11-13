@@ -3,6 +3,7 @@
  */
 
 import { processScreenshot } from '../image-processing.js';
+import { capture } from '../capture.js';
 
 /**
  * Execute screenshot action on element
@@ -36,20 +37,26 @@ export async function executeScreenshotAction(page, element, options = {}) {
     throw new Error(`Element is not visible or has no bounding box: ${identifier}`);
   }
 
+  // boundingBox() is viewport-relative, the screenshot clip is document-relative
+  const scroll = await page.evaluate(() => ({
+    x: window.visualViewport ? window.visualViewport.pageLeft : window.scrollX,
+    y: window.visualViewport ? window.visualViewport.pageTop : window.scrollY
+  }));
   const clip = {
-    x: Math.max(box.x - padding, 0),
-    y: Math.max(box.y - padding, 0),
+    x: Math.max(box.x + scroll.x - padding, 0),
+    y: Math.max(box.y + scroll.y - padding, 0),
     width: Math.max(box.width + padding * 2, 1),
     height: Math.max(box.height + padding * 2, 1)
   };
 
   // Take screenshot as buffer
-  const screenshotBuffer = await page.screenshot({ clip, encoding: 'binary' });
+  const screenshotBuffer = await capture(page, () => page.screenshot({ clip, encoding: 'binary' }));
 
   // Process with compression and scaling
   const processed = await processScreenshot(screenshotBuffer, {
-    maxWidth: maxWidth ?? 1024,
-    maxHeight: maxHeight ?? 8000,
+    // null = original size (?? would turn null back into the default)
+    maxWidth: maxWidth === undefined ? 1024 : maxWidth,
+    maxHeight: maxHeight === undefined ? 8000 : maxHeight,
     quality: quality ?? 80,
     format: format ?? 'auto'
   });

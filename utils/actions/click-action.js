@@ -6,6 +6,7 @@
 import { runPostClickDiagnostics, formatDiagnosticsForAI } from '../post-click-diagnostics.js';
 import { generateClickHints } from '../hints-generator.js';
 import { processScreenshot } from '../screenshot-processor.js';
+import { capture } from '../capture.js';
 
 /**
  * Execute click action on element with adaptive strategy
@@ -54,6 +55,25 @@ export async function executeClickAction(page, element, options = {}) {
   //   Trusted CDP events (Tier 1 & 2) are critical for Angular/Zone.js apps where
   //   untrusted .click() triggers change detection mid-dispatch, destroying *ngFor elements.
   let clickMethod = 'unknown';
+  let coverInfo = null;
+
+  // Watch for any effect of the click: DOM changes outside the element (ripples and
+  // focus styles inside it do not count), aria/state attributes, checked/value, URL.
+  const stateBefore = await element.evaluate(el => {
+    const watch = { outside: 0, attrs: 0 };
+    try {
+      const obs = new MutationObserver(list => {
+        for (const m of list) {
+          const inside = el === m.target || el.contains(m.target);
+          if (!inside) watch.outside++;
+          else if (m.type === 'attributes' && /^(aria-|data-state|checked|selected|open|value)/.test(m.attributeName || '')) watch.attrs++;
+        }
+      });
+      obs.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+      window.__ctClickWatch = { watch, obs };
+    } catch (e) { /* ignore */ }
+    return { checked: el.checked, value: el.value, active: document.activeElement === el };
+  }).catch(() => null);
 
   const clickWithTimeout = async (timeoutMs = 5000) => {
     const withTimeout = (promise) => Promise.race([
@@ -62,17 +82,31 @@ export async function executeClickAction(page, element, options = {}) {
     ]);
 
     // Pre-check: is another element covering our target at its center coordinates?
-    const intercepted = await element.evaluate(el => {
+    coverInfo = await element.evaluate(el => {
       const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return false;
+      if (rect.width === 0 || rect.height === 0) return null;
       const cx = rect.left + rect.width / 2;
       const cy = rect.top + rect.height / 2;
       const topEl = document.elementFromPoint(cx, cy);
       // topEl is our element or a child of it — not intercepted
-      return topEl !== el && !el.contains(topEl);
-    });
+      if (!topEl || topEl === el || el.contains(topEl)) return null;
+      const describe = (n) => {
+        let d = n.tagName.toLowerCase();
+        if (n.id) d += '#' + n.id;
+        const cls = typeof n.className === 'string' ? n.className.trim().split(/\s+/).filter(Boolean).slice(0, 2) : [];
+        if (cls.length) d += '.' + cls.join('.');
+        const text = (n.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+        return text ? `${d} "${text}"` : d;
+      };
+      const devOverlay = /webpack-dev-server-client-overlay|vite-error-overlay|nextjs-portal|react-refresh-overlay|__parcel__error__overlay__/
+        .test((topEl.id || '') + ' ' + topEl.tagName.toLowerCase() + ' ' + (topEl.closest('[id]')?.id || ''));
+      // Target sits behind an open modal: probably a duplicate element under the dialog
+      const modal = topEl.closest('[role="dialog"], [aria-modal="true"], .MuiModal-root, .MuiDialog-root, .ant-modal-wrap, .modal');
+      const behindModal = !!modal && !modal.contains(el);
+      return { by: describe(topEl), devOverlay, behindModal };
+    }).catch(() => null);
 
-    if (intercepted) {
+    if (coverInfo) {
       // Path A: Element is covered (e.g., small button under <a routerLink>)
       // Coordinate clicks would hit the covering element — dispatch full event sequence
       // directly on the element to bypass hit-testing while still triggering framework handlers
@@ -205,6 +239,30 @@ export async function executeClickAction(page, element, options = {}) {
     };
   }
 
+  // Did the click change anything? Context loss (navigation) counts as a change.
+  let noVisibleChange = false;
+  if (stateBefore && !elementDetached && page.url() === urlBeforeClick) {
+    const after = await element.evaluate((el, before) => {
+      const w = window.__ctClickWatch;
+      if (!w) return null;
+      w.obs.disconnect();
+      delete window.__ctClickWatch;
+      return {
+        changed: w.watch.outside > 0 || w.watch.attrs > 0 ||
+          el.checked !== before.checked || el.value !== before.value
+      };
+    }, stateBefore).catch(() => null);
+    const dataRequests = (diagnostics.networkActivity?.trackedRequests || [])
+      .filter(r => !r.type || ['XHR', 'Fetch', 'Document'].includes(r.type));
+    noVisibleChange = after !== null && !after.changed && dataRequests.length === 0 &&
+      !(waitResult && waitResult.appeared);
+  } else if (stateBefore) {
+    await element.evaluate(() => {
+      window.__ctClickWatch?.obs.disconnect();
+      delete window.__ctClickWatch;
+    }).catch(() => {});
+  }
+
   // 2. Generate AI hints after click
   let hints;
   try {
@@ -280,7 +338,19 @@ export async function executeClickAction(page, element, options = {}) {
   const diagnosticsText = formatDiagnosticsForAI(diagnostics);
 
   // Include click method in output for diagnostics (only non-default methods)
-  const methodNote = clickMethod !== 'puppeteer-native' ? ` [${clickMethod}]` : '';
+  let methodNote = clickMethod !== 'puppeteer-native' ? ` [${clickMethod}]` : '';
+  if (coverInfo) {
+    methodNote = ` [${clickMethod}: element covered by ${coverInfo.by}, synthetic untrusted events dispatched on the element]`;
+    if (coverInfo.devOverlay) {
+      hintsText += '\n⚠️ A dev-server error overlay covers the page. A real user could not click here.';
+    }
+    if (coverInfo.behindModal) {
+      hintsText += '\n⚠️ The element is behind an open modal. Probably a duplicate under the dialog was matched: use a selector inside the dialog.';
+    }
+  }
+  if (noVisibleChange) {
+    hintsText += '\n⚠️ NO_CHANGE: no DOM, attribute, URL or data request change after click. The click probably had no effect.';
+  }
 
   const content = [
     { type: "text", text: `Clicked: ${identifier}${methodNote}${hintsText}${diagnosticsText}` }
@@ -288,7 +358,7 @@ export async function executeClickAction(page, element, options = {}) {
 
   // Only add screenshot if requested — lightweight JPEG for action confirmation
   if (screenshot === true) {
-    const screenshotBuffer = await page.screenshot({ encoding: 'binary', fullPage: false });
+    const screenshotBuffer = await capture(page, () => page.screenshot({ encoding: 'binary', fullPage: false }));
     const processed = await processScreenshot(screenshotBuffer, {
       maxWidth: 800,
       maxHeight: 4000,

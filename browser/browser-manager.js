@@ -19,6 +19,45 @@ const EXTENSION_PATH = path.join(__dirname, '..', 'extension').replace(/\\/g, '/
 // Fixed extension ID, derived from "key" in extension/manifest.json
 export const EXTENSION_ID = 'dmehkibmncgphijnigkahhlekgajhpbl';
 
+const CONNECT_TIMEOUT_MS = Number(process.env.CHROMETOOLS_CONNECT_TIMEOUT_MS) || 15000;
+
+/**
+ * puppeteer.connect with a hard timeout.
+ * Puppeteer waits for every existing target to initialize; a hidden page with an
+ * empty URL (prerender / discarded tab) may never answer, and connect then hangs
+ * forever, blocking every later tool call. Such pages present at connect time are
+ * skipped; targets created later are not filtered.
+ */
+async function connectToChrome(browserWSEndpoint) {
+  let initial = true;
+  const connecting = puppeteer.connect({
+    browserWSEndpoint,
+    defaultViewport: null,
+    targetFilter: target => !(initial && target.type() === 'page' && target.url() === ''),
+  });
+  let timer;
+  try {
+    const browser = await Promise.race([
+      connecting,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(`Chrome at ${browserWSEndpoint} did not respond to attach within ${CONNECT_TIMEOUT_MS}ms`);
+          error.code = 'CT_ATTACH_TIMEOUT';
+          reject(error);
+        }, CONNECT_TIMEOUT_MS);
+      }),
+    ]);
+    return browser;
+  } catch (error) {
+    // Do not leak a connection that completes after the timeout
+    connecting.then(b => b.disconnect()).catch(() => {});
+    throw error;
+  } finally {
+    initial = false;
+    clearTimeout(timer);
+  }
+}
+
 // Global browser instance (persists between requests)
 let browserPromise = null;
 let chromeProcess = null;
@@ -105,10 +144,7 @@ export async function getBrowser() {
         // and spawning entirely — connect straight to the live session.
         const wsEndpoint = process.env.CHROMETOOLS_BROWSER_WS_ENDPOINT;
         if (wsEndpoint) {
-          browser = await puppeteer.connect({
-            browserWSEndpoint: wsEndpoint,
-            defaultViewport: null,
-          });
+          browser = await connectToChrome(wsEndpoint);
           debugLog("Connected via CHROMETOOLS_BROWSER_WS_ENDPOINT:", wsEndpoint);
           connectedToExistingChrome = true;
           console.error("[chrometools-mcp] Connected to Chrome via CHROMETOOLS_BROWSER_WS_ENDPOINT.");
@@ -128,10 +164,7 @@ export async function getBrowser() {
         // Try to connect to existing Chrome with remote debugging
         try {
           endpoint = await getChromeWebSocketEndpoint(CHROME_DEBUG_PORT, 2);
-          browser = await puppeteer.connect({
-            browserWSEndpoint: endpoint,
-            defaultViewport: null,
-          });
+          browser = await connectToChrome(endpoint);
           debugLog("Connected to existing Chrome instance");
           debugLog("WebSocket endpoint:", endpoint);
 
@@ -156,6 +189,12 @@ export async function getBrowser() {
 
           return browser;
         } catch (connectError) {
+          if (connectError.code === 'CT_ATTACH_TIMEOUT') {
+            // Chrome is there but hung: launching another one on the busy port would hang too
+            throw new Error(`Chrome on debug port ${CHROME_DEBUG_PORT} is running but does not respond to automation ` +
+              `(${connectError.message}). Fully quit that Chrome (check Task Manager for chrome.exe left in background) ` +
+              `and call the tool again: ChromeTools will launch a new one.`);
+          }
           debugLog("No existing Chrome found, launching new instance...");
           connectedToExistingChrome = false;
         }
@@ -177,7 +216,18 @@ export async function getBrowser() {
           `--load-extension=${EXTENSION_PATH}`,
           // Chrome 137+: allows CDP Extensions.loadUnpacked (see ensureExtensionLoaded)
           '--enable-unsafe-extension-debugging',
+          // Keep rendering when the window is covered or in background: otherwise
+          // screenshots wait for a frame that never comes
+          '--disable-features=CalculateNativeWinOcclusion',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
         ];
+        // OS display scaling (Windows 110%) still rounds borders and sizes under
+        // emulation (1px border = 0.909px); only this flag gives exact CSS px
+        const forcedDsf = process.env.CHROMETOOLS_FORCE_DEVICE_SCALE_FACTOR;
+        if (forcedDsf && Number(forcedDsf) > 0) {
+          chromeArgs.push(`--force-device-scale-factor=${Number(forcedDsf)}`);
+        }
 
         debugLog("Extension path:", EXTENSION_PATH);
 
@@ -194,10 +244,7 @@ export async function getBrowser() {
         endpoint = await getChromeWebSocketEndpoint(CHROME_DEBUG_PORT, 20);
 
         // Connect to the Chrome instance
-        browser = await puppeteer.connect({
-          browserWSEndpoint: endpoint,
-          defaultViewport: null,
-        });
+        browser = await connectToChrome(endpoint);
 
         debugLog("Connected to Chrome instance");
         debugLog("WebSocket endpoint:", endpoint);
@@ -375,17 +422,18 @@ function setupNewTabTracking(browser) {
       // Get opener URL if available
       const opener = target.opener();
       let openerUrl = '';
+      let openerPage = null;
       if (opener) {
         try {
-          const openerPage = await opener.page();
+          openerPage = await opener.page();
           openerUrl = openerPage ? openerPage.url() : '';
         } catch (e) {
           // Opener might not be available
         }
       }
 
-      // Handle the new tab
-      await handleNewTab(page, openerUrl);
+      // Handle the new tab (switches only when opened from a chrometools page)
+      await handleNewTab(page, openerUrl, openerPage);
 
     } catch (error) {
       debugLog('Error handling new tab:', error.message);
@@ -408,6 +456,24 @@ export async function closeBrowser() {
       debugLog("Error closing browser:", error.message);
     }
     browserPromise = null;
+  }
+  connectedToExistingChrome = false;
+}
+
+/**
+ * Drop the CDP connection without closing Chrome (user tabs stay open).
+ * The next getBrowser() connects again (existing Chrome on the debug port).
+ */
+export async function resetBrowserConnection() {
+  if (browserPromise) {
+    const pending = browserPromise;
+    browserPromise = null;
+    try {
+      const browser = await Promise.race([pending, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))]);
+      await browser.disconnect();
+    } catch (error) {
+      debugLog("Error disconnecting browser:", error.message);
+    }
   }
   connectedToExistingChrome = false;
 }
