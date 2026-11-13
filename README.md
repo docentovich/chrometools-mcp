@@ -220,22 +220,24 @@ The Chrome Extension is **required** for scenario recording and other advanced f
 
 - [Installation](#installation)
   - [Chrome Extension Setup](#chrome-extension-setup)
-- [AI Optimization Features](#ai-optimization-features)- [Scenario Recorder](#scenario-recorder)  - Visual UI-based recording with smart optimization
-- [Available Tools](#available-tools) - **51+ Tools Total**
-  - [AI-Powered Tools](#ai-powered-tools)  - smartFindElement, analyzePage, getElementDetails, findElementsByText
+- [AI Optimization Features](#ai-optimization-features)
+- [Scenario Recorder](#scenario-recorder) - Visual UI-based recording with smart optimization
+- [Available Tools](#available-tools) - **70 Tools Total**
+  - [AI-Powered Tools](#ai-powered-tools) - smartFindElement, analyzePage, getElementDetails, findElementsByText
   - [Core Tools](#1-core-tools) - ping, openBrowser
   - [Interaction Tools](#2-interaction-tools) - click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal
-  - [Inspection Tools](#3-inspection-tools) - getElement, getComputedCss, getBoxModel, screenshot
+  - [Inspection Tools](#3-inspection-tools) - getComputedCss, getFontReport, getBoxModel, screenshot, saveScreenshot
   - [Advanced Tools](#4-advanced-tools) - executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, pressKey, setStyles, setViewport, getViewport, navigateTo
-  - [Tab Management Tools](#5-tab-management-tools)  - listTabs, switchTab
-  - [Frame Tools](#5a-frame-tools-iframe-automation)  - listFrames, switchFrame (cross-origin iframe automation)
-  - [Credential Vault](#5b-credential-vault-saved-passwords)  - typeCredential, listCredentials (log in without passing passwords through the AI)
-  - [Recorder Tools](#7-recorder-tools)  - enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
+  - [Tab Management Tools](#5-tab-management-tools) - resetBrowser, listTabs, switchTab
+  - [Frame Tools](#5a-frame-tools-iframe-automation) - listFrames, switchFrame (cross-origin iframe automation)
+  - [Credential Vault](#5b-credential-vault-saved-passwords) - typeCredential, listCredentials (log in without passing passwords through the AI)
+  - [Figma Tools](#6-figma-tools) - getFigmaFrame, compareFigmaToElement, compareFigmaSpecs, getFigmaNodeTree, getFigmaSpecs, Figma disk cache and more
+  - [Recorder Tools](#7-recorder-tools) - enableRecorder, startRecording, stopRecording, getRecorderState, saveScenario, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
   - [API / Swagger Tools](#8-api--swagger-tools) - loadSwagger, generateApiModels
 - [Typical Workflow Example](#typical-workflow-example)
 - [Tool Usage Tips](#tool-usage-tips)
 - [Configuration](#configuration)
-- [Multi-Instance Support](#multi-instance-support)  - Run multiple MCP servers simultaneously
+- [Multi-Instance Support](#multi-instance-support) - Run multiple MCP servers simultaneously
 - [WSL Setup Guide](#wsl-setup-guide) → [Full WSL Guide](WSL_SETUP.md)
 - [Development](#development)
 - [Features](#features)
@@ -328,7 +330,7 @@ executeScenario({ name: "login_flow", parameters: { email: "user@test.com" } })
    - Use `refresh: true` after interactions to see updated state
    - Efficient: 2-5k tokens vs screenshot 5-10k
 2. ✅ **`findElementsByText()`** - Find specific elements by visible text
-3. ✅ **`getElement()`** - Get HTML of specific element
+3. ✅ **`getElementDetails()`** - Full info about one element by APOM ID (optionally with children)
 4. ⚠️ **`executeScript()`** - LAST RESORT, only if above failed
 
 #### Model-Based Interaction (Advanced)
@@ -662,12 +664,6 @@ Scroll element horizontally (for tables, carousels, wide content).
 - **Returns**: Scroll state (position, total width, visible width, scroll availability)
 
 ### 3. Inspection Tools
-
-#### getElement
-Get HTML markup of element (defaults to body if no selector).
-- **Parameters**: `selector` (optional)
-- **Use case**: Inspecting structure, debugging markup
-- **Returns**: Complete outerHTML
 
 #### getComputedCss
 Get computed CSS styles for an element with intelligent filtering to reduce token usage.
@@ -1477,6 +1473,14 @@ Delete a scenario and its associated secrets. Searches all projects to find the 
   - Hash suffixes: `component_a1b2c3d` → removed
   - Prefers stable selectors: `data-testid`, `role`, `aria-label`, semantic attributes
 
+#### startRecording / stopRecording / getRecorderState / saveScenario
+Programmatic control of the recorder (same recording as the extension popup).
+- **startRecording**: `name`, `description`, `tags` (all optional). Recording follows the active tab.
+- **stopRecording**: no parameters. Returns recorded `actions` and `secrets` without saving, so they can be reviewed first.
+- **getRecorderState**: no parameters. Returns `isRecording`, `isPaused`, action count, current tab.
+- **saveScenario**: `name` (required), `actions` (required, from `stopRecording`), `description`, `tags`, `secrets`. Saves the scenario to disk under the project of the current URL.
+- **Example**: `startRecording({ name: "login" })`, user acts in the browser, `stopRecording()`, then `saveScenario({ name: "login", actions })`
+
 #### appendScenarioToFile
 Append recorded scenario as test code to an **EXISTING** test file. Automatically cleans unstable selectors (CSS Modules, styled-components, Emotion). Optionally generates Page Object class. Returns JSON with test code (without imports) - Claude Code will read the file, append the test, and write back. To create **NEW** test files, use `exportScenarioAsCode` instead.
 
@@ -1571,7 +1575,8 @@ Append recorded scenario as test code to an **EXISTING** test file. Automaticall
   }
   ```
 
-#### generatePageObjectGenerate Page Object Model (POM) class from current page structure. Analyzes page, extracts interactive elements, and generates framework-specific code with smart naming and helper methods.
+#### generatePageObject
+Generate Page Object Model (POM) class from current page structure. Analyzes page, extracts interactive elements, and generates framework-specific code with smart naming and helper methods.
 
 - **Parameters**:
   - `className` (optional): Page Object class name (auto-generated from page title/URL if not provided)
@@ -1825,12 +1830,13 @@ Each tool definition is sent to the AI in every request, consuming context token
 
 | Group | Description | Tools (count) |
 |-------|-------------|---------------|
-| `core` | Basic tools | `ping`, `openBrowser`, `executeScript`, `navigateTo`, `resetBrowser`, `listTabs`, `switchTab` (7) |
-| `interaction` | User interaction, frames & credentials | `click`, `type`, `scrollTo`, `waitForElement`, `hover`, `selectOption`, `selectFromGroup`, `drag`, `scrollHorizontal`, `switchFrame`, `listFrames`, `typeCredential`, `listCredentials` (13) |
+| `core` | Basic tools & tabs | `ping`, `openBrowser`, `executeScript`, `navigateTo`, `resetBrowser`, `listTabs`, `switchTab` (7) |
+| `interaction` | User interaction, frames & credentials | `click`, `type`, `scrollTo`, `waitForElement`, `hover`, `selectOption`, `selectFromGroup`, `drag`, `scrollHorizontal`, `switchFrame`, `listFrames`, `typeCredential`, `listCredentials`, `pressKey`, `executeModelAction` (15) |
 | `inspection` | Page inspection | `getComputedCss`, `getBoxModel`, `screenshot`, `saveScreenshot`, `getFontReport` (5) |
 | `debug` | Debugging & network | `getConsoleLogs`, `listNetworkRequests`, `getNetworkRequest`, `filterNetworkRequests` (4) |
-| `advanced` | Advanced automation & AI | `executeScript`, `setStyles`, `setViewport`, `getViewport`, `navigateTo`, `smartFindElement`, `analyzePage`, `findElementsByText` (8) |
-| `recorder` | Scenario recording | `enableRecorder`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`, `appendScenarioToFile`, `generatePageObject` (9) |
+| `advanced` | Page analysis & AI | `setStyles`, `setViewport`, `getViewport`, `smartFindElement`, `analyzePage`, `getElementDetails`, `findElementsByText` (7) |
+| `recorder` | Scenario recording | `enableRecorder`, `startRecording`, `stopRecording`, `getRecorderState`, `saveScenario`, `executeScenario`, `listScenarios`, `searchScenarios`, `getScenarioInfo`, `deleteScenario`, `exportScenarioAsCode`, `appendScenarioToFile`, `generatePageObject` (13) |
+| `api` | API / Swagger | `loadSwagger`, `generateApiModels` (2) |
 | `figma` | Figma integration | `getFigmaFrame`, `compareFigmaToElement`, `getFigmaSpecs`, `parseFigmaUrl`, `listFigmaPages`, `searchFigmaFrames`, `getFigmaComponents`, `getFigmaStyles`, `getFigmaColorPalette`, `convertFigmaToCode`, `getFigmaNodeTree`, `compareFigmaSpecs`, `prefetchFigma`, `importFigmaCache`, `importFigmaRender`, `figmaCacheStatus`, `figmaCacheClear` (17) |
 
 **Total:** 70 tools
@@ -1899,7 +1905,7 @@ Each tool definition is sent to the AI in every request, consuming context token
 
 **Full automation with recording:**
 ```json
-"ENABLED_TOOLS": "core,interaction,inspection,debug,advanced,recorder"
+"ENABLED_TOOLS": "core,interaction,inspection,debug,advanced,recorder,api"
 ```
 
 **All tools (default):**
@@ -1959,6 +1965,8 @@ To use Figma tools, you need to configure your Figma Personal Access Token.
 **Note:** Alternatively, you can pass the token directly in each Figma tool call using the `figmaToken` parameter, but using the environment variable is more convenient.
 
 **Proxy and timeouts:** Figma requests (API and image downloads from Figma's S3) honour `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` from the MCP server env. Each request times out after 30 s (`CHROMETOOLS_FIGMA_TIMEOUT_MS`), the error names the host. If `getFigmaFrame` / `compareFigmaToElement` time out while the API works, image hosts are probably reachable only through a proxy: add `HTTPS_PROXY` to the `env` block.
+
+**Other Figma variables:** `CHROMETOOLS_FIGMA_MAX_RETRY_WAIT_MS` (default 30000): on HTTP 429 a request waits and retries once if Figma asks to wait no longer than this, otherwise the error is returned at once. `CHROMETOOLS_FIGMA_API_BASE` (default `https://api.figma.com/v1/`): alternative API base URL, for a proxy or a test server.
 
 ---
 
@@ -2044,24 +2052,33 @@ npx @modelcontextprotocol/inspector node index.js
 
 ## Features
 
-- **70 Powerful Tools**: Complete toolkit for browser automation (including model-based interaction system)
-  - Core: ping, openBrowser
-  - Interaction: click, type, scrollTo, selectOption, selectFromGroup, drag, scrollHorizontal, executeModelAction
-  - Inspection: getElement, getComputedCss, getBoxModel, screenshot, saveScreenshot
-  - Advanced: executeScript, getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests, hover, setStyles, setViewport, getViewport, navigateTo, waitForElement
-  - AI-Powered: smartFindElement, analyzePage, getElementDetails (with children analysis), findElementsByText  - Recorder: enableRecorder, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
-  - Figma: getFigmaFrame, compareFigmaToElement, getFigmaSpecs, parseFigmaUrl, listFigmaPages, searchFigmaFrames, getFigmaComponents, getFigmaStyles, getFigmaColorPalette, convertFigmaToCode
-- **UI Framework Detection**: Automatic detection of MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI- **Smart Dropdown Handling**: Extracts options from both native `<select>` and custom UI framework components- **APOM (Agent Page Object Model)**: Automatic element ID assignment for reliable interaction  - `analyzePage()` returns elements with unique IDs (e.g., `input_20`, `button_45`)
+- **70 Tools**: Complete toolkit for browser automation (including model-based interaction system)
+  - Core: ping, openBrowser, executeScript, navigateTo, resetBrowser, listTabs, switchTab
+  - Interaction: click, type, scrollTo, waitForElement, hover, pressKey, selectOption, selectFromGroup, drag, scrollHorizontal, executeModelAction
+  - Frames & credentials: switchFrame, listFrames, typeCredential, listCredentials
+  - Inspection: getComputedCss, getBoxModel, getFontReport, screenshot, saveScreenshot
+  - Debug: getConsoleLogs, listNetworkRequests, getNetworkRequest, filterNetworkRequests
+  - Advanced: setStyles, setViewport, getViewport
+  - AI-Powered: smartFindElement, analyzePage, getElementDetails (with children analysis), findElementsByText
+  - Recorder: enableRecorder, startRecording, stopRecording, getRecorderState, saveScenario, executeScenario, listScenarios, searchScenarios, getScenarioInfo, deleteScenario, exportScenarioAsCode, appendScenarioToFile, generatePageObject
+  - Figma: getFigmaFrame, compareFigmaToElement, compareFigmaSpecs, getFigmaNodeTree, getFigmaSpecs, parseFigmaUrl, listFigmaPages, searchFigmaFrames, getFigmaComponents, getFigmaStyles, getFigmaColorPalette, convertFigmaToCode, prefetchFigma, importFigmaCache, importFigmaRender, figmaCacheStatus, figmaCacheClear
+  - API: loadSwagger, generateApiModels
+- **UI Framework Detection**: Automatic detection of MUI, Ant Design, Chakra UI, Bootstrap, Vuetify, Semantic UI
+- **Smart Dropdown Handling**: Extracts options from both native `<select>` and custom UI framework components
+- **APOM (Agent Page Object Model)**: Automatic element ID assignment for reliable interaction
+  - `analyzePage()` returns elements with unique IDs (e.g., `input_20`, `button_45`)
   - Use `id` parameter in click/type/hover/selectOption for stable targeting
   - Use `getElementDetails()` to get detailed element info
 - **Console Log Capture**: Automatic JavaScript console monitoring
 - **Network Request Monitoring**: Track all HTTP/API requests (XHR, Fetch, etc.)
 - **Persistent Browser Sessions**: Browser tabs remain open between requests
-- **Multi-Instance Support**: Run multiple MCP servers simultaneously with automatic discovery  - Dynamic port allocation (9223-9227)
+- **Multi-Instance Support**: Run multiple MCP servers simultaneously with automatic discovery
+  - Dynamic port allocation (9223-9227)
   - Chrome Extension port scanning every 20s
   - Broadcast pattern for parallel AI clients
   - Graceful handling of ungraceful shutdowns
-- **Auto-Sync Active Tab**: MCP server automatically syncs to user's currently active tab- **Visual Browser (GUI Mode)**: See automation in real-time
+- **Auto-Sync Active Tab**: MCP server automatically syncs to user's currently active tab
+- **Visual Browser (GUI Mode)**: See automation in real-time
 - **Cross-platform**: Works on Windows/WSL, Linux, macOS
 - **Simple Installation**: One command with npx
 - **CDP Integration**: Uses Chrome DevTools Protocol for precision

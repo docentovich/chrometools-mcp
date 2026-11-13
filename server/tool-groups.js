@@ -7,9 +7,9 @@
 export const toolGroups = {
   core: ['ping', 'openBrowser', 'executeScript', 'navigateTo', 'resetBrowser', 'listTabs', 'switchTab'],
 
-  interaction: ['click', 'type', 'scrollTo', 'waitForElement', 'hover', 'selectOption', 'selectFromGroup', 'drag', 'scrollHorizontal', 'switchFrame', 'listFrames', 'typeCredential', 'listCredentials'],
+  interaction: ['click', 'type', 'scrollTo', 'waitForElement', 'hover', 'selectOption', 'selectFromGroup', 'drag', 'scrollHorizontal', 'switchFrame', 'listFrames', 'typeCredential', 'listCredentials', 'pressKey', 'executeModelAction'],
 
-  inspection: ['getElement', 'getComputedCss', 'getBoxModel', 'screenshot', 'saveScreenshot', 'getFontReport'],
+  inspection: ['getComputedCss', 'getBoxModel', 'screenshot', 'saveScreenshot', 'getFontReport'],
 
   debug: [
     'getConsoleLogs',
@@ -24,6 +24,7 @@ export const toolGroups = {
     'getViewport',
     'smartFindElement',
     'analyzePage',
+    'getElementDetails',
     'findElementsByText'
   ],
 
@@ -36,7 +37,16 @@ export const toolGroups = {
     'deleteScenario',
     'exportScenarioAsCode',
     'appendScenarioToFile',
-    'generatePageObject'
+    'generatePageObject',
+    'startRecording',
+    'stopRecording',
+    'getRecorderState',
+    'saveScenario'
+  ],
+
+  api: [
+    'loadSwagger',
+    'generateApiModels'
   ],
 
   figma: [

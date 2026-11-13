@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [3.8.0] - 2026-11-14
 
 ### Added
-- **Figma disk cache** - Figma API responses and renders are cached on disk (`CHROMETOOLS_FIGMA_CACHE_DIR`, `=off` to disable), the token is never stored. All Figma tools use the cache, support `refresh` / `offline` and report the source. 429 rate limits are tracked: no calls while blocked, stale cache returned with a note and the local retry time
+- **Figma disk cache** - Figma API responses and renders are cached on disk (`CHROMETOOLS_FIGMA_CACHE_DIR`, `CHROMETOOLS_FIGMA_CACHE=off` to disable), the token is never stored. All Figma tools use the cache, support `refresh` / `offline` and report the source. 429 rate limits are tracked: no calls while blocked, stale cache returned with a note and the local retry time
 - **New Figma tools** - `prefetchFigma`, `figmaCacheStatus`, `figmaCacheClear`, `importFigmaCache`, `importFigmaRender`, `getFigmaNodeTree` (boxes, auto layout, radius, fills, strokes, effects, text styles, 60 KB guard, `textOnly`)
 - **`compareFigmaSpecs`** - Compares Figma node specs with the rendered page: text and block matching, diff table for size, position, color, radius and font (actually rendered font), unmatched lists, `outputFile`
 - **`getFontReport`** - Shows which font each element is really rendered with (web font / system / fallback), `document.fonts` status, failed `@font-face`
@@ -31,6 +31,7 @@ All notable changes to this project will be documented in this file.
 - **Detached tab** - Liveness check, re-attach by URL, one retry on dead-page errors; `switchTab` fails with a clear error
 - **Screenshot clip on scrolled pages** and ignored `maxWidth: null`
 - **Figma token** read at call time, not only at startup
+- **`ENABLED_TOOLS`** - 9 tools were in no group and could not be enabled (`pressKey`, `getElementDetails`, `executeModelAction`, `startRecording`, `stopRecording`, `getRecorderState`, `saveScenario`, `loadSwagger`, `generateApiModels`). Added to groups, new `api` group, nonexistent `getElement` removed. README tool lists updated
 - **All tools hanging after attaching to a running Chrome** - `puppeteer.connect` waited forever for a hidden tab with an empty URL that never answered, and every later call waited for that connection, even after Chrome was closed (only an MCP restart helped). Such tabs are skipped on connect, attach has a 15 s timeout (`CHROMETOOLS_CONNECT_TIMEOUT_MS`) and the next call retries. A hung Chrome on the port gives a clear error instead of an attempt to launch a second Chrome on the busy port
 - **Screenshots hanging when the Chrome window is minimized or the tab is in background** - Chrome renders no frames there. `screenshot`, `saveScreenshot`, `compareFigmaToElement`, `executeScript({ screenshot })` and action screenshots now restore the window / bring the tab to front first and time out after 15 s (`CHROMETOOLS_CAPTURE_TIMEOUT_MS`). Chrome launched by ChromeTools keeps rendering when covered by other windows
 
